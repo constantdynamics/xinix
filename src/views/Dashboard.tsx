@@ -8,6 +8,8 @@ const JOBS = [
   ["poll-trials-background", "Klinische trials"],
   ["poll-edgar-background", "SEC 8-K"],
   ["poll-fda-background", "FDA approvals"],
+  ["poll-metals-background", "Metalen / DXY"],
+  ["poll-mining-news-background", "Mining nieuws"],
   ["compute-signals-background", "Pre-catalyst signalen"],
   ["dispatch-alerts-background", "Verstuur alerts"],
 ];
@@ -117,15 +119,27 @@ function CardTile({ card: c }: { card: Card }) {
       title={`${c.color} = ${COLOR_LABEL_NL[c.color]}`}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <div className="font-bold text-lg">{c.ticker}</div>
+        <div className="flex items-baseline gap-1">
+          <span className="font-bold text-lg">{c.ticker}</span>
+          <span className="text-[10px] uppercase opacity-60 tracking-wide">
+            {c.sector === "mining" ? "MIN" : "BIO"}
+          </span>
+        </div>
         <div className="text-xs opacity-80">
           score {c.goud_score ?? "?"}
+          {c.sector === "mining" && c.factor_count > 0
+            ? ` · ${c.factor_count}f`
+            : ""}
           {c.goud_type ? ` · ${c.goud_type}` : ""}
         </div>
       </div>
       <div className="text-xs opacity-90 truncate">{c.company}</div>
       <div className="text-xs opacity-75 truncate">
-        {[c.modality, c.disease_area, c.phase].filter(Boolean).join(" · ")}
+        {c.sector === "mining"
+          ? [c.commodity, c.jurisdiction, c.deposit_type]
+              .filter(Boolean)
+              .join(" · ")
+          : [c.modality, c.disease_area, c.phase].filter(Boolean).join(" · ")}
       </div>
 
       {px && (

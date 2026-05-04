@@ -31,7 +31,7 @@ export async function insertSignal(
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const { data: existing } = await supabase
-    .from("biotech_signals")
+    .from("signal_events")
     .select("id")
     .eq("ticker", s.ticker)
     .eq("signal_type", s.signal_type)
@@ -43,7 +43,7 @@ export async function insertSignal(
 
   const payload = { ...(s.payload ?? {}), dedup_key: dedup };
   const { data, error } = await supabase
-    .from("biotech_signals")
+    .from("signal_events")
     .insert({
       ticker: s.ticker,
       signal_type: s.signal_type,

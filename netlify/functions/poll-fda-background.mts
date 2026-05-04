@@ -35,9 +35,10 @@ export default async () => {
   await logRun("poll-fda", async () => {
     const supabase = getServiceClient();
     const { data: tickers } = await supabase
-      .from("biotech_tickers")
+      .from("signal_tickers")
       .select("ticker, company")
-      .eq("active", true);
+      .eq("active", true)
+      .eq("sector", "biotech");
     if (!tickers) return { ok: true, message: "no tickers" };
 
     let signalsInserted = 0;

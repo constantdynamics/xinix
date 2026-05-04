@@ -3,7 +3,7 @@ import { getServiceClient, logRun } from "./_lib/supabase.mts";
 import { insertSignal } from "./_lib/signals.mts";
 
 // ClinicalTrials.gov v2 API — fully free, no auth.
-// Search by sponsor/lead name; we use ticker→company mapping from biotech_tickers.
+// Search by sponsor/lead name; we use ticker→company mapping from signal_tickers.
 // Docs: https://clinicaltrials.gov/data-api/api
 
 interface CTStudy {
@@ -57,9 +57,10 @@ export default async () => {
   await logRun("poll-trials", async () => {
     const supabase = getServiceClient();
     const { data: tickers } = await supabase
-      .from("biotech_tickers")
+      .from("signal_tickers")
       .select("ticker, company")
-      .eq("active", true);
+      .eq("active", true)
+      .eq("sector", "biotech");
     if (!tickers) return { ok: true, message: "no tickers" };
 
     let trialsTracked = 0;
@@ -86,7 +87,7 @@ export default async () => {
 
           // Check if we have this trial already
           const { data: existing } = await supabase
-            .from("biotech_trials")
+            .from("signal_trials")
             .select("nct_id, overall_status, primary_completion_date")
             .eq("nct_id", id.nctId)
             .maybeSingle();
@@ -94,7 +95,7 @@ export default async () => {
           const statusChanged =
             existing && existing.overall_status !== overall;
 
-          await supabase.from("biotech_trials").upsert(
+          await supabase.from("signal_trials").upsert(
             {
               nct_id: id.nctId,
               ticker,
@@ -142,7 +143,7 @@ export default async () => {
             );
             if (completionDate > now && completionDate < oneYear) {
               const { data: existingCat } = await supabase
-                .from("biotech_catalysts")
+                .from("signal_catalysts")
                 .select("id")
                 .eq("source", "clinicaltrials.gov")
                 .eq("source_id", id.nctId)
@@ -151,7 +152,7 @@ export default async () => {
                 const catalystType = phase?.includes("PHASE3")
                   ? "Phase3_readout"
                   : "Phase2_readout";
-                await supabase.from("biotech_catalysts").insert({
+                await supabase.from("signal_catalysts").insert({
                   ticker,
                   catalyst_type: catalystType,
                   description: id.briefTitle ?? id.nctId,
@@ -164,7 +165,7 @@ export default async () => {
               } else {
                 // Update expected date if it changed
                 await supabase
-                  .from("biotech_catalysts")
+                  .from("signal_catalysts")
                   .update({
                     expected_date: completion,
                     updated_at: new Date().toISOString(),

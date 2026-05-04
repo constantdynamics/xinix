@@ -16,7 +16,7 @@ export default async (req: Request) => {
 
   if (req.method === "GET") {
     const { data, error } = await supabase
-      .from("biotech_settings")
+      .from("signal_settings")
       .select("*")
       .eq("id", 1)
       .single();
@@ -40,7 +40,7 @@ export default async (req: Request) => {
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
     for (const k of allowed) if (k in body) update[k] = body[k];
     const { error } = await supabase
-      .from("biotech_settings")
+      .from("signal_settings")
       .update(update)
       .eq("id", 1);
     if (error) return new Response(error.message, { status: 500 });

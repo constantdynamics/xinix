@@ -36,9 +36,10 @@ export async function saveSettings(s: Partial<Settings>): Promise<void> {
   if (!res.ok) throw new Error(`settings save ${res.status}`);
 }
 
-export async function addTicker(payload: {
+export interface TickerInput {
   ticker: string;
   company: string;
+  sector?: "biotech" | "mining";
   goud_score?: number;
   goud_type?: string;
   trigger_event?: string;
@@ -46,13 +47,29 @@ export async function addTicker(payload: {
   modality?: string;
   disease_area?: string;
   phase?: string;
-}): Promise<void> {
+  commodity?: string;
+  jurisdiction?: string;
+  deposit_type?: string;
+  share_count_millions?: number;
+}
+
+export async function addTicker(payload: TickerInput): Promise<void> {
   const res = await fetch("/api/tickers", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`add ticker ${res.status}: ${await res.text()}`);
+}
+
+export async function batchAddTickers(rows: TickerInput[]): Promise<{ inserted: number }> {
+  const res = await fetch("/api/tickers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ rows }),
+  });
+  if (!res.ok) throw new Error(`batch add ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { inserted: number };
 }
 
 export async function removeTicker(ticker: string): Promise<void> {

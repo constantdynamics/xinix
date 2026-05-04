@@ -19,7 +19,7 @@ export async function logRun(
 ) {
   const supabase = getServiceClient();
   const { data: row } = await supabase
-    .from("biotech_run_log")
+    .from("signal_runs")
     .insert({ job })
     .select("id")
     .single();
@@ -28,7 +28,7 @@ export async function logRun(
     const result = await fn();
     if (id) {
       await supabase
-        .from("biotech_run_log")
+        .from("signal_runs")
         .update({
           finished_at: new Date().toISOString(),
           ok: result.ok,
@@ -42,7 +42,7 @@ export async function logRun(
     const msg = err instanceof Error ? err.message : String(err);
     if (id) {
       await supabase
-        .from("biotech_run_log")
+        .from("signal_runs")
         .update({
           finished_at: new Date().toISOString(),
           ok: false,

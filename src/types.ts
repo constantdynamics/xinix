@@ -39,14 +39,21 @@ export interface Catalyst {
   status: string;
 }
 
+export type Sector = "biotech" | "mining";
+
 export interface Card {
   ticker: string;
   company: string;
+  sector: Sector;
   goud_score: number | null;
   goud_type: string | null;
   modality: string | null;
   disease_area: string | null;
   phase: string | null;
+  commodity: string | null;
+  jurisdiction: string | null;
+  deposit_type: string | null;
+  factor_count: number;
   trigger_event: string | null;
   color: Color;
   signal_color: Color;

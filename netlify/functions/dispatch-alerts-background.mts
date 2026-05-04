@@ -81,7 +81,7 @@ export default async () => {
   await logRun("dispatch-alerts", async () => {
     const supabase = getServiceClient();
     const { data: settings } = await supabase
-      .from("biotech_settings")
+      .from("signal_settings")
       .select("*")
       .eq("id", 1)
       .single();
@@ -96,7 +96,7 @@ export default async () => {
     // Fetch unalerted signals from last 24h
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const { data: signals } = await supabase
-      .from("biotech_signals")
+      .from("signal_events")
       .select("*")
       .eq("alerted", false)
       .gte("detected_at", since)
@@ -124,7 +124,7 @@ export default async () => {
 
       if (emailOk) {
         const r = await sendEmail(s.email!, subject, body);
-        await supabase.from("biotech_alerts_sent").insert({
+        await supabase.from("signal_alerts_sent").insert({
           signal_id: sig.id,
           channel: "email",
           success: r.ok,
@@ -142,7 +142,7 @@ export default async () => {
           sig.detail ?? sig.title,
           sigSev
         );
-        await supabase.from("biotech_alerts_sent").insert({
+        await supabase.from("signal_alerts_sent").insert({
           signal_id: sig.id,
           channel: "ntfy",
           success: r.ok,
@@ -153,7 +153,7 @@ export default async () => {
       }
 
       await supabase
-        .from("biotech_signals")
+        .from("signal_events")
         .update({ alerted: true })
         .eq("id", sig.id);
     }

@@ -7,21 +7,21 @@ export default async () => {
 
   const [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes] =
     await Promise.all([
-      supabase.from("biotech_tickers").select("*").eq("active", true),
-      supabase.from("biotech_price_summary").select("*"),
+      supabase.from("signal_tickers").select("*").eq("active", true),
+      supabase.from("signal_price_summary").select("*"),
       supabase
-        .from("biotech_signals")
+        .from("signal_events")
         .select("*")
         .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
         .order("detected_at", { ascending: false })
         .limit(500),
       supabase
-        .from("biotech_catalysts")
+        .from("signal_catalysts")
         .select("*")
         .eq("status", "pending")
         .order("expected_date", { ascending: true }),
       supabase
-        .from("biotech_run_log")
+        .from("signal_runs")
         .select("job, started_at, finished_at, ok, message")
         .order("started_at", { ascending: false })
         .limit(20),
@@ -88,11 +88,16 @@ export default async () => {
     return {
       ticker: t.ticker,
       company: t.company,
+      sector: t.sector ?? "biotech",
       goud_score: t.goud_score,
       goud_type: t.goud_type,
       modality: t.modality,
       disease_area: t.disease_area,
       phase: t.phase,
+      commodity: t.commodity,
+      jurisdiction: t.jurisdiction,
+      deposit_type: t.deposit_type,
+      factor_count: t.factor_count ?? 0,
       trigger_event: t.trigger_event,
       color: finalSev,
       signal_color: signalSev,

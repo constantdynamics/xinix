@@ -18,7 +18,7 @@ export default async () => {
       .slice(0, 10);
 
     const { data: catalysts, error } = await supabase
-      .from("biotech_catalysts")
+      .from("signal_catalysts")
       .select("*")
       .eq("status", "pending")
       .gte("expected_date", todayStr)
@@ -71,13 +71,80 @@ export default async () => {
       .toISOString()
       .slice(0, 10);
     await supabase
-      .from("biotech_catalysts")
+      .from("signal_catalysts")
       .update({
         status: "occurred",
         occurred_at: new Date().toISOString(),
       })
       .eq("status", "pending")
       .lt("expected_date", passedCutoff);
+
+    // ─── Mining factor count per ticker ────────────────────────────────
+    // Counts active goud-factors so the dashboard can show factor density.
+    // Factors counted (V=H/M from framework):
+    //   - has any active high-severity signal in last 30d
+    //   - macro tide signal active (commodity bull)
+    //   - tight share count (<100M)
+    //   - phoenix / multi-bagger goud_type
+    //   - reverse_split_history true
+    //   - founder_led / cornerstone-style flag (goud_score ≥80 used as proxy)
+    //   - upcoming catalyst within 60d
+    //   - bonanza or step-out signal in last 30d
+    const { data: miningTickers } = await supabase
+      .from("signal_tickers")
+      .select("id, ticker, goud_score, goud_type, share_count_millions, reverse_split_history")
+      .eq("active", true)
+      .eq("sector", "mining");
+
+    if (miningTickers && miningTickers.length > 0) {
+      const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: recentSig } = await supabase
+        .from("signal_events")
+        .select("ticker, signal_type, severity")
+        .gt("detected_at", since30);
+
+      const sigByTicker = new Map<string, { types: Set<string>; sev: Set<string> }>();
+      for (const s of recentSig ?? []) {
+        const e = sigByTicker.get(s.ticker) ?? { types: new Set(), sev: new Set() };
+        e.types.add(s.signal_type);
+        e.sev.add(s.severity);
+        sigByTicker.set(s.ticker, e);
+      }
+
+      const upcomingByTicker = new Set<string>();
+      for (const c of catalysts ?? []) upcomingByTicker.add(c.ticker);
+
+      for (const t of miningTickers) {
+        const sigs = sigByTicker.get(t.ticker);
+        const factors: string[] = [];
+        if (sigs?.types.has("macro_tide")) factors.push("macro_tide");
+        if (
+          t.share_count_millions != null &&
+          Number(t.share_count_millions) <= 100
+        )
+          factors.push("tight_share_count");
+        if (["phoenix", "multi-bagger"].includes(t.goud_type ?? "")) factors.push("history");
+        if (t.reverse_split_history) factors.push("post_consolidation");
+        if (typeof t.goud_score === "number" && t.goud_score >= 70) factors.push("baseline_high");
+        if (upcomingByTicker.has(t.ticker)) factors.push("upcoming_catalyst");
+        if (sigs?.sev.has("red")) factors.push("active_red_signal");
+        if (
+          sigs?.types.has("bonanza_au") ||
+          sigs?.types.has("bonanza_ag") ||
+          sigs?.types.has("bonanza_cu") ||
+          sigs?.types.has("step_out_drill")
+        )
+          factors.push("geology_event");
+
+        await supabase
+          .from("signal_tickers")
+          .update({
+            factor_count: factors.length,
+            factors_json: factors,
+          })
+          .eq("id", t.id);
+      }
+    }
 
     return {
       ok: true,

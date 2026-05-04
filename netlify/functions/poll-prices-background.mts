@@ -55,7 +55,7 @@ export default async () => {
   await logRun("poll-prices", async () => {
     const supabase = getServiceClient();
     const { data: tickers, error } = await supabase
-      .from("biotech_tickers")
+      .from("signal_tickers")
       .select("ticker")
       .eq("active", true);
     if (error) throw error;
@@ -82,7 +82,7 @@ export default async () => {
         if (rows.length === 0) continue;
 
         await supabase
-          .from("biotech_prices")
+          .from("signal_prices")
           .upsert(rows, { onConflict: "ticker,date" });
 
         // Compute summary
@@ -121,7 +121,7 @@ export default async () => {
         };
 
         await supabase
-          .from("biotech_price_summary")
+          .from("signal_price_summary")
           .upsert(summary, { onConflict: "ticker" });
 
         updated++;

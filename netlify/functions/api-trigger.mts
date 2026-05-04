@@ -8,6 +8,8 @@ const JOBS = [
   "poll-trials-background",
   "poll-edgar-background",
   "poll-fda-background",
+  "poll-metals-background",
+  "poll-mining-news-background",
   "compute-signals-background",
   "dispatch-alerts-background",
 ];

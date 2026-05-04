@@ -88,7 +88,7 @@ export default async () => {
   await logRun("poll-edgar", async () => {
     const supabase = getServiceClient();
     const { data: tickers } = await supabase
-      .from("biotech_tickers")
+      .from("signal_tickers")
       .select("ticker")
       .eq("active", true);
     if (!tickers) return { ok: true, message: "no tickers" };
@@ -101,10 +101,7 @@ export default async () => {
     for (const { ticker } of tickers) {
       try {
         const cik = cikMap.get(ticker.toUpperCase());
-        if (!cik) {
-          errors.push(`${ticker}: no CIK`);
-          continue;
-        }
+        if (!cik) continue; // foreign listings (TSX-V/ASX) won't have a CIK; silently skip
         const subs = await fetchSubmissions(cik);
         const recent = subs.filings.recent;
         if (!recent) continue;
@@ -127,7 +124,7 @@ export default async () => {
 
           // Dedup via unique constraint on accession
           const { error: insertErr } = await supabase
-            .from("biotech_filings")
+            .from("signal_filings")
             .insert({
               ticker,
               accession,
