@@ -13,29 +13,47 @@ interface Settings {
   alert_only_goud_events: boolean;
 }
 
-// Whitelist of signal_types that represent an event that has actually occurred
-// AND historically correlate with a possible 20x ("goud-medaille") spike.
-// When alert_only_goud_events=true, only these are dispatched.
+// Whitelist of signal_types where a *red-severity* signal historically aligns
+// with the user's bar: ≥100% in 1 day OR ≥250% in 1 week. Any other type, or
+// any orange/yellow signal, stays on the dashboard but does not alert.
+//
+// Calibration notes per type:
+//   bonanza_au/ag/cu  red tier = ≥100 g/t Au, ≥3000 g/t Ag, ≥8% Cu
+//                     (lower bonanza tiers fire orange, no alert)
+//   discovery_announcement   PR-language for new high-grade zone
+//   permit            kept despite lower hit-rate; Pebble/Skouries-style
+//                     wins after multi-year sagas do hit 100%/day
+//   takeover_bid      direct cash bid or definitive acquisition agreement
+//   fda_approval      conditional or full approval
+//   topline_positive  primary endpoint met / topline data positive
+//                     (the #1 biotech 100%/day driver — VKTX/KRYS/AKRO style)
+//   phase_success     "Phase 2/3 trial successful" PR
+//   licensing_deal    major upfront / exclusive worldwide license
+//   buyout_definitive cash tender or definitive M&A agreement
+//   trial_failed      red because the move can be -50%+ in a day; still
+//                     critical to alert on (defensive)
+//   8k_material       red 8-K only (item 1.01/2.01/1.03)
+//   price_spike_up    red only (≥30% intraday + 3× volume) — safety net
+//
+// Excluded (orange or below): dfs, first_pour, trial_status_change,
+//                             resource_update, pea, pfs, jv_strategic,
+//                             step_out_drill, financing, macro_tide,
+//                             near_90d_low, volume_spike, pre_catalyst_*
 const GOUD_EVENT_TYPES = new Set<string>([
-  // Geology — bonanza-grade discovery is the #1 trigger (cluster 1.1)
   "bonanza_au",
   "bonanza_ag",
   "bonanza_cu",
-  // Definitive feasibility — production decision validated
-  "dfs",
-  // Permitting — long saga finally resolved (cluster 5.1)
+  "discovery_announcement",
   "permit",
-  // Operations — first pour rerates a developer to producer
-  "first_pour",
-  // Biotech terminal events
-  "fda_approval",
-  "trial_status_change",
-  // M&A — direct take-out
   "takeover_bid",
-  // 8-K filings — only material agreement/acquisition/bankruptcy fire as red,
-  // and other 8-K severities (yellow/orange) are excluded by design
+  "fda_approval",
+  "topline_positive",
+  "phase_success",
+  "breakthrough_designation",
+  "licensing_deal",
+  "buyout_definitive",
+  "trial_failed",
   "8k_material",
-  // Price spike with volume confirmation — only red severity (>=15% + 2x vol)
   "price_spike_up",
 ]);
 

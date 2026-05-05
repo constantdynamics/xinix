@@ -149,8 +149,13 @@ export default async () => {
           if (id) signalsInserted++;
         }
 
-        // Price spike up: >15% in 1 day with volume confirmation (>2x)
-        if (summary.pct_change_1d >= 15 && volRatio >= 2) {
+        // Price spike up — calibrated against the 100%/day or 250%/week bar.
+        //   red:    ≥30% + 3× volume → almost certainly a net-event capable of
+        //           leading to a goud-medaille spike (catches biotech/mining
+        //           news the polls missed).
+        //   orange: ≥15% + 2× volume → meaningful move, dashboard-only.
+        //   yellow: ≥8%              → minor pop.
+        if (summary.pct_change_1d >= 30 && volRatio >= 3) {
           const id = await insertSignal(supabase, {
             ticker,
             signal_type: "price_spike_up",
@@ -158,7 +163,19 @@ export default async () => {
             title: `${ticker} +${summary.pct_change_1d.toFixed(1)}% met volume ${volRatio.toFixed(1)}×`,
             detail: `Koers $${last.close.toFixed(2)} (was $${prev?.close.toFixed(
               2
-            )}). Mogelijk net-event.`,
+            )}). Vrijwel zeker net-event.`,
+            payload: { pct: summary.pct_change_1d, volume_ratio: volRatio },
+            expires_at: expires7,
+            dedup_key: `price_spike_up:${ticker}:${today}`,
+          });
+          if (id) signalsInserted++;
+        } else if (summary.pct_change_1d >= 15 && volRatio >= 2) {
+          const id = await insertSignal(supabase, {
+            ticker,
+            signal_type: "price_spike_up",
+            severity: "orange",
+            title: `${ticker} +${summary.pct_change_1d.toFixed(1)}% (vol ${volRatio.toFixed(1)}×)`,
+            detail: `Koers $${last.close.toFixed(2)}. Materiële beweging.`,
             payload: { pct: summary.pct_change_1d, volume_ratio: volRatio },
             expires_at: expires7,
             dedup_key: `price_spike_up:${ticker}:${today}`,
@@ -168,7 +185,7 @@ export default async () => {
           const id = await insertSignal(supabase, {
             ticker,
             signal_type: "price_spike_up",
-            severity: "orange",
+            severity: "yellow",
             title: `${ticker} +${summary.pct_change_1d.toFixed(1)}% intraday`,
             detail: `Koers $${last.close.toFixed(2)}. Volume ratio ${volRatio.toFixed(1)}×.`,
             payload: { pct: summary.pct_change_1d, volume_ratio: volRatio },

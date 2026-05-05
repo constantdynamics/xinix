@@ -8,6 +8,7 @@ const JOBS = [
   ["poll-trials-background", "Klinische trials"],
   ["poll-edgar-background", "SEC 8-K"],
   ["poll-fda-background", "FDA approvals"],
+  ["poll-biotech-news-background", "Biotech nieuws"],
   ["poll-metals-background", "Metalen / DXY"],
   ["poll-mining-news-background", "Mining nieuws"],
   ["compute-signals-background", "Pre-catalyst signalen"],

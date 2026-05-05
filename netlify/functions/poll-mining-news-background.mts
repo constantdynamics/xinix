@@ -40,34 +40,57 @@ interface MiningPattern {
   catalyst?: string;
 }
 
-// Bonanza-grade thresholds align with framework cluster 1.1.
-// Capture group 1 must be the numeric value for grade-based patterns.
+// Bonanza-grade thresholds calibrated against historical 100%/day or
+// 250%/week movers. The "orange" tier captures all bonanza-ish news for
+// dashboard visibility; the "red" tier is the alert trigger.
+//
+//   Au: ≥30 g/t = high-grade hit (~30% lift on average)
+//       ≥100 g/t = bonanza class (NFG Keats 92 g/t over 19m, GBR BR-037)
+//   Ag: ≥1000 g/t = high-grade hit
+//       ≥3000 g/t = bonanza class (Hochschild, Hercules style)
+//   Cu: ≥5%   = high-grade hit
+//       ≥8%   = bonanza class (Filo del Sol-style)
+//
+// Capture group 1 is the numeric value.
 const BONANZA: MiningPattern[] = [
   {
     type: "bonanza_au",
-    severity: "red",
+    severity: "orange", // overridden to red when threshold met (see below)
     re: /(\d{1,4}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:au|gold)/i,
     label: "high-grade Au intercept",
   },
   {
     type: "bonanza_ag",
-    severity: "red",
+    severity: "orange",
     re: /(\d{2,5}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:ag|silver)/i,
     label: "high-grade Ag intercept",
   },
   {
     type: "bonanza_cu",
-    severity: "red",
+    severity: "orange",
     re: /(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:cu|copper)/i,
     label: "high-grade Cu intercept",
   },
 ];
 
-function bonanzaThresholdMet(type: string, value: number): boolean {
-  if (type === "bonanza_au") return value >= 30; // ≥30 g/t Au
-  if (type === "bonanza_ag") return value >= 1000; // ≥1000 g/t Ag
-  if (type === "bonanza_cu") return value >= 5; // ≥5% Cu
-  return false;
+// Returns the severity tier ("none" if below orange threshold).
+function bonanzaTier(type: string, value: number): "none" | "orange" | "red" {
+  if (type === "bonanza_au") {
+    if (value >= 100) return "red";
+    if (value >= 30) return "orange";
+    return "none";
+  }
+  if (type === "bonanza_ag") {
+    if (value >= 3000) return "red";
+    if (value >= 1000) return "orange";
+    return "none";
+  }
+  if (type === "bonanza_cu") {
+    if (value >= 8) return "red";
+    if (value >= 5) return "orange";
+    return "none";
+  }
+  return "none";
 }
 
 const NEWS_PATTERNS: MiningPattern[] = [
@@ -94,14 +117,14 @@ const NEWS_PATTERNS: MiningPattern[] = [
   },
   {
     type: "dfs",
-    severity: "red",
+    severity: "orange", // demoted: typical DFS-day move is +20-40%, not 100%
     re: /(?:definitive|bankable)\s+feasibility|\bdfs\b/i,
     label: "DFS published",
     catalyst: "DFS",
   },
   {
     type: "permit",
-    severity: "red",
+    severity: "red", // marginal: some Pebble/Skouries-style wins do hit 100%/day
     re: /(?:mining|construction|environmental)\s+permit\s+(?:granted|approved|received)|\beia\s+approved/i,
     label: "Permit granted",
     catalyst: "permit",
@@ -114,15 +137,21 @@ const NEWS_PATTERNS: MiningPattern[] = [
   },
   {
     type: "first_pour",
-    severity: "red",
+    severity: "orange", // demoted: anticipated event, not a surprise
     re: /first\s+gold\s+pour|commercial\s+production\s+(?:declared|achieved|announced)/i,
     label: "First pour / commercial production",
   },
   {
     type: "takeover_bid",
     severity: "red",
-    re: /(?:takeover|acquisition|all[-\s]?cash)\s+(?:offer|bid|proposal)|to\s+be\s+acquired/i,
+    re: /(?:takeover|acquisition|all[-\s]?cash)\s+(?:offer|bid|proposal)|(?:definitive|binding)\s+agreement\s+to\s+(?:acquire|be\s+acquired)|to\s+be\s+acquired\s+(?:for|by)/i,
     label: "Takeover bid",
+  },
+  {
+    type: "discovery_announcement",
+    severity: "red",
+    re: /(?:announces?|reports?)\s+(?:major\s+|significant\s+|new\s+)?(?:high[-\s]?grade\s+)?(?:gold\s+|silver\s+|copper\s+)?discovery|new\s+(?:high[-\s]?grade\s+)?zone\s+discovered/i,
+    label: "Discovery announcement",
   },
   {
     type: "financing",
@@ -177,23 +206,25 @@ export default async () => {
           const link = item.link ?? "";
           const uniq = item.uuid ?? `${t.ticker}:${item.title.slice(0, 80)}`;
 
-          // Bonanza assays — extract numeric value and check threshold
+          // Bonanza assays — emit at orange or red tier based on grade
           for (const p of BONANZA) {
             const m = haystack.match(p.re);
             if (!m) continue;
             const value = Number((m[1] ?? "").replace(",", "."));
             if (!Number.isFinite(value)) continue;
-            if (!bonanzaThresholdMet(p.type, value)) continue;
+            const tier = bonanzaTier(p.type, value);
+            if (tier === "none") continue;
             const id = await insertSignal(supabase, {
               ticker: t.ticker,
               signal_type: p.type,
-              severity: p.severity,
+              severity: tier,
               title: `${t.ticker}: ${p.label} (${value} ${
                 p.type === "bonanza_cu" ? "%" : "g/t"
               })`,
               detail: `${item.title}${link ? `\n${link}` : ""}`,
               payload: {
                 value,
+                tier,
                 title: item.title,
                 publisher: item.publisher,
                 link,

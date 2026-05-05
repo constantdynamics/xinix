@@ -113,7 +113,10 @@ export default async () => {
           );
           trialsTracked++;
 
-          // Trial completion → readout signal (red, occurred event)
+          // Trial COMPLETED status — orange only. The status change alone is
+          // not the readout; topline data may follow weeks later. The actual
+          // bagger event will arrive via 8-K (ticker-specific PR) or an
+          // explicit positive readout press release (poll-biotech-news).
           if (
             statusChanged &&
             overall === "COMPLETED" &&
@@ -122,9 +125,9 @@ export default async () => {
             const sigId = await insertSignal(supabase, {
               ticker,
               signal_type: "trial_status_change",
-              severity: "red",
+              severity: "orange",
               title: `${ticker} trial COMPLETED — ${id.briefTitle?.slice(0, 60)}`,
-              detail: `${phase ?? ""} ${id.nctId} status → COMPLETED. Topline kan elk moment komen.`,
+              detail: `${phase ?? ""} ${id.nctId} status → COMPLETED. Topline kan binnen weken komen.`,
               payload: { nct_id: id.nctId, new_status: overall },
               expires_at: new Date(
                 Date.now() + 30 * 24 * 60 * 60 * 1000
