@@ -89,4 +89,5 @@ export interface Settings {
   alert_ntfy_threshold: Severity;
   quiet_hours_start: number | null;
   quiet_hours_end: number | null;
+  alert_only_goud_events: boolean;
 }

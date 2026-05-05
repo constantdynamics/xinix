@@ -31,6 +31,33 @@ export function SettingsView() {
     <div className="max-w-2xl space-y-4 bg-slate-900 border border-slate-800 rounded p-4">
       <h2 className="text-lg font-semibold">Alert instellingen</h2>
 
+      <label className="block bg-slate-800/50 border border-slate-700 rounded p-3 cursor-pointer">
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={s.alert_only_goud_events}
+            onChange={(e) =>
+              setS({ ...s, alert_only_goud_events: e.target.checked })
+            }
+            className="mt-1"
+          />
+          <div className="flex-1">
+            <div className="font-semibold text-sm">
+              Alleen goud‑medaille events alerten
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Aan = alleen meldingen voor evenementen die <em>nu</em> gebeurd
+              zijn én historisch tot een 20×‑spike kunnen leiden: bonanza
+              assays, FDA approval, trial completed, permit grant, takeover
+              bid, DFS, first pour, material 8‑K, prijs‑spike +15% met volume.
+              <br />
+              Uit = ook proximity‑signalen ("over X dagen…"), volume blips,
+              90d‑low en macro tide.
+            </div>
+          </div>
+        </div>
+      </label>
+
       <Field label="E-mail (Resend stuurt naar dit adres)">
         <input
           type="email"

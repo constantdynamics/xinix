@@ -10,7 +10,34 @@ interface Settings {
   alert_ntfy_threshold: Severity;
   quiet_hours_start: number | null;
   quiet_hours_end: number | null;
+  alert_only_goud_events: boolean;
 }
+
+// Whitelist of signal_types that represent an event that has actually occurred
+// AND historically correlate with a possible 20x ("goud-medaille") spike.
+// When alert_only_goud_events=true, only these are dispatched.
+const GOUD_EVENT_TYPES = new Set<string>([
+  // Geology — bonanza-grade discovery is the #1 trigger (cluster 1.1)
+  "bonanza_au",
+  "bonanza_ag",
+  "bonanza_cu",
+  // Definitive feasibility — production decision validated
+  "dfs",
+  // Permitting — long saga finally resolved (cluster 5.1)
+  "permit",
+  // Operations — first pour rerates a developer to producer
+  "first_pour",
+  // Biotech terminal events
+  "fda_approval",
+  "trial_status_change",
+  // M&A — direct take-out
+  "takeover_bid",
+  // 8-K filings — only material agreement/acquisition/bankruptcy fire as red,
+  // and other 8-K severities (yellow/orange) are excluded by design
+  "8k_material",
+  // Price spike with volume confirmation — only red severity (>=15% + 2x vol)
+  "price_spike_up",
+]);
 
 function inQuietHours(s: Settings): boolean {
   if (s.quiet_hours_start == null || s.quiet_hours_end == null) return false;
@@ -108,11 +135,23 @@ export default async () => {
 
     let sentEmail = 0;
     let sentNtfy = 0;
+    let suppressed = 0;
     const errors: string[] = [];
 
     for (const sig of signals) {
       const sigSev = sig.severity as Severity;
       const sigRank = SEVERITY_RANK[sigSev];
+
+      // Hard filter: events-only mode skips proximity ("over X dagen…"),
+      // volume blips, near-90d-low and macro tide noise.
+      if (s.alert_only_goud_events && !GOUD_EVENT_TYPES.has(sig.signal_type)) {
+        await supabase
+          .from("signal_events")
+          .update({ alerted: true })
+          .eq("id", sig.id);
+        suppressed++;
+        continue;
+      }
 
       const emailOk =
         s.email && sigRank >= SEVERITY_RANK[s.alert_email_threshold];
@@ -160,11 +199,13 @@ export default async () => {
 
     return {
       ok: errors.length === 0,
-      message: `email: ${sentEmail}, ntfy: ${sentNtfy}` +
+      message:
+        `email: ${sentEmail}, ntfy: ${sentNtfy}, suppressed: ${suppressed}` +
         (errors.length ? `; errors: ${errors.slice(0, 3).join("; ")}` : ""),
       metrics: {
         email: sentEmail,
         ntfy: sentNtfy,
+        suppressed,
         errors: errors.length,
         total_signals: signals.length,
       },

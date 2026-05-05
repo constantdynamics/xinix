@@ -36,6 +36,7 @@ export default async (req: Request) => {
       "alert_ntfy_threshold",
       "quiet_hours_start",
       "quiet_hours_end",
+      "alert_only_goud_events",
     ];
     const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
     for (const k of allowed) if (k in body) update[k] = body[k];
