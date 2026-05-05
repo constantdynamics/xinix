@@ -13,6 +13,7 @@ const JOBS = [
   "poll-mining-news-background",
   "compute-signals-background",
   "dispatch-alerts-background",
+  "backtest-background",
 ];
 
 function checkAuth(req: Request): boolean {
