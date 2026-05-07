@@ -59,6 +59,10 @@ export default async () => {
     let failed = 0;
     let skipped = 0;
 
+    // Cache per ticker — current price is identical across all horizon
+    // iterations, so fetch Yahoo at most once per ticker per run.
+    const priceCache = new Map<string, number | null>();
+
     for (const days of TARGET_DAYS) {
       const target = new Date(today.getTime() - days * 86400000)
         .toISOString()
@@ -82,10 +86,6 @@ export default async () => {
       const existingIds = new Set(
         (existing ?? []).map((e) => e.signal_score_id)
       );
-
-      // Cache per ticker — same ticker may appear multiple days, but
-      // within one run we hit Yahoo at most once per ticker.
-      const priceCache = new Map<string, number | null>();
 
       for (const s of scores) {
         if (existingIds.has(s.id)) {
