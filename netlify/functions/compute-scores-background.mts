@@ -20,6 +20,7 @@ import {
   type TickerRow,
 } from "./_lib/scoring/classify.mts";
 import { buildTradeSetup } from "./_lib/scoring/trade_setup.mts";
+import { expectedOutcome } from "./_lib/scoring/expected_outcome.mts";
 
 async function scoreOneTicker(
   supabase: ReturnType<typeof getServiceClient>,
@@ -71,6 +72,20 @@ async function scoreOneTicker(
     });
   }
 
+  // ExpectedOutcome (briefing §6.1.5/6) — for any BUY+ action, biotech or mining
+  let expOut = null;
+  if (
+    (result.action === "BUY" || result.action === "STRONG_BUY") &&
+    c.nearestCatalyst?.type
+  ) {
+    expOut = expectedOutcome({
+      sector: ticker.sector,
+      catalystType: c.nearestCatalyst.type,
+      daysUntilCatalyst: c.nearestCatalyst.daysUntil ?? null,
+      currentPrice: price?.last_close ?? null,
+    });
+  }
+
   const { error } = await supabase.from("signal_scores").upsert(
     {
       ticker: ticker.ticker,
@@ -93,6 +108,7 @@ async function scoreOneTicker(
         nearest_catalyst: c.nearestCatalyst,
       },
       trade_setup: tradeSetup,
+      expected_outcome: expOut,
       data_completeness: c.dataCompleteness,
     },
     { onConflict: "ticker,scan_date,mode" }

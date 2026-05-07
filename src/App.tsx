@@ -4,10 +4,17 @@ import { SettingsView } from "./views/Settings";
 import { TickersView } from "./views/Tickers";
 import { BacktestView } from "./views/Backtest";
 import { ScoresView } from "./views/Scores";
+import { TrackRecordView } from "./views/TrackRecord";
 import { fetchDashboard, getToken, setToken } from "./api";
 import type { Dashboard } from "./types";
 
-type Tab = "dashboard" | "scores" | "settings" | "tickers" | "backtest";
+type Tab =
+  | "dashboard"
+  | "scores"
+  | "settings"
+  | "tickers"
+  | "backtest"
+  | "track-record";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -48,7 +55,7 @@ export function App() {
             </p>
           </div>
           <nav className="flex gap-2">
-            {(["dashboard", "scores", "tickers", "backtest", "settings"] as Tab[]).map((t) => (
+            {(["dashboard", "scores", "tickers", "backtest", "track-record", "settings"] as Tab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -117,6 +124,7 @@ export function App() {
         )}
         {tab === "backtest" && <BacktestView />}
         {tab === "scores" && <ScoresView />}
+        {tab === "track-record" && <TrackRecordView />}
       </main>
     </div>
   );

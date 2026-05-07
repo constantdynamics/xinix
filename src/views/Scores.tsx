@@ -51,7 +51,21 @@ interface ScoreRow {
     nearest_catalyst: NearestCatalyst | null;
   };
   trade_setup: TradeSetup | null;
+  expected_outcome: ExpectedOutcome | null;
   data_completeness: number;
+}
+
+interface ExpectedOutcome {
+  catalystType: string;
+  catalystLabel: string;
+  hitRateBaseline: number;
+  peakReturnEst: number;
+  t90ReturnEst: number;
+  expectedPeakPrice: number | null;
+  expectedT90Price: number | null;
+  exitWindowDays: number;
+  warning: string;
+  caveat: string;
 }
 
 interface Payload {
@@ -337,6 +351,54 @@ function ScoreCard({
                   ))}
                 </ul>
               )}
+            </div>
+          )}
+          {row.expected_outcome && (
+            <div className="border border-violet-900 bg-violet-950/30 rounded p-3">
+              <h4 className="text-sm font-semibold mb-2">
+                Verwachte uitkomst{" "}
+                <span className="text-xs font-normal text-slate-400">
+                  ({row.expected_outcome.catalystLabel})
+                </span>
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <Stat
+                  label="Hit rate baseline"
+                  value={pct(row.expected_outcome.hitRateBaseline)}
+                />
+                <Stat
+                  label="Peak ret est."
+                  value={pct(row.expected_outcome.peakReturnEst)}
+                  hl="emerald"
+                />
+                <Stat
+                  label="T+90 ret est."
+                  value={pct(row.expected_outcome.t90ReturnEst)}
+                />
+                <Stat
+                  label="Exit window"
+                  value={`${row.expected_outcome.exitWindowDays}d`}
+                />
+                {row.expected_outcome.expectedPeakPrice != null && (
+                  <Stat
+                    label="Peak prijs"
+                    value={`$${row.expected_outcome.expectedPeakPrice}`}
+                    hl="emerald"
+                  />
+                )}
+                {row.expected_outcome.expectedT90Price != null && (
+                  <Stat
+                    label="T+90 prijs"
+                    value={`$${row.expected_outcome.expectedT90Price}`}
+                  />
+                )}
+              </div>
+              <p className="mt-2 text-xs text-amber-400">
+                ⚠ {row.expected_outcome.warning}
+              </p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {row.expected_outcome.caveat}
+              </p>
             </div>
           )}
         </div>
