@@ -5,6 +5,7 @@ import { TickersView } from "./views/Tickers";
 import { BacktestView } from "./views/Backtest";
 import { ScoresView } from "./views/Scores";
 import { TrackRecordView } from "./views/TrackRecord";
+import { LegendaView } from "./views/Legenda";
 import { fetchDashboard, getToken, setToken } from "./api";
 import type { Dashboard } from "./types";
 
@@ -14,7 +15,18 @@ type Tab =
   | "settings"
   | "tickers"
   | "backtest"
-  | "track-record";
+  | "track-record"
+  | "legenda";
+
+const TAB_LABEL: Record<Tab, string> = {
+  dashboard: "Dashboard",
+  scores: "Scores",
+  tickers: "Watchlist",
+  backtest: "Backtest",
+  "track-record": "Track record",
+  legenda: "Legenda",
+  settings: "Instellingen",
+};
 
 export function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -54,8 +66,18 @@ export function App() {
               Pre- en post-event signalering met kleurcodes en alerts
             </p>
           </div>
-          <nav className="flex gap-2">
-            {(["dashboard", "scores", "tickers", "backtest", "track-record", "settings"] as Tab[]).map((t) => (
+          <nav className="flex gap-2 flex-wrap">
+            {(
+              [
+                "dashboard",
+                "scores",
+                "tickers",
+                "backtest",
+                "track-record",
+                "legenda",
+                "settings",
+              ] as Tab[]
+            ).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -65,15 +87,7 @@ export function App() {
                     : "border-slate-700 text-slate-300 hover:bg-slate-800"
                 }`}
               >
-                {t === "dashboard"
-                  ? "Dashboard"
-                  : t === "scores"
-                  ? "Scores"
-                  : t === "tickers"
-                  ? "Watchlist"
-                  : t === "backtest"
-                  ? "Backtest"
-                  : "Instellingen"}
+                {TAB_LABEL[t]}
               </button>
             ))}
           </nav>
@@ -125,6 +139,7 @@ export function App() {
         {tab === "backtest" && <BacktestView />}
         {tab === "scores" && <ScoresView />}
         {tab === "track-record" && <TrackRecordView />}
+        {tab === "legenda" && <LegendaView />}
       </main>
     </div>
   );
