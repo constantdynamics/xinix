@@ -12,6 +12,7 @@ const JOBS = [
   "poll-metals-background",
   "poll-mining-news-background",
   "compute-signals-background",
+  "compute-scores-background",
   "dispatch-alerts-background",
   "backtest-background",
 ];
