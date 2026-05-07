@@ -1,8 +1,57 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Card, Dashboard, Sector } from "../types";
-import { addTicker, batchAddTickers, removeTicker, type TickerInput } from "../api";
+import {
+  addTicker,
+  batchAddTickers,
+  lookupTickers,
+  removeTicker,
+  type TickerInput,
+} from "../api";
 import { TickerDetailsModal } from "./TickerDetailsModal";
 import { googleFinanceUrl } from "../tickerLinks";
+
+// Bekende exchange-suffixen — bij bulk "wijzig suffix" worden deze als
+// vervangbaar herkend, anderen (bv. BRK.B share class) blijven staan.
+const EXCHANGE_SUFFIXES = [
+  { value: "", label: "Geen (US)" },
+  { value: "V", label: ".V (TSXV)" },
+  { value: "TO", label: ".TO (TSX)" },
+  { value: "CN", label: ".CN (CNSX)" },
+  { value: "AX", label: ".AX (ASX)" },
+  { value: "L", label: ".L (LSE)" },
+  { value: "HK", label: ".HK (HKG)" },
+  { value: "T", label: ".T (TYO)" },
+  { value: "DE", label: ".DE (XETRA)" },
+  { value: "PA", label: ".PA (Paris)" },
+  { value: "AS", label: ".AS (AMS)" },
+  { value: "MI", label: ".MI (Milan)" },
+  { value: "ST", label: ".ST (Stockholm)" },
+];
+
+const KNOWN_SUFFIX_SET = new Set(
+  EXCHANGE_SUFFIXES.map((x) => x.value).filter(Boolean)
+);
+
+function applySuffix(ticker: string, suffix: string): string {
+  const t = ticker.toUpperCase();
+  const dot = t.lastIndexOf(".");
+  let base = t;
+  if (dot !== -1) {
+    const existing = t.slice(dot + 1);
+    if (KNOWN_SUFFIX_SET.has(existing)) base = t.slice(0, dot);
+  }
+  return suffix ? `${base}.${suffix}` : base;
+}
+
+interface PreviewRow {
+  id: number;
+  ticker: string;
+  company: string;
+  sector: Sector;
+  selected: boolean;
+  status: "pending" | "checking" | "recognized" | "unknown";
+  exchange: string | null;
+}
 
 interface Form {
   ticker: string;
@@ -154,13 +203,170 @@ export function TickersView({
   const [batchMode, setBatchMode] = useState<"quick" | "table">("quick");
   const [editing, setEditing] = useState<Card | null>(null);
 
-  const preview = useMemo(
-    () =>
+  const [rows, setRows] = useState<PreviewRow[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [bulkSuffix, setBulkSuffix] = useState<string>("");
+  const [bulkSector, setBulkSector] = useState<Sector>("biotech");
+  const nextIdRef = useRef(1);
+  const extrasRef = useRef<Map<string, Partial<TickerInput>>>(new Map());
+
+  // Re-parse text → reconcile met bestaande rijen. Behoudt company/status
+  // van rijen die nog steeds in de tekst staan, zodat een lookup niet
+  // herhaald hoeft te worden bij elke toetsaanslag.
+  useEffect(() => {
+    const parsed =
       batchMode === "quick"
         ? parseQuickAdd(batchText, batchSector)
-        : parseBatch(batchText, batchSector),
-    [batchText, batchSector, batchMode]
-  );
+        : parseBatch(batchText, batchSector);
+    setParseErrors(parsed.errors);
+
+    setRows((prev) => {
+      const prevByTicker = new Map(prev.map((r) => [r.ticker, r]));
+      const next: PreviewRow[] = [];
+      for (const p of parsed.rows) {
+        const existing = prevByTicker.get(p.ticker);
+        // bewaar extras (commodity, jurisdiction, modality, etc) voor import
+        const extras: Partial<TickerInput> = { ...p };
+        delete (extras as { ticker?: string }).ticker;
+        delete (extras as { company?: string }).company;
+        delete (extras as { sector?: string }).sector;
+        extrasRef.current.set(p.ticker, extras);
+        if (existing) {
+          // Behoud bestaande sector — anders worden per-rij of bulk
+          // sector-edits weggeflashed zodra je een teken in de textarea
+          // typt. Voor sector-wijzigingen op bestaande rijen: gebruik
+          // per-rij select of bulk toolbar.
+          next.push(existing);
+        } else {
+          next.push({
+            id: nextIdRef.current++,
+            ticker: p.ticker,
+            company: p.company || p.ticker,
+            sector: p.sector ?? batchSector,
+            selected: false,
+            status: "pending",
+            exchange: null,
+          });
+        }
+      }
+      return next;
+    });
+  }, [batchText, batchSector, batchMode]);
+
+  // Debounced lookup voor alle rijen in "pending" — pas na 600ms stilte
+  // om Yahoo niet bij elke toetsaanslag te raken.
+  useEffect(() => {
+    const pending = rows.filter((r) => r.status === "pending").map((r) => r.ticker);
+    if (pending.length === 0) return;
+    const timer = setTimeout(async () => {
+      // mark als "checking" voor visuele feedback
+      setRows((prev) =>
+        prev.map((r) =>
+          pending.includes(r.ticker) ? { ...r, status: "checking" } : r
+        )
+      );
+      try {
+        const results = await lookupTickers(pending);
+        const map = new Map(results.map((r) => [r.ticker, r]));
+        setRows((prev) =>
+          prev.map((r) => {
+            const res = map.get(r.ticker);
+            if (!res) return r;
+            if (res.recognized) {
+              return {
+                ...r,
+                status: "recognized",
+                company: res.company ?? r.company,
+                exchange: res.exchange ?? null,
+              };
+            }
+            return { ...r, status: "unknown", exchange: null };
+          })
+        );
+      } catch (e) {
+        // Auth fout / netwerk — terug naar pending zodat retry mogelijk is
+        setRows((prev) =>
+          prev.map((r) =>
+            pending.includes(r.ticker) ? { ...r, status: "pending" } : r
+          )
+        );
+        setError(
+          `Lookup mislukt: ${e instanceof Error ? e.message : String(e)}`
+        );
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [rows]);
+
+  function toggleRow(id: number) {
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, selected: !r.selected } : r))
+    );
+  }
+
+  function toggleAll() {
+    const anySelected = rows.some((r) => r.selected);
+    setRows((prev) => prev.map((r) => ({ ...r, selected: !anySelected })));
+  }
+
+  function setRowTicker(id: number, newTicker: string) {
+    const t = newTicker.trim().toUpperCase();
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              ticker: t,
+              status: "pending",
+              company: t,
+              exchange: null,
+            }
+          : r
+      )
+    );
+  }
+
+  function setRowSector(id: number, sec: Sector) {
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, sector: sec } : r))
+    );
+  }
+
+  function removeRow(id: number) {
+    setRows((prev) => prev.filter((r) => r.id !== id));
+  }
+
+  function applyBulkSuffix() {
+    setRows((prev) =>
+      prev.map((r) => {
+        if (!r.selected) return r;
+        const newTicker = applySuffix(r.ticker, bulkSuffix);
+        if (newTicker === r.ticker) return r;
+        return {
+          ...r,
+          ticker: newTicker,
+          status: "pending",
+          company: newTicker,
+          exchange: null,
+        };
+      })
+    );
+  }
+
+  function applyBulkSector() {
+    setRows((prev) =>
+      prev.map((r) => (r.selected ? { ...r, sector: bulkSector } : r))
+    );
+  }
+
+  function removeSelected() {
+    setRows((prev) => prev.filter((r) => !r.selected));
+  }
+
+  const selectedCount = rows.filter((r) => r.selected).length;
+  const recognizedCount = rows.filter((r) => r.status === "recognized").length;
+  const unknownCount = rows.filter((r) => r.status === "unknown").length;
+  const checkingCount = rows.filter((r) => r.status === "checking").length;
 
   async function add() {
     setError(null);
@@ -196,15 +402,22 @@ export function TickersView({
   async function importBatch() {
     setError(null);
     setMsg(null);
-    if (preview.rows.length === 0) {
+    if (rows.length === 0) {
       setError("Geen geldige rijen gevonden");
       return;
     }
     setBatchBusy(true);
     try {
-      const res = await batchAddTickers(preview.rows);
+      const payload: TickerInput[] = rows.map((r) => ({
+        ticker: r.ticker,
+        company: r.company || r.ticker,
+        sector: r.sector,
+        ...(extrasRef.current.get(r.ticker) ?? {}),
+      }));
+      const res = await batchAddTickers(payload);
       setMsg(`${res.inserted} ticker(s) toegevoegd / bijgewerkt`);
       setBatchText("");
+      setRows([]);
       onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -280,7 +493,7 @@ export function TickersView({
             </>
           )}
         </p>
-        <div className="flex gap-2 mb-2 items-center">
+        <div className="flex gap-2 mb-2 items-center flex-wrap">
           <label className="text-xs text-slate-400">Default sector</label>
           <select
             value={batchSector}
@@ -291,9 +504,31 @@ export function TickersView({
             <option value="mining">mining</option>
           </select>
           <span className="text-xs text-slate-500">
-            {preview.rows.length} rij(en) klaar
-            {preview.errors.length > 0 &&
-              `, ${preview.errors.length} fout(en)`}
+            {rows.length} rij(en)
+            {recognizedCount > 0 && (
+              <span className="text-emerald-400">
+                {" · "}
+                {recognizedCount} herkend
+              </span>
+            )}
+            {checkingCount > 0 && (
+              <span className="text-sky-400">
+                {" · "}
+                {checkingCount} bezig
+              </span>
+            )}
+            {unknownCount > 0 && (
+              <span className="text-amber-400">
+                {" · "}
+                {unknownCount} onbekend
+              </span>
+            )}
+            {parseErrors.length > 0 && (
+              <span className="text-red-400">
+                {" · "}
+                {parseErrors.length} parse-fout
+              </span>
+            )}
           </span>
         </div>
         <textarea
@@ -312,48 +547,200 @@ export function TickersView({
           }
           className="w-full font-mono text-xs bg-slate-950 border border-slate-700 rounded p-2"
         />
-        {preview.errors.length > 0 && (
+        {parseErrors.length > 0 && (
           <ul className="mt-1 text-xs text-amber-400 list-disc list-inside">
-            {preview.errors.slice(0, 5).map((e, i) => (
+            {parseErrors.slice(0, 5).map((e, i) => (
               <li key={i}>{e}</li>
             ))}
-            {preview.errors.length > 5 && <li>… en meer</li>}
+            {parseErrors.length > 5 && <li>… en meer</li>}
           </ul>
         )}
-        {preview.rows.length > 0 && (
-          <div className="mt-2 max-h-40 overflow-auto bg-slate-950 border border-slate-800 rounded">
+
+        {/* Bulk action toolbar — verschijnt zodra er ≥1 rij geselecteerd is */}
+        {selectedCount > 0 && (
+          <div className="mt-2 p-2 bg-slate-800/60 border border-slate-700 rounded flex items-center gap-3 flex-wrap text-xs">
+            <span className="text-slate-300 font-semibold">
+              {selectedCount} geselecteerd
+            </span>
+            <span className="text-slate-600">|</span>
+            <label className="text-slate-400">Sector:</label>
+            <select
+              value={bulkSector}
+              onChange={(e) => setBulkSector(e.target.value as Sector)}
+              className="px-2 py-1 bg-slate-900 border border-slate-700 rounded"
+            >
+              <option value="biotech">biotech</option>
+              <option value="mining">mining</option>
+            </select>
+            <button
+              onClick={applyBulkSector}
+              className="px-2 py-1 bg-sky-700 hover:bg-sky-600 rounded text-white"
+            >
+              Pas sector toe
+            </button>
+            <span className="text-slate-600">|</span>
+            <label className="text-slate-400">Suffix:</label>
+            <select
+              value={bulkSuffix}
+              onChange={(e) => setBulkSuffix(e.target.value)}
+              className="px-2 py-1 bg-slate-900 border border-slate-700 rounded"
+            >
+              {EXCHANGE_SUFFIXES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={applyBulkSuffix}
+              className="px-2 py-1 bg-sky-700 hover:bg-sky-600 rounded text-white"
+              title="Vervangt bestaande exchange-suffix; share class suffixen (bv .B) blijven staan"
+            >
+              Pas suffix toe
+            </button>
+            <span className="text-slate-600">|</span>
+            <button
+              onClick={removeSelected}
+              className="px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-white"
+            >
+              Verwijder selectie
+            </button>
+          </div>
+        )}
+
+        {rows.length > 0 && (
+          <div className="mt-2 max-h-96 overflow-auto bg-slate-950 border border-slate-800 rounded">
             <table className="w-full text-xs">
-              <thead className="text-slate-500">
+              <thead className="text-slate-500 sticky top-0 bg-slate-950">
                 <tr>
+                  <th className="p-1 w-8">
+                    <input
+                      type="checkbox"
+                      checked={rows.length > 0 && rows.every((r) => r.selected)}
+                      onChange={toggleAll}
+                      title="Selecteer alles"
+                    />
+                  </th>
+                  <th className="text-left p-1 w-6">●</th>
                   <th className="text-left p-1">Ticker</th>
                   <th className="text-left p-1">Bedrijf</th>
+                  <th className="text-left p-1">Beurs</th>
                   <th className="text-left p-1">Sector</th>
-                  <th className="text-left p-1">Extra</th>
+                  <th className="p-1 w-8"></th>
                 </tr>
               </thead>
               <tbody>
-                {preview.rows.slice(0, 50).map((r) => (
-                  <tr key={r.ticker} className="border-t border-slate-800">
-                    <td className="p-1 font-mono">{r.ticker}</td>
-                    <td className="p-1 text-slate-300">{r.company}</td>
-                    <td className="p-1 text-slate-400">{r.sector}</td>
-                    <td className="p-1 text-slate-500">
-                      {r.sector === "mining"
-                        ? [r.commodity, r.jurisdiction].filter(Boolean).join(" / ")
-                        : [r.disease_area, r.phase].filter(Boolean).join(" / ")}
-                    </td>
-                  </tr>
-                ))}
+                {rows.map((r) => {
+                  const rowBg =
+                    r.status === "recognized"
+                      ? "bg-emerald-900/20 hover:bg-emerald-900/30"
+                      : r.status === "unknown"
+                      ? "bg-amber-900/20 hover:bg-amber-900/30"
+                      : r.status === "checking"
+                      ? "bg-sky-900/20"
+                      : "hover:bg-slate-900";
+                  const dotColor =
+                    r.status === "recognized"
+                      ? "bg-emerald-500"
+                      : r.status === "unknown"
+                      ? "bg-amber-500"
+                      : r.status === "checking"
+                      ? "bg-sky-500 animate-pulse"
+                      : "bg-slate-600";
+                  return (
+                    <tr
+                      key={r.id}
+                      className={`border-t border-slate-800 ${rowBg}`}
+                    >
+                      <td className="p-1 text-center">
+                        <input
+                          type="checkbox"
+                          checked={r.selected}
+                          onChange={() => toggleRow(r.id)}
+                        />
+                      </td>
+                      <td className="p-1">
+                        <span
+                          className={`inline-block w-2 h-2 rounded-full ${dotColor}`}
+                          title={
+                            r.status === "recognized"
+                              ? `Herkend op Yahoo${r.exchange ? ` (${r.exchange})` : ""}`
+                              : r.status === "unknown"
+                              ? "Niet gevonden op Yahoo — controleer ticker / suffix"
+                              : r.status === "checking"
+                              ? "Bezig met opzoeken..."
+                              : "Wacht op lookup"
+                          }
+                        />
+                      </td>
+                      <td className="p-1">
+                        <input
+                          value={r.ticker}
+                          onChange={(e) => setRowTicker(r.id, e.target.value)}
+                          className="font-mono bg-transparent border-b border-slate-700 focus:border-sky-500 outline-none w-28"
+                        />
+                      </td>
+                      <td className="p-1 text-slate-300 truncate max-w-xs">
+                        {r.status === "recognized" ? (
+                          <span className="text-emerald-300">{r.company}</span>
+                        ) : r.status === "checking" ? (
+                          <span className="text-slate-500 italic">opzoeken…</span>
+                        ) : r.status === "unknown" ? (
+                          <span className="text-amber-400">
+                            niet gevonden
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">{r.company}</span>
+                        )}
+                      </td>
+                      <td className="p-1 text-slate-400 truncate max-w-[8rem]">
+                        {r.exchange ?? ""}
+                      </td>
+                      <td className="p-1">
+                        <select
+                          value={r.sector}
+                          onChange={(e) =>
+                            setRowSector(r.id, e.target.value as Sector)
+                          }
+                          className="bg-transparent border-b border-slate-700 focus:border-sky-500 outline-none"
+                        >
+                          <option value="biotech">biotech</option>
+                          <option value="mining">mining</option>
+                        </select>
+                      </td>
+                      <td className="p-1 text-right">
+                        <button
+                          onClick={() => removeRow(r.id)}
+                          className="text-slate-500 hover:text-red-400"
+                          title="Verwijder rij"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
         <button
           onClick={importBatch}
-          disabled={batchBusy || preview.rows.length === 0}
+          disabled={batchBusy || rows.length === 0 || checkingCount > 0}
           className="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded text-white text-sm"
+          title={
+            checkingCount > 0
+              ? "Wacht tot alle lookups klaar zijn"
+              : unknownCount > 0
+              ? `${unknownCount} ticker(s) niet herkend — worden alsnog toegevoegd, controleer suffix`
+              : ""
+          }
         >
-          {batchBusy ? "Bezig..." : `Importeer ${preview.rows.length} rij(en)`}
+          {batchBusy
+            ? "Bezig..."
+            : checkingCount > 0
+            ? `Bezig met lookup (${checkingCount})...`
+            : `Importeer ${rows.length} rij(en)`}
         </button>
       </div>
 

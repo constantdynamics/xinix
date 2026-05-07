@@ -92,6 +92,27 @@ export async function removeTicker(ticker: string): Promise<void> {
   if (!res.ok) throw new Error(`remove ticker ${res.status}`);
 }
 
+export interface LookupResult {
+  ticker: string;
+  recognized: boolean;
+  company: string | null;
+  currency: string | null;
+  exchange: string | null;
+  error?: string;
+}
+
+export async function lookupTickers(tickers: string[]): Promise<LookupResult[]> {
+  if (tickers.length === 0) return [];
+  const res = await fetch("/api/ticker-lookup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ tickers }),
+  });
+  if (!res.ok) throw new Error(`lookup ${res.status}: ${await res.text()}`);
+  const j = (await res.json()) as { results: LookupResult[] };
+  return j.results;
+}
+
 export async function triggerJob(job: string): Promise<void> {
   const res = await fetch(`/api/trigger?job=${encodeURIComponent(job)}`, {
     method: "POST",
