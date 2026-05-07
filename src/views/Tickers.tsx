@@ -34,6 +34,36 @@ const EMPTY: Form = {
   deposit_type: "",
 };
 
+// Quick-add format: "OPHR.V; MEK.V; XYZ" — semicolon or whitespace separated.
+// Suffix .V/.TO/.AX/.L is preserved verbatim (Yahoo-compatible).
+function parseQuickAdd(
+  text: string,
+  defaultSector: Sector
+): { rows: TickerInput[]; errors: string[] } {
+  const errors: string[] = [];
+  const rows: TickerInput[] = [];
+  const seen = new Set<string>();
+  const tokens = text
+    .split(/[;,\n\r\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const t of tokens) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(t)) {
+      errors.push(`'${t}' is geen geldig ticker‑formaat`);
+      continue;
+    }
+    const ticker = t.toUpperCase();
+    if (seen.has(ticker)) continue;
+    seen.add(ticker);
+    rows.push({
+      ticker,
+      company: ticker,
+      sector: defaultSector,
+    });
+  }
+  return { rows, errors };
+}
+
 function parseBatch(
   text: string,
   defaultSector: Sector
@@ -119,10 +149,14 @@ export function TickersView({
   const [batchText, setBatchText] = useState("");
   const [batchSector, setBatchSector] = useState<Sector>("biotech");
   const [batchBusy, setBatchBusy] = useState(false);
+  const [batchMode, setBatchMode] = useState<"quick" | "table">("quick");
 
   const preview = useMemo(
-    () => parseBatch(batchText, batchSector),
-    [batchText, batchSector]
+    () =>
+      batchMode === "quick"
+        ? parseQuickAdd(batchText, batchSector)
+        : parseBatch(batchText, batchSector),
+    [batchText, batchSector, batchMode]
   );
 
   async function add() {
@@ -196,10 +230,45 @@ export function TickersView({
       {/* Batch import */}
       <div className="bg-slate-900 border border-slate-800 rounded p-4">
         <h2 className="text-lg font-semibold mb-2">Batch‑import</h2>
+        <div className="flex gap-2 mb-2 items-center text-xs">
+          <span className="text-slate-400">Format:</span>
+          <button
+            onClick={() => setBatchMode("quick")}
+            className={`px-2 py-0.5 rounded border ${
+              batchMode === "quick"
+                ? "bg-slate-100 text-slate-900 border-slate-100"
+                : "border-slate-700 text-slate-300"
+            }`}
+          >
+            Snel (TICKER; TICKER; …)
+          </button>
+          <button
+            onClick={() => setBatchMode("table")}
+            className={`px-2 py-0.5 rounded border ${
+              batchMode === "table"
+                ? "bg-slate-100 text-slate-900 border-slate-100"
+                : "border-slate-700 text-slate-300"
+            }`}
+          >
+            Tabel (CSV met velden)
+          </button>
+        </div>
         <p className="text-xs text-slate-400 mb-2">
-          Plak één ticker per regel. Eenvoudig: <code>TICKER,Bedrijfsnaam</code>{" "}
-          of met defaults via sectorkeuze. Voor meer kolommen begin met header,
-          bijv.: <code>ticker,company,sector,commodity,jurisdiction</code>.
+          {batchMode === "quick" ? (
+            <>
+              Plak tickers gescheiden door <code>;</code> of nieuwe regels.
+              Suffixen zoals <code>.V</code> (TSXV), <code>.TO</code> (TSX),{" "}
+              <code>.AX</code> (ASX) blijven behouden voor Yahoo/Stooq.
+              Sectorlabel komt van de keuze hieronder; bedrijfsnaam vul je
+              later in via "Eén ticker toevoegen" of per‑rij bewerking.
+            </>
+          ) : (
+            <>
+              Eén ticker per regel. Eenvoudig:{" "}
+              <code>TICKER,Bedrijfsnaam</code> of met header voor extra
+              kolommen, bijv.: <code>ticker,company,sector,commodity,jurisdiction</code>.
+            </>
+          )}
         </p>
         <div className="flex gap-2 mb-2 items-center">
           <label className="text-xs text-slate-400">Default sector</label>
@@ -220,10 +289,14 @@ export function TickersView({
         <textarea
           value={batchText}
           onChange={(e) => setBatchText(e.target.value)}
-          rows={8}
+          rows={batchMode === "quick" ? 4 : 8}
           spellCheck={false}
           placeholder={
-            batchSector === "mining"
+            batchMode === "quick"
+              ? batchSector === "mining"
+                ? "OPHR.V; MEK.V; FILO.TO; NFG.TO; WA1.AX"
+                : "VKTX; SAVA; AKRO; ETNB; MDGL"
+              : batchSector === "mining"
               ? "FILO,Filo Mining,mining,Cu,Argentina\nNFG,New Found Gold,mining,Au,Canada\n…"
               : "VKTX,Viking Therapeutics\nSAVA,Cassava Sciences\n…"
           }
