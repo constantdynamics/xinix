@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Card } from "../types";
 import { patchTicker } from "../api";
+import { googleFinanceUrl } from "../tickerLinks";
 
 interface Props {
   card: Card;
@@ -230,7 +231,15 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">
-              {card.ticker}{" "}
+              <a
+                href={googleFinanceUrl(card.ticker)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sky-300 hover:underline"
+                title={`Open ${card.ticker} op Google Finance`}
+              >
+                {card.ticker}
+              </a>{" "}
               <span className="text-xs text-slate-400 uppercase ml-2">
                 {card.sector}
               </span>

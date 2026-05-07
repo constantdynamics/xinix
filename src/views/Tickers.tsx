@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { Card, Dashboard, Sector } from "../types";
 import { addTicker, batchAddTickers, removeTicker, type TickerInput } from "../api";
 import { TickerDetailsModal } from "./TickerDetailsModal";
+import { googleFinanceUrl } from "../tickerLinks";
 
 interface Form {
   ticker: string;
@@ -494,7 +495,17 @@ export function TickersView({
                   <td className="p-2 text-slate-400 text-xs uppercase">
                     {c.sector}
                   </td>
-                  <td className="p-2 font-bold">{c.ticker}</td>
+                  <td className="p-2 font-bold">
+                    <a
+                      href={googleFinanceUrl(c.ticker)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sky-300 hover:underline"
+                      title={`Open ${c.ticker} op Google Finance`}
+                    >
+                      {c.ticker}
+                    </a>
+                  </td>
                   <td className="p-2 text-slate-300">{c.company}</td>
                   <td className="p-2">{c.goud_score}</td>
                   <td className="p-2 text-slate-400">{c.goud_type}</td>

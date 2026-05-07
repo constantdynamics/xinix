@@ -1,6 +1,7 @@
 import type { Dashboard, Card } from "../types";
 import { COLOR_BG, COLOR_DOT, COLOR_LABEL_NL } from "../colors";
 import { triggerJob } from "../api";
+import { googleFinanceUrl } from "../tickerLinks";
 import { useState } from "react";
 
 const JOBS = [
@@ -115,13 +116,18 @@ function CardGrid({ cards }: { cards: Card[] }) {
 function CardTile({ card: c }: { card: Card }) {
   const px = c.summary;
   return (
-    <div
-      className={`rounded-lg border-2 p-3 shadow-sm ${COLOR_BG[c.color]}`}
-      title={`${c.color} = ${COLOR_LABEL_NL[c.color]}`}
+    <a
+      href={googleFinanceUrl(c.ticker)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`block rounded-lg border-2 p-3 shadow-sm hover:ring-2 hover:ring-sky-400 transition ${COLOR_BG[c.color]}`}
+      title={`${c.color} = ${COLOR_LABEL_NL[c.color]} · open ${c.ticker} op Google Finance`}
     >
       <div className="flex items-baseline justify-between gap-2">
         <div className="flex items-baseline gap-1">
-          <span className="font-bold text-lg">{c.ticker}</span>
+          <span className="font-bold text-lg underline-offset-2 hover:underline">
+            {c.ticker}
+          </span>
           <span className="text-[10px] uppercase opacity-60 tracking-wide">
             {c.sector === "mining" ? "MIN" : "BIO"}
           </span>
@@ -185,7 +191,7 @@ function CardTile({ card: c }: { card: Card }) {
           {c.active_signals} actieve signalen
         </div>
       )}
-    </div>
+    </a>
   );
 }
 
@@ -214,7 +220,16 @@ function Catalysts({ data }: { data: Dashboard }) {
                 <td className="p-2 whitespace-nowrap text-slate-300">
                   {c.expected_date}
                 </td>
-                <td className="p-2 font-semibold">{c.ticker}</td>
+                <td className="p-2 font-semibold">
+                  <a
+                    href={googleFinanceUrl(c.ticker)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sky-300 hover:underline"
+                  >
+                    {c.ticker}
+                  </a>
+                </td>
                 <td className="p-2 text-slate-300">{c.catalyst_type}</td>
                 <td className="p-2 text-slate-400 truncate max-w-md">
                   {c.description}
@@ -243,7 +258,15 @@ function RecentSignals({ data }: { data: Dashboard }) {
             key={s.id}
             className={`flex items-start gap-2 p-2 rounded border ${COLOR_BG[s.severity]}`}
           >
-            <span className="font-bold w-16">{s.ticker}</span>
+            <a
+              href={googleFinanceUrl(s.ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold w-16 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {s.ticker}
+            </a>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium">{s.title}</div>
               {s.detail && (

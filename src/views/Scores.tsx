@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { triggerJob, getToken } from "../api";
+import { googleFinanceUrl } from "../tickerLinks";
 
 type Action = "STRONG_BUY" | "BUY" | "WATCH" | "HOLD" | "AVOID";
 
@@ -265,9 +266,17 @@ function ScoreCard({
   const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
   return (
     <div className="bg-slate-900 border border-slate-800 rounded">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onToggle}
-        className="w-full p-3 flex items-center gap-3 hover:bg-slate-800/40 text-left"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+        className="w-full p-3 flex items-center gap-3 hover:bg-slate-800/40 text-left cursor-pointer"
       >
         <span
           className={`px-2 py-0.5 text-xs font-bold rounded ${
@@ -276,7 +285,16 @@ function ScoreCard({
         >
           {row.action}
         </span>
-        <span className="font-mono font-bold text-base">{row.ticker}</span>
+        <a
+          href={googleFinanceUrl(row.ticker)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="font-mono font-bold text-base text-sky-300 hover:underline"
+          title={`Open ${row.ticker} op Google Finance`}
+        >
+          {row.ticker}
+        </a>
         <span className="text-xs text-slate-400 uppercase">{row.sector}</span>
         <span className="ml-auto flex gap-3 text-xs items-center">
           <SubBar label="S" value={row.structural} color="cyan" />
@@ -293,7 +311,7 @@ function ScoreCard({
           )}
           <span className="text-slate-600">{expanded ? "▾" : "▸"}</span>
         </span>
-      </button>
+      </div>
       {expanded && (
         <div className="border-t border-slate-800 p-3 space-y-3 text-sm">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
