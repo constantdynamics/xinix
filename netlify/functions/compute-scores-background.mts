@@ -72,10 +72,13 @@ async function scoreOneTicker(
     });
   }
 
-  // ExpectedOutcome (briefing §6.1.5/6) — for any BUY+ action, biotech or mining
+  // ExpectedOutcome (briefing §6.1.5/6) — ook bij WATCH zodat owner ziet
+  // WAAROM watch (lage baseline hit-rate of zwakke catalyst type).
   let expOut = null;
   if (
-    (result.action === "BUY" || result.action === "STRONG_BUY") &&
+    (result.action === "BUY" ||
+      result.action === "STRONG_BUY" ||
+      result.action === "WATCH") &&
     c.nearestCatalyst?.type
   ) {
     expOut = expectedOutcome({
@@ -168,9 +171,22 @@ export default async () => {
       sigByTicker.set(e.ticker, s);
     }
 
+    // Cap op #tickers per run — Netlify background functions hebben 15min
+    // limit. Bij 500+ tickers + Yahoo throttling van pollers loopt dit aan.
+    // Cap is ruim boven huidige watchlist (49) en logt de skip helder.
+    const MAX_TICKERS_PER_RUN = 400;
+    const allTickers = tickers as TickerRow[];
+    const toScore = allTickers.slice(0, MAX_TICKERS_PER_RUN);
+    const skipped = allTickers.length - toScore.length;
+    if (skipped > 0) {
+      console.warn(
+        `compute-scores: ${skipped} tickers overslagen (cap=${MAX_TICKERS_PER_RUN}). Verhoog limit of split in twee runs.`
+      );
+    }
+
     let scored = 0;
     let failed = 0;
-    for (const t of tickers as TickerRow[]) {
+    for (const t of toScore) {
       const ok = await scoreOneTicker(
         supabase,
         t,
@@ -186,9 +202,9 @@ export default async () => {
     }
 
     return {
-      ok: failed < tickers.length / 2,
-      message: `${scored} scored, ${failed} failed`,
-      metrics: { scored, failed },
+      ok: failed < toScore.length / 2,
+      message: `${scored} scored, ${failed} failed, ${skipped} skipped`,
+      metrics: { scored, failed, skipped },
     };
   });
 };

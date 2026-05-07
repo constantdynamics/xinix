@@ -18,6 +18,8 @@ type SectorStats = Record<string, ActionStats>;
 interface TrackRecord {
   as_of: string;
   window_days: number;
+  min_completeness: number;
+  total_signals_unfiltered: number;
   total_signals: number;
   total_returns_recorded: number;
   overall: Record<string, ActionStats>;
@@ -40,9 +42,11 @@ export function TrackRecordView() {
   const [data, setData] = useState<TrackRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [minCompleteness, setMinCompleteness] = useState(0);
 
   useEffect(() => {
-    fetch("/api/track-record")
+    setLoading(true);
+    fetch(`/api/track-record?min_completeness=${minCompleteness}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
         return (await r.json()) as TrackRecord;
@@ -50,9 +54,9 @@ export function TrackRecordView() {
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [minCompleteness]);
 
-  if (loading) return <div className="text-slate-400">laden...</div>;
+  if (loading && !data) return <div className="text-slate-400">laden...</div>;
   if (error) return <div className="text-red-400 text-sm">{error}</div>;
   if (!data) return null;
 
@@ -62,9 +66,36 @@ export function TrackRecordView() {
         <h2 className="text-xl font-semibold">Track record</h2>
         <p className="text-xs text-slate-400">
           Forward returns per actie/sector/catalyst over de laatste{" "}
-          {data.window_days} dagen. {data.total_signals} signalen,{" "}
-          {data.total_returns_recorded} returns vastgelegd.
+          {data.window_days} dagen. {data.total_signals} signalen
+          {data.total_signals !== data.total_signals_unfiltered && (
+            <span className="text-slate-500">
+              {" "}
+              ({data.total_signals_unfiltered - data.total_signals} gefilterd op
+              completeness)
+            </span>
+          )}
+          , {data.total_returns_recorded} returns vastgelegd.
         </p>
+        <div className="mt-2 flex items-center gap-3 text-xs">
+          <label className="text-slate-400">
+            Min data completeness:{" "}
+            <span className="font-mono text-slate-200">
+              {(minCompleteness * 100).toFixed(0)}%
+            </span>
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.1}
+            value={minCompleteness}
+            onChange={(e) => setMinCompleteness(Number(e.target.value))}
+            className="w-48"
+          />
+          <span className="text-slate-600">
+            (filter slecht‑gevulde tickers eruit)
+          </span>
+        </div>
         <p className="mt-1 text-xs text-amber-400">⚠ {data.caveat}</p>
       </header>
 

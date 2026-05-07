@@ -8,39 +8,83 @@ import { getServiceClient, logRun } from "./_lib/supabase.mts";
 
 const TARGET_DAYS = [7, 14, 30, 90];
 
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function fetchYahooClose(ticker: string): Promise<number | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5d&interval=1d`;
+  // Retry: 1 directe poging + 2 retries op 429/5xx met 2s/4s backoff.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64) Xinix/SignalForwardReturns",
+        },
+      });
+      if (!r.ok) {
+        if ((r.status === 429 || r.status >= 500) && attempt < 2) {
+          await sleep(2000 * (attempt + 1));
+          continue;
+        }
+        return null;
+      }
+      const j = (await r.json()) as {
+        chart?: {
+          result?: Array<{
+            indicators?: {
+              adjclose?: Array<{ adjclose?: (number | null)[] }>;
+              quote?: Array<{ close?: (number | null)[] }>;
+            };
+          }>;
+        };
+      };
+      const result = j.chart?.result?.[0];
+      const closes =
+        result?.indicators?.adjclose?.[0]?.adjclose ??
+        result?.indicators?.quote?.[0]?.close ??
+        [];
+      for (let i = closes.length - 1; i >= 0; i--) {
+        const v = closes[i];
+        if (typeof v === "number" && Number.isFinite(v)) return v;
+      }
+      return null;
+    } catch {
+      if (attempt < 2) await sleep(2000 * (attempt + 1));
+    }
+  }
+  return null;
+}
+
+// Stooq fallback voor US-tickers (geen exchange suffix). Stooq dekt
+// `.V`/`.AX`/`.TO` gebrekkig dus alleen US is de moeite waard.
+async function fetchStooqClose(ticker: string): Promise<number | null> {
+  if (ticker.includes(".")) return null; // skip non-US
+  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(
+    ticker.toLowerCase()
+  )}.us&i=d`;
   try {
     const r = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (X11; Linux x86_64) Xinix/SignalForwardReturns",
-      },
+      headers: { "User-Agent": "Xinix/ForwardReturnsFallback" },
     });
     if (!r.ok) return null;
-    const j = (await r.json()) as {
-      chart?: {
-        result?: Array<{
-          indicators?: {
-            adjclose?: Array<{ adjclose?: (number | null)[] }>;
-            quote?: Array<{ close?: (number | null)[] }>;
-          };
-        }>;
-      };
-    };
-    const result = j.chart?.result?.[0];
-    const closes =
-      result?.indicators?.adjclose?.[0]?.adjclose ??
-      result?.indicators?.quote?.[0]?.close ??
-      [];
-    for (let i = closes.length - 1; i >= 0; i--) {
-      const v = closes[i];
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-    }
-    return null;
+    const csv = await r.text();
+    const lines = csv.trim().split("\n");
+    if (lines.length < 2) return null;
+    // Header: Date,Open,High,Low,Close,Volume — pak laatste regel close
+    const last = lines[lines.length - 1].split(",");
+    const close = Number(last[4]);
+    return Number.isFinite(close) && close > 0 ? close : null;
   } catch {
     return null;
   }
+}
+
+async function fetchCurrentClose(ticker: string): Promise<number | null> {
+  const yahoo = await fetchYahooClose(ticker);
+  if (yahoo != null) return yahoo;
+  return await fetchStooqClose(ticker);
 }
 
 interface ScoreRow {
@@ -99,9 +143,9 @@ export default async () => {
         }
         let current = priceCache.get(s.ticker);
         if (current === undefined) {
-          current = await fetchYahooClose(s.ticker);
+          current = await fetchCurrentClose(s.ticker);
           priceCache.set(s.ticker, current);
-          await new Promise((r) => setTimeout(r, 250));
+          await sleep(250);
         }
         if (current == null) {
           failed++;

@@ -3,7 +3,7 @@ import { getServiceClient } from "./_lib/supabase.mts";
 
 function checkAuth(req: Request): boolean {
   const required = Netlify.env.get("ADMIN_TOKEN");
-  if (!required) return true;
+  if (!required) return false; // fail closed — no token configured = no writes
   const auth = req.headers.get("authorization") ?? "";
   return auth === `Bearer ${required}`;
 }

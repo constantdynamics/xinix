@@ -13,6 +13,7 @@ interface ScoreRow {
   sector: string;
   action: string;
   final_score: number;
+  data_completeness: number | null;
   components: { nearest_catalyst?: { type?: string } | null } | null;
 }
 
@@ -62,7 +63,12 @@ function summarize(returns: number[]) {
   };
 }
 
-export default async () => {
+export default async (req: Request) => {
+  const url = new URL(req.url);
+  const minCompleteness = Number(
+    url.searchParams.get("min_completeness") ?? "0"
+  );
+
   const supabase = getServiceClient();
   const since = new Date(Date.now() - 365 * 86400000)
     .toISOString()
@@ -70,12 +76,17 @@ export default async () => {
 
   const { data: scoresRaw } = await supabase
     .from("signal_scores")
-    .select("id, ticker, scan_date, sector, action, final_score, components")
+    .select(
+      "id, ticker, scan_date, sector, action, final_score, data_completeness, components"
+    )
     .in("action", ["STRONG_BUY", "BUY", "WATCH"])
     .gte("scan_date", since)
     .returns<ScoreRow[]>();
 
-  const scores = scoresRaw ?? [];
+  const allScores = scoresRaw ?? [];
+  const scores = allScores.filter(
+    (s) => (s.data_completeness ?? 0) >= minCompleteness
+  );
   const ids = scores.map((s) => s.id);
   let returns: ReturnRow[] = [];
   if (ids.length > 0) {
@@ -192,6 +203,8 @@ export default async () => {
       {
         as_of: new Date().toISOString(),
         window_days: 365,
+        min_completeness: minCompleteness,
+        total_signals_unfiltered: allScores.length,
         total_signals: scores.length,
         total_returns_recorded: returns.length,
         overall,

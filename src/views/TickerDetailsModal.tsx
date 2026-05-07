@@ -172,6 +172,33 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  function isFilled(v: unknown): boolean {
+    return v !== "" && v != null;
+  }
+  const groupCounts = {
+    shared: {
+      total: SHARED_FIELDS.length,
+      filled: SHARED_FIELDS.filter((f) => isFilled(form[f.key as string]))
+        .length,
+    },
+    sector: {
+      total:
+        card.sector === "biotech" ? BIOTECH_FIELDS.length : MINING_FIELDS.length,
+      filled: (card.sector === "biotech" ? BIOTECH_FIELDS : MINING_FIELDS).filter(
+        (f) => isFilled(form[f.key as string])
+      ).length,
+    },
+  };
+  const totalFilled = groupCounts.shared.filled + groupCounts.sector.filled;
+  const totalFields = groupCounts.shared.total + groupCounts.sector.total;
+  const overallPct = totalFields ? totalFilled / totalFields : 0;
+  function light(filled: number, total: number): string {
+    const r = total ? filled / total : 0;
+    if (r >= 0.7) return "bg-emerald-500";
+    if (r >= 0.4) return "bg-amber-500";
+    return "bg-red-500";
+  }
+
   async function save() {
     setBusy(true);
     setError(null);
@@ -211,6 +238,35 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
             <p className="text-xs text-slate-400">
               {card.company} · pre‑event details (briefing v1.1)
             </p>
+            <div className="mt-2 flex items-center gap-3 text-[11px]">
+              <span className="text-slate-400">Compleetheid:</span>
+              <span className="flex items-center gap-1">
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${light(
+                    groupCounts.shared.filled,
+                    groupCounts.shared.total
+                  )}`}
+                />
+                <span className="text-slate-300">
+                  shared {groupCounts.shared.filled}/{groupCounts.shared.total}
+                </span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${light(
+                    groupCounts.sector.filled,
+                    groupCounts.sector.total
+                  )}`}
+                />
+                <span className="text-slate-300">
+                  {card.sector} {groupCounts.sector.filled}/
+                  {groupCounts.sector.total}
+                </span>
+              </span>
+              <span className="text-slate-500">
+                totaal {(overallPct * 100).toFixed(0)}%
+              </span>
+            </div>
           </div>
           <button
             onClick={onClose}
