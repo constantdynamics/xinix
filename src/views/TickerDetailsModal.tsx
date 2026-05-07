@@ -1,0 +1,302 @@
+import { useState } from "react";
+import type { Card } from "../types";
+import { patchTicker } from "../api";
+
+interface Props {
+  card: Card;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+type FieldType = "number" | "text" | "boolean" | "select";
+interface Field {
+  key: keyof Card;
+  label: string;
+  type: FieldType;
+  options?: string[];
+  hint?: string;
+}
+
+const SHARED_FIELDS: Field[] = [
+  { key: "market_cap_usd", label: "Market cap (USD)", type: "number" },
+  {
+    key: "cash_runway_months",
+    label: "Runway (maanden)",
+    type: "number",
+    hint: "Briefing §2.3: 18+ mnd is sweet spot voor biotech",
+  },
+  {
+    key: "insider_ownership_pct",
+    label: "Insider ownership (0–1)",
+    type: "number",
+    hint: "0.10 t/m 0.30 = sweet spot",
+  },
+  {
+    key: "pre_event_ytd_return_pct",
+    label: "Pre-event YTD return (1.55 = +155%)",
+    type: "number",
+    hint: "Briefing §6.1.2: ≥1.5 = sell-the-news AVOID",
+  },
+  {
+    key: "share_count_millions",
+    label: "Shares outstanding (M)",
+    type: "number",
+  },
+  { key: "notes", label: "Notes", type: "text" },
+];
+
+const BIOTECH_FIELDS: Field[] = [
+  {
+    key: "trial_patient_population_severity",
+    label: "Patient population severity",
+    type: "select",
+    options: ["", "early", "moderate", "late"],
+    hint: "ETNB F2-F3 = early; AKRO F4 = late (briefing §5.4 paar 1)",
+  },
+  {
+    key: "trial_endpoint_duration_weeks",
+    label: "Endpoint duration (wks)",
+    type: "number",
+    hint: "24w = beter dan 36w bij progressieve disease",
+  },
+  {
+    key: "primary_endpoint_powered_for_subgroup",
+    label: "Powered op subgroup only?",
+    type: "boolean",
+    hint: "TRUE = AKRO-style rode vlag (-0.20 penalty)",
+  },
+  {
+    key: "mechanism_has_clinical_precedent",
+    label: "Mechanism heeft klinisch precedent?",
+    type: "boolean",
+  },
+  { key: "prior_crl_count", label: "Prior CRL count", type: "number" },
+  {
+    key: "label_narrowed_after_crl",
+    label: "Label narrowed na CRL?",
+    type: "boolean",
+    hint: "TRUE = AKBA-style smart strategy",
+  },
+  {
+    key: "has_ex_us_safety_dataset",
+    label: "Heeft ex-US safety dataset?",
+    type: "boolean",
+  },
+  {
+    key: "fda_advisory_committee_outcome",
+    label: "AdCom outcome",
+    type: "select",
+    options: ["", "positive", "negative", "none", "pending"],
+  },
+  { key: "trial_size_n", label: "Trial size (n)", type: "number" },
+  {
+    key: "competitor_failures_in_target",
+    label: "Competitor failures bij target",
+    type: "number",
+  },
+  {
+    key: "has_breakthrough_designation",
+    label: "Breakthrough designation",
+    type: "boolean",
+  },
+  { key: "has_fast_track", label: "Fast Track", type: "boolean" },
+  { key: "has_orphan_drug", label: "Orphan Drug", type: "boolean" },
+  { key: "first_in_class", label: "First-in-class", type: "boolean" },
+  { key: "best_in_class", label: "Best-in-class", type: "boolean" },
+];
+
+const MINING_FIELDS: Field[] = [
+  {
+    key: "geological_anomaly",
+    label: "Geological anomaly",
+    type: "select",
+    options: ["", "dual_grav_mag", "single_signal", "nearology", "none"],
+    hint: "WA1 (dual) +500%, LYN (single) -50% (briefing §5.4 paar 3)",
+  },
+  { key: "cover_depth_meters", label: "Cover depth (m)", type: "number" },
+  {
+    key: "prior_geophysics_spend_usd",
+    label: "Prior geophysics spend (USD)",
+    type: "number",
+  },
+  {
+    key: "processing_tech",
+    label: "Processing technology",
+    type: "select",
+    options: ["", "proven_conventional", "unproven_dle", "unproven_other"],
+    hint: "PMET (conventional) vs LKE (Lilac DLE) — briefing §5.4 paar 4",
+  },
+  {
+    key: "operational_status",
+    label: "Operational status",
+    type: "select",
+    options: ["", "operational", "construction", "pre_development"],
+    hint: "UAMY operational +3800%, PPTA pre-dev +19% (briefing §5.4 paar 5)",
+  },
+  {
+    key: "promoter_concentration_pct",
+    label: "Promoter concentration (0-1)",
+    type: "number",
+  },
+  {
+    key: "has_strategic_backer",
+    label: "Strategic backer aanwezig?",
+    type: "boolean",
+    hint: "Albemarle/CATL/etc.",
+  },
+  {
+    key: "strategic_backer_tier",
+    label: "Backer tier (1 of 2)",
+    type: "number",
+  },
+];
+
+export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
+  const [form, setForm] = useState<Record<string, unknown>>({
+    ...Object.fromEntries(
+      [...SHARED_FIELDS, ...BIOTECH_FIELDS, ...MINING_FIELDS].map((f) => [
+        f.key,
+        card[f.key] ?? "",
+      ])
+    ),
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fields =
+    card.sector === "biotech"
+      ? [...SHARED_FIELDS, ...BIOTECH_FIELDS]
+      : [...SHARED_FIELDS, ...MINING_FIELDS];
+
+  function setField(key: string, value: unknown) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      // Strip empty strings → null
+      const payload: Record<string, unknown> = {};
+      for (const f of fields) {
+        const v = form[f.key as string];
+        if (v === "" || v == null) payload[f.key as string] = null;
+        else if (f.type === "number") payload[f.key as string] = Number(v);
+        else if (f.type === "boolean")
+          payload[f.key as string] =
+            v === true || v === "true" ? true : v === false || v === "false" ? false : null;
+        else payload[f.key as string] = v;
+      }
+      await patchTicker(card.ticker, payload);
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center overflow-y-auto p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-lg max-w-3xl w-full my-8 shadow-2xl">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {card.ticker}{" "}
+              <span className="text-xs text-slate-400 uppercase ml-2">
+                {card.sector}
+              </span>
+            </h2>
+            <p className="text-xs text-slate-400">
+              {card.company} · pre‑event details (briefing v1.1)
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="px-2 py-1 text-xs text-slate-400 hover:text-slate-200"
+          >
+            ✕ Sluiten
+          </button>
+        </div>
+
+        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+          {fields.map((f) => (
+            <div key={f.key as string} className="space-y-1">
+              <label className="block text-xs text-slate-400">
+                {f.label}
+                {f.hint && (
+                  <span className="block text-[10px] text-slate-600">
+                    {f.hint}
+                  </span>
+                )}
+              </label>
+              {f.type === "boolean" ? (
+                <select
+                  value={
+                    form[f.key as string] === true
+                      ? "true"
+                      : form[f.key as string] === false
+                      ? "false"
+                      : ""
+                  }
+                  onChange={(e) =>
+                    setField(
+                      f.key as string,
+                      e.target.value === "" ? "" : e.target.value === "true"
+                    )
+                  }
+                  className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded"
+                >
+                  <option value="">— onbekend —</option>
+                  <option value="true">ja</option>
+                  <option value="false">nee</option>
+                </select>
+              ) : f.type === "select" ? (
+                <select
+                  value={(form[f.key as string] ?? "") as string}
+                  onChange={(e) => setField(f.key as string, e.target.value)}
+                  className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded"
+                >
+                  {f.options!.map((o) => (
+                    <option key={o} value={o}>
+                      {o || "— onbekend —"}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={f.type === "number" ? "number" : "text"}
+                  step="any"
+                  value={(form[f.key as string] ?? "") as string | number}
+                  onChange={(e) => setField(f.key as string, e.target.value)}
+                  className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded font-mono"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {error && (
+          <div className="px-4 pb-2 text-sm text-red-400">{error}</div>
+        )}
+
+        <div className="p-4 border-t border-slate-800 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-sm border border-slate-700 rounded text-slate-300"
+          >
+            Annuleer
+          </button>
+          <button
+            onClick={save}
+            disabled={busy}
+            className="px-4 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded text-white"
+          >
+            {busy ? "Bezig..." : "Opslaan"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

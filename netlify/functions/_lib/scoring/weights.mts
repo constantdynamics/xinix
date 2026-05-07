@@ -89,11 +89,15 @@ export const BIOTECH_INVESTOR: WeightSet = {
     { name: "pre_event_runup_mild", penalty: 0.05 },
     { name: "pre_event_runup_moderate", penalty: 0.15 },
     { name: "pre_event_runup_extreme", penalty: 0.25 },
+    // trial design rode vlaggen (briefing §6.1.1 + §5.4)
+    { name: "primary_endpoint_powered_for_subgroup", penalty: 0.20 }, // AKRO-style
+    { name: "adcom_negative", penalty: 0.40 }, // YMAB 2022 = vrijwel fataal
+    { name: "prior_crl_unchanged_strategy", penalty: 0.25 }, // APLT-style
   ],
 };
 
 // Trader: structural-weights ge-halveerd, timing-weights iets verhoogd,
-// strengere sell-the-news penalty.
+// strengere sell-the-news + trial-design penalty.
 export const BIOTECH_TRADER: WeightSet = {
   structural: BIOTECH_INVESTOR.structural.map((w) => ({
     ...w,
@@ -128,6 +132,9 @@ export const BIOTECH_TRADER: WeightSet = {
     { name: "pre_event_runup_extreme", penalty: 0.35 },
   ],
 };
+
+// Update mining trader risk adjusters — geen veranderingen aan biotech-only
+// trial-design risk names omdat die niet in MINING_INVESTOR voorkomen.
 
 export const MINING_INVESTOR: WeightSet = {
   structural: [

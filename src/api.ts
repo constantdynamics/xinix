@@ -72,6 +72,18 @@ export async function batchAddTickers(rows: TickerInput[]): Promise<{ inserted: 
   return (await res.json()) as { inserted: number };
 }
 
+export async function patchTicker(
+  ticker: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const res = await fetch(`/api/tickers?ticker=${encodeURIComponent(ticker)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`patch ticker ${res.status}: ${await res.text()}`);
+}
+
 export async function removeTicker(ticker: string): Promise<void> {
   const res = await fetch(
     `/api/tickers?ticker=${encodeURIComponent(ticker)}`,

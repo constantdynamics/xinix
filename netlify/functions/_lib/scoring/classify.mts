@@ -20,11 +20,36 @@ export interface TickerRow {
   phase?: string | null;
   modality?: string | null;
   disease_area?: string | null;
-  // velden die later gevuld worden (fase 4)
+  // Shared fase 4 velden
   market_cap_usd?: number | null;
   cash_runway_months?: number | null;
   insider_ownership_pct?: number | null;
   pre_event_ytd_return_pct?: number | null;
+  // Biotech v1.1 (briefing §6.1.1)
+  trial_patient_population_severity?: string | null; // 'early'|'moderate'|'late'
+  trial_endpoint_duration_weeks?: number | null;
+  mechanism_has_clinical_precedent?: boolean | null;
+  primary_endpoint_powered_for_subgroup?: boolean | null;
+  prior_crl_count?: number | null;
+  label_narrowed_after_crl?: boolean | null;
+  has_ex_us_safety_dataset?: boolean | null;
+  fda_advisory_committee_outcome?: string | null; // 'positive'|'negative'|'none'|'pending'
+  has_breakthrough_designation?: boolean | null;
+  has_fast_track?: boolean | null;
+  has_orphan_drug?: boolean | null;
+  first_in_class?: boolean | null;
+  best_in_class?: boolean | null;
+  competitor_failures_in_target?: number | null;
+  trial_size_n?: number | null;
+  // Mining v1.1 (briefing §6.1.3)
+  geological_anomaly?: string | null; // 'dual_grav_mag'|'single_signal'|'nearology'|'none'
+  cover_depth_meters?: number | null;
+  prior_geophysics_spend_usd?: number | null;
+  processing_tech?: string | null; // 'proven_conventional'|'unproven_dle'|'unproven_other'
+  operational_status?: string | null; // 'operational'|'construction'|'pre_development'
+  promoter_concentration_pct?: number | null;
+  has_strategic_backer?: boolean | null;
+  strategic_backer_tier?: number | null; // 1 or 2
 }
 
 export interface CatalystRow {
@@ -235,7 +260,9 @@ export function classify(ctx: ClassifyContext): ClassifyResult {
       cat.add("china_export_shock");
   }
 
-  // Indication / disease area mapping (biotech)
+  // Indication / disease area mapping (biotech) — heuristiek vanuit
+  // disease_area string. Owner kan via first_in_class/best_in_class
+  // velden expliciet overschrijven.
   if (sector === "biotech" && t.disease_area) {
     inputs++;
     knownInputs++;
@@ -247,16 +274,87 @@ export function classify(ctx: ClassifyContext): ClassifyResult {
     else cat.add("common_disease_indication");
   }
 
-  // Modality-driven novelty proxy (heuristisch — handmatig overschrijven later)
-  if (sector === "biotech" && t.modality) {
-    const m = t.modality.toLowerCase();
+  // ── Biotech v1.1 trial design (briefing §6.1.1) ─────────────────────
+  if (sector === "biotech") {
+    if (t.first_in_class) cat.add("first_in_class");
+    else if (t.best_in_class) cat.add("best_in_class");
+    if (t.has_breakthrough_designation) cat.add("has_breakthrough_designation");
+    if (t.has_fast_track) cat.add("has_fast_track");
+    if (t.has_orphan_drug) cat.add("has_orphan_drug");
+    if (t.trial_size_n != null && t.trial_size_n >= 300)
+      cat.add("trial_size_300plus");
+    if (t.competitor_failures_in_target != null) {
+      if (t.competitor_failures_in_target >= 2)
+        cat.add("competitor_failures_in_target_2plus");
+      else if (t.competitor_failures_in_target === 1)
+        cat.add("competitor_failures_in_target_1");
+    }
+    // Trial design quality risk-adjusters (briefing §6.1.1):
+    // these don't add positive weight but penalize via riskAdjusters
+    // — we model them as risk adjuster names that the aggregator
+    // looks up. Add to risk set only if briefing flags them as
+    // negative-only signals (none currently in BIOTECH risk list,
+    // but reserved for fase 6 calibration).
+    if (t.primary_endpoint_powered_for_subgroup === true) {
+      // AKRO-style red flag: powered alleen op subgroup
+      // (briefing §5.4 paar 1)
+      risk.add("primary_endpoint_powered_for_subgroup");
+    }
     if (
-      m.includes("first") ||
-      m.includes("novel") ||
-      m.includes("crispr") ||
-      m.includes("gene therap")
+      t.mechanism_has_clinical_precedent === false &&
+      t.first_in_class === true
+    ) {
+      // Geen precedent + FIC = hogere onzekerheid — reserveer voor fase 6.
+    }
+    if (t.fda_advisory_committee_outcome === "negative") {
+      risk.add("adcom_negative");
+    }
+    // prior CRL strategy: label narrowed = positive, no narrowing after CRL = risk
+    if (t.prior_crl_count != null && t.prior_crl_count > 0) {
+      if (t.label_narrowed_after_crl !== true) {
+        risk.add("prior_crl_unchanged_strategy");
+      }
+    }
+  }
+
+  // ── Mining v1.1 quality differentiators (briefing §6.1.3) ───────────
+  if (sector === "mining") {
+    // Geological setting
+    if (t.geological_anomaly === "dual_grav_mag")
+      struct.add("geological_anomaly_dual_grav_mag");
+    else if (
+      t.geological_anomaly === "single_signal" ||
+      t.geological_anomaly === "nearology"
     )
-      cat.add("first_in_class");
+      struct.add("geological_anomaly_single_signal");
+
+    // Processing tech
+    if (t.processing_tech === "proven_conventional")
+      struct.add("processing_tech_proven_conventional");
+    else if (
+      t.processing_tech === "unproven_dle" ||
+      t.processing_tech === "unproven_other"
+    )
+      risk.add("processing_tech_unproven_dle");
+
+    // Operational status (UAMY vs PPTA differentiator — briefing §5.4 paar 5)
+    if (t.operational_status === "operational")
+      struct.add("operational_status_operational");
+    else if (t.operational_status === "pre_development")
+      struct.add("operational_status_pre_development");
+
+    // Strategic backer (Albemarle/CATL — briefing §5.4 paar 4)
+    if (t.has_strategic_backer) {
+      if (t.strategic_backer_tier === 1) cat.add("strategic_backer_tier1");
+      else cat.add("strategic_backer_other");
+    }
+
+    // Promoter concentration
+    if (
+      t.promoter_concentration_pct != null &&
+      t.promoter_concentration_pct > 0.4
+    )
+      risk.add("promoter_concentration");
   }
 
   // ── Timing ───────────────────────────────────────────────────────────

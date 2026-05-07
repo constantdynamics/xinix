@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import type { Dashboard, Sector } from "../types";
+import type { Card, Dashboard, Sector } from "../types";
 import { addTicker, batchAddTickers, removeTicker, type TickerInput } from "../api";
+import { TickerDetailsModal } from "./TickerDetailsModal";
 
 interface Form {
   ticker: string;
@@ -150,6 +151,7 @@ export function TickersView({
   const [batchSector, setBatchSector] = useState<Sector>("biotech");
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMode, setBatchMode] = useState<"quick" | "table">("quick");
+  const [editing, setEditing] = useState<Card | null>(null);
 
   const preview = useMemo(
     () =>
@@ -224,6 +226,13 @@ export function TickersView({
 
   return (
     <div className="space-y-6">
+      {editing && (
+        <TickerDetailsModal
+          card={editing}
+          onClose={() => setEditing(null)}
+          onSaved={onRefresh}
+        />
+      )}
       {error && <div className="text-red-400 text-sm">{error}</div>}
       {msg && <div className="text-emerald-400 text-sm">{msg}</div>}
 
@@ -501,7 +510,13 @@ export function TickersView({
                   <td className="p-2 text-slate-400 truncate max-w-xs">
                     {c.trigger_event}
                   </td>
-                  <td className="p-2 text-right">
+                  <td className="p-2 text-right space-x-1">
+                    <button
+                      onClick={() => setEditing(c)}
+                      className="px-2 py-0.5 text-xs bg-slate-700 hover:bg-slate-600 rounded"
+                    >
+                      details
+                    </button>
                     <button
                       onClick={() => remove(c.ticker)}
                       className="px-2 py-0.5 text-xs bg-red-700 hover:bg-red-600 rounded"

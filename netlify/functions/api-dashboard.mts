@@ -107,6 +107,39 @@ export default async () => {
       top_signal: tSignals[0] ?? null,
       next_catalyst: nextCatalyst ?? null,
       days_to_next_catalyst: daysToNext,
+      // v1.1 velden — owner vult handmatig in via TickerDetailsModal
+      market_cap_usd: t.market_cap_usd ?? null,
+      cash_runway_months: t.cash_runway_months ?? null,
+      insider_ownership_pct: t.insider_ownership_pct ?? null,
+      pre_event_ytd_return_pct: t.pre_event_ytd_return_pct ?? null,
+      share_count_millions: t.share_count_millions ?? null,
+      // biotech v1.1
+      trial_patient_population_severity: t.trial_patient_population_severity ?? null,
+      trial_endpoint_duration_weeks: t.trial_endpoint_duration_weeks ?? null,
+      mechanism_has_clinical_precedent: t.mechanism_has_clinical_precedent ?? null,
+      primary_endpoint_powered_for_subgroup:
+        t.primary_endpoint_powered_for_subgroup ?? null,
+      prior_crl_count: t.prior_crl_count ?? null,
+      label_narrowed_after_crl: t.label_narrowed_after_crl ?? null,
+      has_ex_us_safety_dataset: t.has_ex_us_safety_dataset ?? null,
+      fda_advisory_committee_outcome: t.fda_advisory_committee_outcome ?? null,
+      has_breakthrough_designation: t.has_breakthrough_designation ?? null,
+      has_fast_track: t.has_fast_track ?? null,
+      has_orphan_drug: t.has_orphan_drug ?? null,
+      first_in_class: t.first_in_class ?? null,
+      best_in_class: t.best_in_class ?? null,
+      competitor_failures_in_target: t.competitor_failures_in_target ?? null,
+      trial_size_n: t.trial_size_n ?? null,
+      // mining v1.1
+      geological_anomaly: t.geological_anomaly ?? null,
+      cover_depth_meters: t.cover_depth_meters ?? null,
+      prior_geophysics_spend_usd: t.prior_geophysics_spend_usd ?? null,
+      processing_tech: t.processing_tech ?? null,
+      operational_status: t.operational_status ?? null,
+      promoter_concentration_pct: t.promoter_concentration_pct ?? null,
+      has_strategic_backer: t.has_strategic_backer ?? null,
+      strategic_backer_tier: t.strategic_backer_tier ?? null,
+      notes: t.notes ?? null,
     };
   });
 

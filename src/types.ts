@@ -63,6 +63,36 @@ export interface Card {
   top_signal: Signal | null;
   next_catalyst: Catalyst | null;
   days_to_next_catalyst: number | null;
+  // v1.1 (briefing §6.1) — handmatig in te vullen via TickerDetailsModal
+  market_cap_usd?: number | null;
+  cash_runway_months?: number | null;
+  insider_ownership_pct?: number | null;
+  pre_event_ytd_return_pct?: number | null;
+  share_count_millions?: number | null;
+  trial_patient_population_severity?: string | null;
+  trial_endpoint_duration_weeks?: number | null;
+  mechanism_has_clinical_precedent?: boolean | null;
+  primary_endpoint_powered_for_subgroup?: boolean | null;
+  prior_crl_count?: number | null;
+  label_narrowed_after_crl?: boolean | null;
+  has_ex_us_safety_dataset?: boolean | null;
+  fda_advisory_committee_outcome?: string | null;
+  has_breakthrough_designation?: boolean | null;
+  has_fast_track?: boolean | null;
+  has_orphan_drug?: boolean | null;
+  first_in_class?: boolean | null;
+  best_in_class?: boolean | null;
+  competitor_failures_in_target?: number | null;
+  trial_size_n?: number | null;
+  geological_anomaly?: string | null;
+  cover_depth_meters?: number | null;
+  prior_geophysics_spend_usd?: number | null;
+  processing_tech?: string | null;
+  operational_status?: string | null;
+  promoter_concentration_pct?: number | null;
+  has_strategic_backer?: boolean | null;
+  strategic_backer_tier?: number | null;
+  notes?: string | null;
 }
 
 export interface RunLog {
