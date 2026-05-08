@@ -1,0 +1,65 @@
+# Build de React app en publiceer naar GitHub Pages.
+# Site komt op: https://constantdynamics.github.io/xinix/
+#
+# Vereiste secrets/vars in GitHub repo settings:
+#   Variables → VITE_API_BASE_URL = https://<jouw-netlify-site>.netlify.app
+#
+# De Pages job hoeft NIET op de branch claude/biotech-... te draaien;
+# we triggeren op main + push naar de claude branch zodat je kunt
+# previewen vanaf elke branch via workflow_dispatch.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - claude/biotech-signal-detector-3ajql
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        env:
+          BUILD_TARGET: pages
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: npm run build
+
+      - name: Add 404 fallback (Pages SPA routing)
+        run: cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

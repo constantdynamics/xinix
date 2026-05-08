@@ -2,6 +2,17 @@ import type { Dashboard, Settings } from "./types";
 
 const TOKEN_KEY = "biotech_admin_token";
 
+// Bij hosten via GitHub Pages staat de frontend op een ander origin dan
+// de Netlify Functions backend. Vite vult `import.meta.env.VITE_API_BASE_URL`
+// op build-time. Leeg laten = same-origin (Netlify hosting van zowel
+// frontend als functions).
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+export function apiUrl(path: string): string {
+  if (path.startsWith("http")) return path;
+  return `${API_BASE}${path}`;
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -16,19 +27,19 @@ function authHeaders(): Record<string, string> {
 }
 
 export async function fetchDashboard(): Promise<Dashboard> {
-  const res = await fetch("/api/dashboard");
+  const res = await fetch(apiUrl("/api/dashboard"));
   if (!res.ok) throw new Error(`dashboard ${res.status}`);
   return (await res.json()) as Dashboard;
 }
 
 export async function fetchSettings(): Promise<Settings> {
-  const res = await fetch("/api/settings", { headers: authHeaders() });
+  const res = await fetch(apiUrl("/api/settings"), { headers: authHeaders() });
   if (!res.ok) throw new Error(`settings ${res.status}`);
   return (await res.json()) as Settings;
 }
 
 export async function saveSettings(s: Partial<Settings>): Promise<void> {
-  const res = await fetch("/api/settings", {
+  const res = await fetch(apiUrl("/api/settings"), {
     method: "PUT",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(s),
@@ -54,7 +65,7 @@ export interface TickerInput {
 }
 
 export async function addTicker(payload: TickerInput): Promise<void> {
-  const res = await fetch("/api/tickers", {
+  const res = await fetch(apiUrl("/api/tickers"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
@@ -62,8 +73,10 @@ export async function addTicker(payload: TickerInput): Promise<void> {
   if (!res.ok) throw new Error(`add ticker ${res.status}: ${await res.text()}`);
 }
 
-export async function batchAddTickers(rows: TickerInput[]): Promise<{ inserted: number }> {
-  const res = await fetch("/api/tickers", {
+export async function batchAddTickers(
+  rows: TickerInput[]
+): Promise<{ inserted: number }> {
+  const res = await fetch(apiUrl("/api/tickers"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ rows }),
@@ -76,17 +89,21 @@ export async function patchTicker(
   ticker: string,
   patch: Record<string, unknown>
 ): Promise<void> {
-  const res = await fetch(`/api/tickers?ticker=${encodeURIComponent(ticker)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error(`patch ticker ${res.status}: ${await res.text()}`);
+  const res = await fetch(
+    apiUrl(`/api/tickers?ticker=${encodeURIComponent(ticker)}`),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(patch),
+    }
+  );
+  if (!res.ok)
+    throw new Error(`patch ticker ${res.status}: ${await res.text()}`);
 }
 
 export async function removeTicker(ticker: string): Promise<void> {
   const res = await fetch(
-    `/api/tickers?ticker=${encodeURIComponent(ticker)}`,
+    apiUrl(`/api/tickers?ticker=${encodeURIComponent(ticker)}`),
     { method: "DELETE", headers: authHeaders() }
   );
   if (!res.ok) throw new Error(`remove ticker ${res.status}`);
@@ -103,7 +120,7 @@ export interface LookupResult {
 
 export async function lookupTickers(tickers: string[]): Promise<LookupResult[]> {
   if (tickers.length === 0) return [];
-  const res = await fetch("/api/ticker-lookup", {
+  const res = await fetch(apiUrl("/api/ticker-lookup"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ tickers }),
@@ -114,9 +131,12 @@ export async function lookupTickers(tickers: string[]): Promise<LookupResult[]> 
 }
 
 export async function triggerJob(job: string): Promise<void> {
-  const res = await fetch(`/api/trigger?job=${encodeURIComponent(job)}`, {
-    method: "POST",
-    headers: authHeaders(),
-  });
+  const res = await fetch(
+    apiUrl(`/api/trigger?job=${encodeURIComponent(job)}`),
+    {
+      method: "POST",
+      headers: authHeaders(),
+    }
+  );
   if (!res.ok) throw new Error(`trigger ${res.status}: ${await res.text()}`);
 }

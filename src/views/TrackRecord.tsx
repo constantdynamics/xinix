@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Card, SectionHeader, Stat } from "../components/ui";
+import { apiUrl } from "../api";
 
 interface BucketStats {
   signals: number;
@@ -47,7 +48,7 @@ export function TrackRecordView() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/track-record?min_completeness=${minCompleteness}`)
+    fetch(apiUrl(`/api/track-record?min_completeness=${minCompleteness}`))
       .then(async (r) => {
         if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
         return (await r.json()) as TrackRecord;

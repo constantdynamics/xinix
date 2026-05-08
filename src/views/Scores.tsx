@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { triggerJob, getToken } from "../api";
+import { triggerJob, getToken, apiUrl } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
   Card,
@@ -93,7 +93,9 @@ const ACTION_TONE: Record<Action, "lime" | "pink" | "watch" | "neutral" | "loss"
 };
 
 async function fetchScores(mode: string): Promise<Payload> {
-  const res = await fetch(`/api/scores?mode=${encodeURIComponent(mode)}`);
+  const res = await fetch(
+    apiUrl(`/api/scores?mode=${encodeURIComponent(mode)}`)
+  );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as Payload;
 }

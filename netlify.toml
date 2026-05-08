@@ -2,6 +2,7 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
+  edge_functions = "netlify/edge-functions"
 
 [build.environment]
   NODE_VERSION = "22"

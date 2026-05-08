@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { triggerJob, getToken } from "../api";
+import { triggerJob, getToken, apiUrl } from "../api";
 import {
   Card,
   Button,
@@ -43,7 +43,7 @@ interface Payload {
 }
 
 async function fetchBacktest(): Promise<Payload> {
-  const res = await fetch("/api/backtest");
+  const res = await fetch(apiUrl("/api/backtest"));
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as Payload;
 }

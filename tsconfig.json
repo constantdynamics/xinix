@@ -18,5 +18,6 @@
     "allowJs": false,
     "types": ["node"]
   },
-  "include": ["src", "netlify"]
+  "include": ["src", "netlify"],
+  "exclude": ["netlify/edge-functions"]
 }
