@@ -370,6 +370,82 @@ export function RangeBar({
   );
 }
 
+// ─── Thermometer — verticale fill bar met green->yellow->orange->red ──
+// Vulling = pctAboveLow / 200, capped op 1.0. Dus +200% boven low = vol.
+// Kleur volgt de fill via een vertical gradient zodat de top altijd rood
+// en de bodem altijd lime is, ongeacht hoe hoog de stand staat.
+export function Thermometer({
+  low,
+  high,
+  current,
+  label,
+  className,
+}: {
+  low: number;
+  high: number;
+  current: number;
+  label?: string;
+  className?: string;
+}) {
+  if (
+    !Number.isFinite(low) ||
+    !Number.isFinite(high) ||
+    !Number.isFinite(current) ||
+    low <= 0
+  ) {
+    return null;
+  }
+  const pctAboveLow = ((current - low) / low) * 100;
+  const fill = Math.max(0, Math.min(1, pctAboveLow / 200));
+  // Tekstkleur = de top-kleur die nu zichtbaar is (vulhoogte bepaalt
+  // welk gedeelte van de gradient de huidige stand is).
+  const textTone =
+    fill < 0.25
+      ? "text-fog-lime"
+      : fill < 0.5
+      ? "text-fog-watch"
+      : fill < 0.75
+      ? "text-fog-warn"
+      : "text-fog-loss";
+  function fmt(v: number) {
+    if (v < 1) return `$${v.toFixed(3)}`;
+    if (v < 100) return `$${v.toFixed(2)}`;
+    return `$${v.toFixed(0)}`;
+  }
+  return (
+    <div className={cx("flex flex-col items-center gap-1", className)}>
+      {label && (
+        <div className="text-[10px] uppercase tracking-wider font-bold text-neutral-300">
+          {label}
+        </div>
+      )}
+      <div className="relative w-7 h-24 rounded-md bg-ink-5 border border-ink-5 overflow-hidden">
+        <div
+          className="absolute inset-x-0 bottom-0 transition-[height] duration-300"
+          style={{
+            height: `${fill * 100}%`,
+            background:
+              "linear-gradient(to top, #a7ff1f 0%, #ffd400 35%, #ff8c00 65%, #ff1a1a 100%)",
+          }}
+        />
+        <div
+          className="absolute inset-x-0 border-t border-white/30"
+          style={{ bottom: `${fill * 100}%` }}
+          title={`current ${fmt(current)} = +${pctAboveLow.toFixed(0)}% boven low`}
+        />
+      </div>
+      <div className={cx("text-[10px] tabular font-bold", textTone)}>
+        {pctAboveLow >= 0 ? "+" : ""}
+        {pctAboveLow.toFixed(0)}%
+      </div>
+      <div className="text-[9px] tabular text-neutral-400 leading-tight text-center">
+        <div>hi {fmt(high)}</div>
+        <div>lo {fmt(low)}</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Input / Select ────────────────────────────────────────────────────
 export function Input({
   className,

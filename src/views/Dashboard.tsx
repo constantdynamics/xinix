@@ -13,7 +13,7 @@ import {
   Dot,
   DotBar,
   MiniDelta,
-  RangeBar,
+  Thermometer,
 } from "../components/ui";
 
 type ToneByColor = "lime" | "watch" | "orange" | "loss";
@@ -352,36 +352,44 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
         </div>
       )}
 
-      {/* Range bars — 90d, 1y, 5y (afhankelijk van prefs en data beschikbaar) */}
+      {/* Thermometers — fill = pctAboveLow / 200 (cap op +200% above low),
+          gradient lime->yellow->orange->red. */}
       {showAnyRange && (
-        <div className="space-y-2.5 rounded-lg border border-ink-5 bg-ink-2/40 p-2.5">
-          {prefs.showRange90d && has90d && (
-            <RangeBar
-              label="90d"
-              low={px!.low_90d!}
-              high={px!.high_90d!}
-              current={px!.last_close!}
-            />
-          )}
-          {prefs.showRange1y && has1y && (
-            <RangeBar
-              label="1y"
-              low={px!.low_1y!}
-              high={px!.high_1y!}
-              current={px!.last_close!}
-            />
-          )}
-          {prefs.showRange5y && has5y && (
-            <RangeBar
-              label="5y"
-              low={px!.low_5y!}
-              high={px!.high_5y!}
-              current={px!.last_close!}
-            />
-          )}
-          {prefs.showRange1y && !has1y && (
-            <div className="text-[10px] text-neutral-400 italic">
-              1y range nog niet opgehaald (komt binnen 7 dagen automatisch)
+        <div className="rounded-lg border border-ink-5 bg-ink-2/40 p-2.5">
+          <div className="flex items-start justify-around gap-2">
+            {prefs.showRange90d && has90d && (
+              <Thermometer
+                label="90D"
+                low={px!.low_90d!}
+                high={px!.high_90d!}
+                current={px!.last_close!}
+              />
+            )}
+            {prefs.showRange1y && has1y && (
+              <Thermometer
+                label="1Y"
+                low={px!.low_1y!}
+                high={px!.high_1y!}
+                current={px!.last_close!}
+              />
+            )}
+            {prefs.showRange5y && has5y && (
+              <Thermometer
+                label="5Y"
+                low={px!.low_5y!}
+                high={px!.high_5y!}
+                current={px!.last_close!}
+              />
+            )}
+            {prefs.showRange1y && !has1y && !prefs.showRange90d && (
+              <div className="text-[10px] text-neutral-400 italic flex-1 self-center text-center">
+                1y range nog niet opgehaald (komt binnen 7 dagen automatisch)
+              </div>
+            )}
+          </div>
+          {prefs.showRange1y && !has1y && (prefs.showRange90d && has90d) && (
+            <div className="text-[10px] text-neutral-400 italic mt-2 text-center">
+              1y nog te ophalen — komt binnen 7 dagen
             </div>
           )}
         </div>

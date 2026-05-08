@@ -80,7 +80,17 @@ export function App() {
       {/* Top bar — minimaal, dichter bij defog */}
       <header className="sticky top-0 z-30 border-b border-ink-5 bg-ink-1/95 backdrop-blur supports-[backdrop-filter]:bg-ink-1/70">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-4">
-          <a className="wordmark text-2xl leading-none select-none">Xinix</a>
+          <a
+            href="#dashboard"
+            onClick={(e) => {
+              e.preventDefault();
+              setTab("dashboard");
+            }}
+            className="wordmark text-2xl leading-none select-none cursor-pointer hover:scale-[1.02] transition-transform"
+            title="Naar dashboard"
+          >
+            Xinix
+          </a>
           <div className="hidden sm:block text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400">
             Biotech & Mining Signal Detector
           </div>

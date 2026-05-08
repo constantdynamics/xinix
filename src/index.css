@@ -21,14 +21,28 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Defog-style wordmark — italic hot pink */
+/* Defog-style wordmark — italic gradient (regenboog: pink -> red ->
+ * orange -> yellow -> lime). text-shadow blijft pink-glow voor brand
+ * herkenbaarheid. */
 .wordmark {
   font-family: "Inter", sans-serif;
   font-style: italic;
   font-weight: 800;
   letter-spacing: -0.04em;
-  color: #ff1f8f;
-  text-shadow: 0 0 24px rgba(255, 31, 143, 0.35);
+  background: linear-gradient(
+    90deg,
+    #ff1f8f 0%,
+    #ff3a6e 18%,
+    #ff5a3a 36%,
+    #ff8c00 54%,
+    #ffd400 72%,
+    #a7ff1f 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 24px rgba(255, 31, 143, 0.25));
 }
 
 /* Subtle scrollbar voor donkere thema */
