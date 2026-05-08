@@ -1,7 +1,10 @@
 // Tegel-customisatie — opgeslagen in localStorage zodat het per
 // browser/device persisteert zonder extra backend calls.
 
-const KEY = "xinix_tile_prefs_v1";
+// Bumped naar v2 toen de RangeBar layout veranderde — oude opgeslagen
+// prefs (showRange90d=false) zouden de bars verbergen die nu juist
+// duidelijker zichtbaar moeten zijn.
+const KEY = "xinix_tile_prefs_v2";
 
 export interface TilePrefs {
   showSector: boolean;
@@ -25,9 +28,9 @@ export const DEFAULT_TILE_PREFS: TilePrefs = {
   showScore: true,
   showDetailMeta: true,
   showPriceDelta: true,
-  showRange90d: false,
+  showRange90d: true,
   showRange1y: true,
-  showRange5y: true,
+  showRange5y: false,
   showCatalyst: true,
   showTopSignal: true,
   showGoudType: false,

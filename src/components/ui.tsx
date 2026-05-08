@@ -324,41 +324,48 @@ export function RangeBar({
       : pos < 0.8
       ? "bg-fog-warn"
       : "bg-fog-loss";
+  const textTone =
+    pos < 0.2
+      ? "text-fog-lime"
+      : pos < 0.5
+      ? "text-fog-info"
+      : pos < 0.8
+      ? "text-fog-warn"
+      : "text-fog-loss";
   const pctAboveLow = ((current - low) / low) * 100;
+  function fmt(v: number) {
+    if (v < 1) return `$${v.toFixed(3)}`;
+    if (v < 100) return `$${v.toFixed(2)}`;
+    return `$${v.toFixed(0)}`;
+  }
   return (
-    <div className={cx("flex items-center gap-2 text-[10px]", className)}>
-      {label && (
-        <span className="uppercase tracking-wider text-neutral-400 font-bold w-7">
-          {label}
-        </span>
-      )}
-      <span className="tabular text-neutral-400 w-12 text-right">
-        ${low < 5 ? low.toFixed(2) : low.toFixed(1)}
-      </span>
-      <span className="relative flex-1 h-1.5 rounded-full bg-ink-5">
-        <span
-          className={cx("absolute -top-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-ink-1", tone)}
-          style={{ left: `calc(${pos * 100}% - 5px)` }}
-        />
-      </span>
-      <span className="tabular text-neutral-400 w-12">
-        ${high < 5 ? high.toFixed(2) : high.toFixed(1)}
-      </span>
-      <span
-        className={cx(
-          "tabular w-12 text-right font-bold",
-          pos < 0.2
-            ? "text-fog-lime"
-            : pos < 0.5
-            ? "text-fog-info"
-            : pos < 0.8
-            ? "text-fog-warn"
-            : "text-fog-loss"
+    <div className={cx("space-y-0.5", className)}>
+      <div className="flex items-center justify-between text-[10px]">
+        {label ? (
+          <span className="uppercase tracking-wider text-neutral-300 font-bold">
+            {label}
+          </span>
+        ) : (
+          <span />
         )}
-        title={`Current $${current.toFixed(2)} = +${pctAboveLow.toFixed(0)}% boven low`}
-      >
-        +{pctAboveLow.toFixed(0)}%
-      </span>
+        <span className={cx("tabular font-bold", textTone)}>
+          +{pctAboveLow.toFixed(0)}% boven low
+        </span>
+      </div>
+      <div className="relative h-2 rounded-full bg-ink-5">
+        <span
+          className={cx(
+            "absolute -top-0.5 w-3 h-3 rounded-full ring-2 ring-ink-1 shadow-sm",
+            tone
+          )}
+          style={{ left: `calc(${pos * 100}% - 6px)` }}
+          title={`Current ${fmt(current)} | low ${fmt(low)} | high ${fmt(high)}`}
+        />
+      </div>
+      <div className="flex justify-between text-[10px] tabular text-neutral-400">
+        <span>{fmt(low)}</span>
+        <span>{fmt(high)}</span>
+      </div>
     </div>
   );
 }

@@ -52,7 +52,7 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
   // — andere tabs/storage events triggeren dit zonder full refresh.
   useEffect(() => {
     function onStorage(e: StorageEvent) {
-      if (e.key === "xinix_tile_prefs_v1") setTilePrefs(loadTilePrefs());
+      if (e.key === "xinix_tile_prefs_v2") setTilePrefs(loadTilePrefs());
     }
     function onVisible() {
       if (document.visibilityState === "visible") setTilePrefs(loadTilePrefs());
@@ -266,20 +266,26 @@ function CardGrid({ cards, prefs }: { cards: CardData[]; prefs: TilePrefs }) {
 function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
   const px = c.summary;
   const tone = COLOR_TONE[c.color];
-  const aboveLow90d = px?.pct_above_90d_low ?? null;
-  const proximity90d =
-    aboveLow90d != null ? Math.min(1, aboveLow90d / 100) : null;
   const detailMeta =
     c.sector === "mining"
       ? [c.commodity, c.jurisdiction, c.deposit_type].filter(Boolean).join(" · ")
       : [c.modality, c.disease_area, c.phase].filter(Boolean).join(" · ");
+
+  const has90d =
+    px?.last_close != null && px.low_90d != null && px.high_90d != null;
+  const has1y = px?.last_close != null && px.low_1y != null && px.high_1y != null;
+  const has5y = px?.last_close != null && px.low_5y != null && px.high_5y != null;
+  const showAnyRange =
+    (prefs.showRange90d && has90d) ||
+    (prefs.showRange1y && has1y) ||
+    (prefs.showRange5y && has5y);
 
   return (
     <Card hover className="p-4 group flex flex-col gap-3">
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <a
               href={googleFinanceUrl(c.ticker)}
               target="_blank"
@@ -295,6 +301,15 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
               </Badge>
             )}
             {prefs.showPhase && <Badge tone={tone}>{COLOR_LABEL[c.color]}</Badge>}
+            {prefs.showActiveSignalCount && c.active_signals > 0 && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-fog-pink/15 border border-fog-pink/30 px-2 py-0.5 text-[10px] font-bold text-fog-pink tabular"
+                title={`${c.active_signals} actief signaal`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-fog-pink animate-pulse-soft" />
+                {c.active_signals}
+              </span>
+            )}
             {prefs.showGoudType && c.goud_type && (
               <span className="text-[10px] uppercase tracking-wider text-neutral-400">
                 {c.goud_type}
@@ -327,62 +342,48 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
         </div>
       )}
 
-      {/* Price + 90d DotBar */}
+      {/* Price + delta */}
       {prefs.showPriceDelta && px && (
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <div className="text-lg font-bold tabular">
-              ${px.last_close?.toFixed(2)}
-            </div>
-            <MiniDelta value={px.pct_change_1d ?? 0} />
+        <div className="flex items-baseline gap-3">
+          <div className="text-2xl font-bold tabular tracking-tight">
+            ${px.last_close?.toFixed(2)}
           </div>
-          {prefs.showRange90d && proximity90d != null && (
-            <div className="flex flex-col items-end gap-1">
-              <div className="text-[10px] uppercase tracking-wider text-neutral-400">
-                90d low
-              </div>
-              <DotBar progress={proximity90d} count={10} />
-              <div className="text-[10px] tabular text-neutral-400">
-                +{Math.round(aboveLow90d ?? 0)}%
-              </div>
-            </div>
-          )}
-          {prefs.showActiveSignalCount && c.active_signals > 0 && (
-            <div className="flex flex-col items-end gap-0.5">
-              <div className="text-[10px] uppercase tracking-wider text-neutral-400">
-                Signalen
-              </div>
-              <div className="text-base font-bold tabular text-fog-pink">
-                {c.active_signals}
-              </div>
-            </div>
-          )}
+          <MiniDelta value={px.pct_change_1d ?? 0} />
         </div>
       )}
 
-      {/* 1y / 5y range bars */}
-      {(prefs.showRange1y || prefs.showRange5y) && px?.last_close != null && (
-        <div className="space-y-1">
-          {prefs.showRange1y &&
-            px.low_1y != null &&
-            px.high_1y != null && (
-              <RangeBar
-                label="1y"
-                low={px.low_1y}
-                high={px.high_1y}
-                current={px.last_close}
-              />
-            )}
-          {prefs.showRange5y &&
-            px.low_5y != null &&
-            px.high_5y != null && (
-              <RangeBar
-                label="5y"
-                low={px.low_5y}
-                high={px.high_5y}
-                current={px.last_close}
-              />
-            )}
+      {/* Range bars — 90d, 1y, 5y (afhankelijk van prefs en data beschikbaar) */}
+      {showAnyRange && (
+        <div className="space-y-2.5 rounded-lg border border-ink-5 bg-ink-2/40 p-2.5">
+          {prefs.showRange90d && has90d && (
+            <RangeBar
+              label="90d"
+              low={px!.low_90d!}
+              high={px!.high_90d!}
+              current={px!.last_close!}
+            />
+          )}
+          {prefs.showRange1y && has1y && (
+            <RangeBar
+              label="1y"
+              low={px!.low_1y!}
+              high={px!.high_1y!}
+              current={px!.last_close!}
+            />
+          )}
+          {prefs.showRange5y && has5y && (
+            <RangeBar
+              label="5y"
+              low={px!.low_5y!}
+              high={px!.high_5y!}
+              current={px!.last_close!}
+            />
+          )}
+          {prefs.showRange1y && !has1y && (
+            <div className="text-[10px] text-neutral-400 italic">
+              1y range nog niet opgehaald (komt binnen 7 dagen automatisch)
+            </div>
+          )}
         </div>
       )}
 
