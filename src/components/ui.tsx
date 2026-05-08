@@ -370,11 +370,92 @@ export function RangeBar({
   );
 }
 
-// ─── Thermometer — verticale fill bar; voller = goedkoper ──────────────
+// ─── BlockBar — discretized rainbow fill in 10 blokjes ─────────────────
+// Gebruikt voor zowel de verticale Thermometer (cheapness op dashboard)
+// als de horizontale Distance-bar in de Limieten tab. fill = 0..1, rond
+// af op het aantal lit blokjes. Kleuren-array bottom-to-top (vertical)
+// of left-to-right (horizontal): lime -> yellow -> orange -> red -> pink.
+const RAINBOW_10 = [
+  "#a7ff1f", // lime
+  "#caf300",
+  "#e8e500",
+  "#ffd400", // yellow
+  "#ffa800",
+  "#ff8c00", // orange
+  "#ff5a3a", // red-orange
+  "#ff3a6a",
+  "#ff2880",
+  "#ff1f8f", // hot pink
+];
+
+export function BlockBar({
+  fill,
+  orientation = "vertical",
+  count = 10,
+  className,
+}: {
+  fill: number; // 0..1
+  orientation?: "vertical" | "horizontal";
+  count?: number;
+  className?: string;
+}) {
+  const safeFill = Math.max(0, Math.min(1, Number.isFinite(fill) ? fill : 0));
+  const lit = Math.round(safeFill * count);
+  const blocks = Array.from({ length: count }, (_, i) => {
+    const isLit = i < lit;
+    // Sample uit RAINBOW_10 — als count == 10 één-op-één, anders linear
+    // interpolatie via positie.
+    const pos = count === 10 ? i : Math.round((i / (count - 1)) * 9);
+    const color = RAINBOW_10[pos] ?? RAINBOW_10[RAINBOW_10.length - 1];
+    return { isLit, color };
+  });
+
+  if (orientation === "vertical") {
+    // Bottom-up: eerste block (lime) onderaan, laatste (pink) bovenaan.
+    return (
+      <div
+        className={cx(
+          "flex flex-col-reverse w-full h-full gap-px rounded-md overflow-hidden bg-ink-1",
+          className
+        )}
+      >
+        {blocks.map((b, i) => (
+          <div
+            key={i}
+            className="flex-1"
+            style={{
+              background: b.isLit ? b.color : "#1a1a1a",
+              opacity: b.isLit ? 1 : 1,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div
+      className={cx(
+        "flex w-full h-full gap-px rounded-md overflow-hidden bg-ink-1",
+        className
+      )}
+    >
+      {blocks.map((b, i) => (
+        <div
+          key={i}
+          className="flex-1"
+          style={{
+            background: b.isLit ? b.color : "#1a1a1a",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Thermometer — verticale BlockBar; voller = goedkoper ──────────────
 // Vulling = 1 - clamp(pctAboveLow / 200, 0, 1). Bij koers op de low =
-// vol (200% rijk = leeg). Regenboog gradient bottom-up: lime -> yellow
-// -> orange -> red -> pink. Dus een volledig gevulde bar laat de hele
-// regenboog zien (cheap = celebration). Halfvol toont alleen lime/yellow.
+// vol (200% rijk = leeg). Regenboog bottom-up. Een vol gevulde bar
+// laat alle 10 blokjes oplichten van lime onderaan tot pink bovenaan.
 export function Thermometer({
   low,
   high,
@@ -398,7 +479,6 @@ export function Thermometer({
   }
   const pctAboveLow = ((current - low) / low) * 100;
   const cheapness = Math.max(0, 1 - Math.min(pctAboveLow / 200, 1));
-  // Label-kleur = "hoe goedkoop". Dichtbij low = lime, ver erboven = pink.
   const textTone =
     pctAboveLow < 30
       ? "text-fog-lime"
@@ -413,22 +493,17 @@ export function Thermometer({
     return `$${v.toFixed(0)}`;
   }
   return (
-    <div className={cx("flex flex-col items-center gap-1", className)}>
+    <div
+      className={cx("flex flex-col items-center gap-1", className)}
+      title={`current ${fmt(current)} = +${pctAboveLow.toFixed(0)}% boven low`}
+    >
       {label && (
         <div className="text-[10px] uppercase tracking-wider font-bold text-neutral-300">
           {label}
         </div>
       )}
-      <div className="relative w-7 h-24 rounded-md bg-ink-5 border border-ink-5 overflow-hidden">
-        <div
-          className="absolute inset-x-0 bottom-0 transition-[height] duration-300"
-          style={{
-            height: `${cheapness * 100}%`,
-            background:
-              "linear-gradient(to top, #a7ff1f 0%, #ffd400 25%, #ff8c00 50%, #ff5a3a 75%, #ff1f8f 100%)",
-          }}
-          title={`current ${fmt(current)} = +${pctAboveLow.toFixed(0)}% boven low (cheapness ${(cheapness * 100).toFixed(0)}%)`}
-        />
+      <div className="w-7 h-24">
+        <BlockBar fill={cheapness} orientation="vertical" />
       </div>
       <div className={cx("text-[10px] tabular font-bold", textTone)}>
         {pctAboveLow >= 0 ? "+" : ""}

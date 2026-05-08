@@ -15,6 +15,7 @@ import {
   Dot,
   SectionHeader,
   RangeBar,
+  BlockBar,
 } from "../components/ui";
 
 const VIEW_KEY = "xinix_limit_view";
@@ -236,12 +237,12 @@ function LimitTable({ rows }: { rows: LimitRow[] }) {
                   </td>
                   <td className="p-3">
                     <div className="flex items-center gap-2">
-                      <span className="relative flex-1 h-2.5 rounded-full bg-ink-5 overflow-hidden">
-                        <span
-                          className={`absolute inset-y-0 left-0 ${tone.bg}`}
-                          style={{ width: `${pct}%` }}
+                      <div className="flex-1 h-3.5">
+                        <BlockBar
+                          fill={r.distance}
+                          orientation="horizontal"
                         />
-                      </span>
+                      </div>
                       <span
                         className={`text-[11px] tabular font-bold w-12 text-right ${tone.text}`}
                       >
