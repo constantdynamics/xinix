@@ -278,7 +278,7 @@ export function BacktestView() {
                         {r.hit_1d_100 && <Badge tone="lime">1D</Badge>}
                         {r.hit_5d_max_250 && <Badge tone="pink">5D</Badge>}
                       </td>
-                      <td className="p-2.5 text-neutral-600 truncate max-w-md">
+                      <td className="p-2.5 text-neutral-400 truncate max-w-md">
                         {r.note}
                       </td>
                     </tr>

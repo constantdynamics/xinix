@@ -245,7 +245,7 @@ export function ScoresView() {
           >
             AVOID
           </Pill>
-          <span className="mx-1 text-neutral-700">|</span>
+          <span className="mx-1 text-neutral-400">|</span>
           <Pill
             tone="orange"
             active={filter === "actionable"}
@@ -256,7 +256,7 @@ export function ScoresView() {
           >
             Actionable
           </Pill>
-          <span className="mx-1 text-neutral-700">|</span>
+          <span className="mx-1 text-neutral-400">|</span>
           {(["all", "biotech", "mining"] as const).map((s) => (
             <Pill
               key={s}
@@ -349,7 +349,7 @@ function ScoreCard({
               </span>
             </span>
           )}
-          <span className="text-neutral-600 w-3">{expanded ? "▾" : "▸"}</span>
+          <span className="text-neutral-400 w-3">{expanded ? "▾" : "▸"}</span>
         </span>
       </div>
       {expanded && (
@@ -392,7 +392,7 @@ function ScoreCard({
             <strong className="text-neutral-100 tabular">
               {row.final_score.toFixed(3)}
             </strong>
-            <span className="ml-3 text-neutral-600">
+            <span className="ml-3 text-neutral-400">
               · completeness{" "}
               <span className="text-neutral-300 tabular">
                 {pct(row.data_completeness)}
@@ -519,7 +519,7 @@ function SubBar({
 }) {
   return (
     <span className="hidden sm:flex items-center gap-1.5">
-      <span className="text-neutral-600 text-[10px] font-bold w-2">
+      <span className="text-neutral-400 text-[10px] font-bold w-2">
         {label}
       </span>
       <DotBar
@@ -557,7 +557,7 @@ function Breakdown({
         {title}
       </div>
       {triggered.length === 0 ? (
-        <p className="text-neutral-600">Geen signalen actief</p>
+        <p className="text-neutral-400">Geen signalen actief</p>
       ) : (
         <ul className="space-y-1">
           {triggered.map((c) => (
@@ -601,7 +601,7 @@ function SetupStat({
       : "text-neutral-100";
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-neutral-600 font-bold">
+      <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
         {label}
       </div>
       <div className={`tabular font-bold text-base ${c}`}>{value}</div>

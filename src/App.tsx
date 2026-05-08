@@ -78,7 +78,7 @@ export function App() {
       <header className="sticky top-0 z-30 border-b border-ink-5 bg-ink-1/95 backdrop-blur supports-[backdrop-filter]:bg-ink-1/70">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-4">
           <a className="wordmark text-2xl leading-none select-none">Xinix</a>
-          <div className="hidden sm:block text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-600">
+          <div className="hidden sm:block text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400">
             Biotech & Mining Signal Detector
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -178,7 +178,7 @@ export function App() {
       </main>
 
       <footer className="border-t border-ink-5 mt-8">
-        <div className="mx-auto max-w-7xl px-4 py-4 text-[11px] text-neutral-600 flex items-center justify-between">
+        <div className="mx-auto max-w-7xl px-4 py-4 text-[11px] text-neutral-400 flex items-center justify-between">
           <span>
             <span className="wordmark">Xinix</span> — pre/post-event detection
           </span>

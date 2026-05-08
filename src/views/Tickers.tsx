@@ -726,7 +726,7 @@ export function TickersView({
               <span className="font-bold text-fog-pink tabular">
                 {selectedCount} geselecteerd
               </span>
-              <span className="text-neutral-700">·</span>
+              <span className="text-neutral-400">·</span>
               <span className="text-neutral-400">Sector</span>
               <Select
                 value={bulkSector}
@@ -739,7 +739,7 @@ export function TickersView({
               <Button size="sm" variant="primary" onClick={applyBulkSector}>
                 Pas toe
               </Button>
-              <span className="text-neutral-700">·</span>
+              <span className="text-neutral-400">·</span>
               <span className="text-neutral-400">Suffix</span>
               <Select
                 value={bulkSuffix}
@@ -760,7 +760,7 @@ export function TickersView({
               >
                 Pas toe
               </Button>
-              <span className="text-neutral-700">·</span>
+              <span className="text-neutral-400">·</span>
               <Button size="sm" variant="danger" onClick={removeSelected}>
                 Verwijder selectie
               </Button>
@@ -1105,7 +1105,7 @@ export function TickersView({
               </span>
             )}
 
-            <span className="text-neutral-700 mx-1">·</span>
+            <span className="text-neutral-400 mx-1">·</span>
 
             <span className="flex items-center gap-1.5 text-xs">
               <Dot tone={wlDuplicates.size > 0 ? "loss" : "lime"} />
@@ -1134,7 +1134,7 @@ export function TickersView({
 
             {wlSelected.size > 0 && (
               <>
-                <span className="text-neutral-700 mx-1">·</span>
+                <span className="text-neutral-400 mx-1">·</span>
                 <span className="font-bold text-fog-pink tabular text-xs">
                   {wlSelected.size} geselecteerd
                 </span>
@@ -1161,7 +1161,7 @@ export function TickersView({
               {wlDuplicateGroups.slice(0, 8).map((g, i) => (
                 <span key={i} className="inline-block mr-3">
                   <span className="text-fog-lime">{g[0]}</span>
-                  <span className="text-neutral-600"> ↔ </span>
+                  <span className="text-neutral-400"> ↔ </span>
                   <span className="text-fog-loss">{g.slice(1).join(", ")}</span>
                 </span>
               ))}

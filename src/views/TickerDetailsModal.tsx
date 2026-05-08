@@ -294,7 +294,7 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
               <label className="block text-[10px] uppercase tracking-wider font-bold text-neutral-500">
                 {f.label}
                 {f.hint && (
-                  <span className="block text-[10px] normal-case tracking-normal text-neutral-700 font-normal mt-0.5">
+                  <span className="block text-[10px] normal-case tracking-normal text-neutral-400 font-normal mt-0.5">
                     {f.hint}
                   </span>
                 )}

@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 import { fetchSettings, saveSettings } from "../api";
 import type { Settings, Severity } from "../types";
 import {
+  loadTilePrefs,
+  saveTilePrefs,
+  DEFAULT_TILE_PREFS,
+  TILE_PREF_LABELS,
+  type TilePrefs,
+} from "../tilePrefs";
+import {
   Card,
   Button,
   Input,
@@ -71,7 +78,7 @@ export function SettingsView() {
               FDA approval, trial completed, permit grant, takeover bid,
               first pour, material 8-K, prijs-spike +15% met volume.
               <br />
-              <span className="text-neutral-600">
+              <span className="text-neutral-400">
                 Uit = ook proximity-signalen ("over X dagen…"), volume blips,
                 90d-low en macro tide.
               </span>
@@ -179,7 +186,74 @@ export function SettingsView() {
           {msg && <span className="text-fog-lime text-sm">{msg}</span>}
         </div>
       </Card>
+
+      <TilePrefsCard />
     </div>
+  );
+}
+
+function TilePrefsCard() {
+  const [prefs, setPrefs] = useState<TilePrefs>(loadTilePrefs);
+  const [saved, setSaved] = useState(false);
+
+  function toggle(key: keyof TilePrefs) {
+    const next = { ...prefs, [key]: !prefs[key] };
+    setPrefs(next);
+    saveTilePrefs(next);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1200);
+  }
+
+  function reset() {
+    setPrefs(DEFAULT_TILE_PREFS);
+    saveTilePrefs(DEFAULT_TILE_PREFS);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1200);
+  }
+
+  const keys = Object.keys(TILE_PREF_LABELS) as (keyof TilePrefs)[];
+
+  return (
+    <>
+      <SectionHeader
+        eyebrow="Dashboard"
+        title="Tegel inhoud"
+        subtitle="Welke velden er op de dashboard tegels staan. Lokaal opgeslagen — geldt alleen voor deze browser."
+      />
+      <Card className="p-4 space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+          {keys.map((k) => (
+            <label
+              key={k}
+              className="flex items-center gap-2 py-1.5 cursor-pointer hover:text-fog-pink transition"
+            >
+              <input
+                type="checkbox"
+                checked={prefs[k]}
+                onChange={() => toggle(k)}
+                className="h-4 w-4 cursor-pointer"
+              />
+              <span className="text-sm text-neutral-300">
+                {TILE_PREF_LABELS[k]}
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 pt-2 border-t border-ink-5">
+          <Button size="sm" variant="ghost" onClick={reset}>
+            Reset naar defaults
+          </Button>
+          {saved && (
+            <span className="text-fog-lime text-xs animate-fade-up">
+              Opgeslagen
+            </span>
+          )}
+          <span className="ml-auto text-[11px] text-neutral-400">
+            Wijzigingen verschijnen direct in Dashboard tab
+          </span>
+        </div>
+      </Card>
+    </>
   );
 }
 

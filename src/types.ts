@@ -12,6 +12,12 @@ export interface PriceSummary {
   pct_change_5d: number | null;
   avg_volume_30d: number | null;
   volume_ratio: number | null;
+  // v1.2 — extremes; gevuld door compute-extremes-background (wekelijks)
+  low_1y?: number | null;
+  high_1y?: number | null;
+  low_5y?: number | null;
+  high_5y?: number | null;
+  last_extremes_at?: string | null;
   updated_at: string;
 }
 

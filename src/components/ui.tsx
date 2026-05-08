@@ -293,6 +293,76 @@ export function DotBar({
   );
 }
 
+// ─── RangeBar — horizontale low/high track met marker voor current ─────
+// Toont positie in de range. Kleur van marker = hoe goedkoop (dichtbij
+// low = lime; midden = warn; dichtbij high = loss/orange wat ook waarschuwt
+// voor mean-reversion risico).
+export function RangeBar({
+  low,
+  high,
+  current,
+  label,
+  className,
+}: {
+  low: number;
+  high: number;
+  current: number;
+  label?: string;
+  className?: string;
+}) {
+  if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) {
+    return null;
+  }
+  const clamped = Math.max(low, Math.min(high, current));
+  const pos = (clamped - low) / (high - low); // 0..1
+  // 0..1: 0 = at low (cheap, lime), 1 = at high (expensive, loss)
+  const tone =
+    pos < 0.2
+      ? "bg-fog-lime"
+      : pos < 0.5
+      ? "bg-fog-info"
+      : pos < 0.8
+      ? "bg-fog-warn"
+      : "bg-fog-loss";
+  const pctAboveLow = ((current - low) / low) * 100;
+  return (
+    <div className={cx("flex items-center gap-2 text-[10px]", className)}>
+      {label && (
+        <span className="uppercase tracking-wider text-neutral-400 font-bold w-7">
+          {label}
+        </span>
+      )}
+      <span className="tabular text-neutral-400 w-12 text-right">
+        ${low < 5 ? low.toFixed(2) : low.toFixed(1)}
+      </span>
+      <span className="relative flex-1 h-1.5 rounded-full bg-ink-5">
+        <span
+          className={cx("absolute -top-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-ink-1", tone)}
+          style={{ left: `calc(${pos * 100}% - 5px)` }}
+        />
+      </span>
+      <span className="tabular text-neutral-400 w-12">
+        ${high < 5 ? high.toFixed(2) : high.toFixed(1)}
+      </span>
+      <span
+        className={cx(
+          "tabular w-12 text-right font-bold",
+          pos < 0.2
+            ? "text-fog-lime"
+            : pos < 0.5
+            ? "text-fog-info"
+            : pos < 0.8
+            ? "text-fog-warn"
+            : "text-fog-loss"
+        )}
+        title={`Current $${current.toFixed(2)} = +${pctAboveLow.toFixed(0)}% boven low`}
+      >
+        +{pctAboveLow.toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
 // ─── Input / Select ────────────────────────────────────────────────────
 export function Input({
   className,
@@ -302,7 +372,7 @@ export function Input({
     <input
       {...rest}
       className={cx(
-        "h-9 px-3 text-sm rounded-lg bg-ink-2 border border-ink-5 placeholder:text-neutral-600",
+        "h-9 px-3 text-sm rounded-lg bg-ink-2 border border-ink-5 placeholder:text-neutral-400",
         className
       )}
     />

@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Dashboard, Card as CardData } from "../types";
 import { triggerJob } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
+import { loadTilePrefs, type TilePrefs } from "../tilePrefs";
 import {
   Card,
   Badge,
@@ -12,6 +13,7 @@ import {
   Dot,
   DotBar,
   MiniDelta,
+  RangeBar,
 } from "../components/ui";
 
 type ToneByColor = "lime" | "watch" | "orange" | "loss";
@@ -45,6 +47,23 @@ type ColorFilter = "all" | "red" | "orange" | "yellow" | "white";
 
 export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void }) {
   const [filter, setFilter] = useState<ColorFilter>("all");
+  const [tilePrefs, setTilePrefs] = useState<TilePrefs>(loadTilePrefs);
+  // Re-load prefs wanneer de gebruiker de Settings tab heeft opengehad
+  // — andere tabs/storage events triggeren dit zonder full refresh.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === "xinix_tile_prefs_v1") setTilePrefs(loadTilePrefs());
+    }
+    function onVisible() {
+      if (document.visibilityState === "visible") setTilePrefs(loadTilePrefs());
+    }
+    window.addEventListener("storage", onStorage);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   const counts = useMemo(
     () =>
@@ -160,7 +179,7 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
       </div>
 
       {/* Cards grid */}
-      <CardGrid cards={visibleCards} />
+      <CardGrid cards={visibleCards} prefs={tilePrefs} />
 
       {/* Catalysts */}
       <Catalysts data={data} />
@@ -227,10 +246,10 @@ function JobControls() {
   );
 }
 
-function CardGrid({ cards }: { cards: CardData[] }) {
+function CardGrid({ cards, prefs }: { cards: CardData[]; prefs: TilePrefs }) {
   if (cards.length === 0) {
     return (
-      <Card className="p-10 text-center text-neutral-500 text-sm">
+      <Card className="p-10 text-center text-neutral-400 text-sm">
         Niets in deze filter. Voeg tickers toe via Watchlist.
       </Card>
     );
@@ -238,20 +257,22 @@ function CardGrid({ cards }: { cards: CardData[] }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
       {cards.map((c) => (
-        <CardTile key={c.ticker} card={c} />
+        <CardTile key={c.ticker} card={c} prefs={prefs} />
       ))}
     </div>
   );
 }
 
-function CardTile({ card: c }: { card: CardData }) {
+function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
   const px = c.summary;
   const tone = COLOR_TONE[c.color];
-
-  // proximity: dichter bij 90d-low = goede entry. dotbar laat zien hoe
-  // ver boven de low de prijs zit (dichter bij low = meer rood).
-  const aboveLow = px?.pct_above_90d_low ?? null;
-  const proximity = aboveLow != null ? Math.min(1, aboveLow / 100) : null;
+  const aboveLow90d = px?.pct_above_90d_low ?? null;
+  const proximity90d =
+    aboveLow90d != null ? Math.min(1, aboveLow90d / 100) : null;
+  const detailMeta =
+    c.sector === "mining"
+      ? [c.commodity, c.jurisdiction, c.deposit_type].filter(Boolean).join(" · ")
+      : [c.modality, c.disease_area, c.phase].filter(Boolean).join(" · ");
 
   return (
     <Card hover className="p-4 group flex flex-col gap-3">
@@ -268,18 +289,25 @@ function CardTile({ card: c }: { card: CardData }) {
             >
               {c.ticker}
             </a>
-            <Badge tone={c.sector === "mining" ? "watch" : "cyan"}>
-              {c.sector === "mining" ? "MIN" : "BIO"}
-            </Badge>
-            <Badge tone={tone}>{COLOR_LABEL[c.color]}</Badge>
+            {prefs.showSector && (
+              <Badge tone={c.sector === "mining" ? "watch" : "cyan"}>
+                {c.sector === "mining" ? "MIN" : "BIO"}
+              </Badge>
+            )}
+            {prefs.showPhase && <Badge tone={tone}>{COLOR_LABEL[c.color]}</Badge>}
+            {prefs.showGoudType && c.goud_type && (
+              <span className="text-[10px] uppercase tracking-wider text-neutral-400">
+                {c.goud_type}
+              </span>
+            )}
           </div>
           <div className="text-xs text-neutral-400 truncate mt-0.5">
             {c.company}
           </div>
         </div>
-        {c.goud_score != null && (
+        {prefs.showScore && c.goud_score != null && (
           <div className="text-right shrink-0">
-            <div className="text-[10px] uppercase tracking-wider text-neutral-600">
+            <div className="text-[10px] uppercase tracking-wider text-neutral-400">
               Score
             </div>
             <div className="text-lg font-bold tabular text-neutral-100">
@@ -289,17 +317,18 @@ function CardTile({ card: c }: { card: CardData }) {
         )}
       </div>
 
-      {/* Detail meta */}
-      <div className="text-[11px] text-neutral-500 truncate">
-        {c.sector === "mining"
-          ? [c.commodity, c.jurisdiction, c.deposit_type]
-              .filter(Boolean)
-              .join(" · ")
-          : [c.modality, c.disease_area, c.phase].filter(Boolean).join(" · ")}
-      </div>
+      {prefs.showDetailMeta && detailMeta && (
+        <div className="text-[11px] text-neutral-400 truncate">{detailMeta}</div>
+      )}
 
-      {/* Price + DotBar */}
-      {px && (
+      {prefs.showTriggerEvent && c.trigger_event && (
+        <div className="text-[11px] text-neutral-400 italic line-clamp-2">
+          {c.trigger_event}
+        </div>
+      )}
+
+      {/* Price + 90d DotBar */}
+      {prefs.showPriceDelta && px && (
         <div className="flex items-end justify-between gap-3">
           <div>
             <div className="text-lg font-bold tabular">
@@ -307,22 +336,58 @@ function CardTile({ card: c }: { card: CardData }) {
             </div>
             <MiniDelta value={px.pct_change_1d ?? 0} />
           </div>
-          {proximity != null && (
+          {prefs.showRange90d && proximity90d != null && (
             <div className="flex flex-col items-end gap-1">
-              <div className="text-[10px] uppercase tracking-wider text-neutral-600">
+              <div className="text-[10px] uppercase tracking-wider text-neutral-400">
                 90d low
               </div>
-              <DotBar progress={proximity} count={10} />
-              <div className="text-[10px] tabular text-neutral-500">
-                +{Math.round(aboveLow ?? 0)}%
+              <DotBar progress={proximity90d} count={10} />
+              <div className="text-[10px] tabular text-neutral-400">
+                +{Math.round(aboveLow90d ?? 0)}%
+              </div>
+            </div>
+          )}
+          {prefs.showActiveSignalCount && c.active_signals > 0 && (
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="text-[10px] uppercase tracking-wider text-neutral-400">
+                Signalen
+              </div>
+              <div className="text-base font-bold tabular text-fog-pink">
+                {c.active_signals}
               </div>
             </div>
           )}
         </div>
       )}
 
+      {/* 1y / 5y range bars */}
+      {(prefs.showRange1y || prefs.showRange5y) && px?.last_close != null && (
+        <div className="space-y-1">
+          {prefs.showRange1y &&
+            px.low_1y != null &&
+            px.high_1y != null && (
+              <RangeBar
+                label="1y"
+                low={px.low_1y}
+                high={px.high_1y}
+                current={px.last_close}
+              />
+            )}
+          {prefs.showRange5y &&
+            px.low_5y != null &&
+            px.high_5y != null && (
+              <RangeBar
+                label="5y"
+                low={px.low_5y}
+                high={px.high_5y}
+                current={px.last_close}
+              />
+            )}
+        </div>
+      )}
+
       {/* Catalyst */}
-      {c.next_catalyst && (
+      {prefs.showCatalyst && c.next_catalyst && (
         <div className="rounded-lg bg-ink-3 border border-ink-5 p-2.5">
           <div className="flex items-center gap-2">
             <Dot tone="pink" />
@@ -339,7 +404,7 @@ function CardTile({ card: c }: { card: CardData }) {
             {c.next_catalyst.catalyst_type}
           </div>
           {c.next_catalyst.description && (
-            <div className="text-[11px] text-neutral-500 truncate">
+            <div className="text-[11px] text-neutral-400 truncate">
               {c.next_catalyst.description}
             </div>
           )}
@@ -347,7 +412,7 @@ function CardTile({ card: c }: { card: CardData }) {
       )}
 
       {/* Top signal */}
-      {c.top_signal && (
+      {prefs.showTopSignal && c.top_signal && (
         <div className="rounded-lg border border-ink-5 p-2.5">
           <div className="flex items-center gap-2">
             <Dot
@@ -360,11 +425,11 @@ function CardTile({ card: c }: { card: CardData }) {
               }
               pulse={c.top_signal.severity === "red"}
             />
-            <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+            <span className="text-[10px] uppercase tracking-wider text-neutral-300 font-bold">
               {c.top_signal.signal_type}
             </span>
             {c.active_signals > 1 && (
-              <span className="ml-auto text-[10px] text-neutral-600">
+              <span className="ml-auto text-[10px] text-neutral-400">
                 +{c.active_signals - 1}
               </span>
             )}
@@ -373,7 +438,7 @@ function CardTile({ card: c }: { card: CardData }) {
             {c.top_signal.title}
           </div>
           {c.top_signal.detail && (
-            <div className="text-[11px] text-neutral-500 line-clamp-2">
+            <div className="text-[11px] text-neutral-400 line-clamp-2">
               {c.top_signal.detail}
             </div>
           )}
@@ -443,7 +508,7 @@ function Catalysts({ data }: { data: Dashboard }) {
                   <td className="p-3 text-neutral-400 truncate max-w-md">
                     {c.description}
                   </td>
-                  <td className="p-3 text-[11px] text-neutral-600">
+                  <td className="p-3 text-[11px] text-neutral-400">
                     {c.source}
                   </td>
                 </tr>
@@ -504,7 +569,7 @@ function RecentSignals({ data }: { data: Dashboard }) {
                   </div>
                 )}
               </div>
-              <span className="text-[11px] tabular text-neutral-600 whitespace-nowrap">
+              <span className="text-[11px] tabular text-neutral-400 whitespace-nowrap">
                 {new Date(s.detected_at).toLocaleString("nl-NL", {
                   day: "2-digit",
                   month: "2-digit",
@@ -537,7 +602,7 @@ function RunLog({ data }: { data: Dashboard }) {
             <span className="font-mono text-neutral-300 w-44 truncate">
               {r.job}
             </span>
-            <span className="tabular text-neutral-600 w-32">
+            <span className="tabular text-neutral-400 w-32">
               {new Date(r.started_at).toLocaleString("nl-NL", {
                 day: "2-digit",
                 month: "2-digit",

@@ -134,7 +134,7 @@ export function LegendaView() {
         ))}
       </div>
 
-      <p className="text-xs text-neutral-600 italic pt-4 border-t border-ink-5">
+      <p className="text-xs text-neutral-400 italic pt-4 border-t border-ink-5">
         Briefing §6 (scoring), §9 (caveats), §10 (validatie). Cijfers zijn
         historische medianen 2018‑2024 — gebruik als prior, niet als belofte.
       </p>
