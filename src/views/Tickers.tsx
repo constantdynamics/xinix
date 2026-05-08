@@ -52,11 +52,32 @@ function applySuffix(ticker: string, suffix: string): string {
   return suffix ? `${base}.${suffix}` : base;
 }
 
+// Probeer sector te raden op basis van bedrijfsnaam. Mining krijgt
+// voorrang wanneer er commodity-/mijnbouwwoorden inzitten — dat is
+// een sterker signaal dan biotech-prefixen die soms in mining-namen
+// voorkomen ("BioGold Resources" → mining).
+const MINING_RE =
+  /\b(mining|miner|mines|metals?|minerals?|resources?|exploration|drill(?:ing)?|royalt(?:y|ies)|streaming|gold|silver|copper|lithium|uranium|nickel|cobalt|graphite|zinc|platinum|palladium|tin|tungsten|molybdenum|rare\s*earth|potash|iron\s*ore|coal)\b/i;
+
+const BIOTECH_RE =
+  /\b(pharma(?:ceuticals?)?|biopharma|therapeutics|bio(?:science|tech(?:nology)?|logics|pharm)?|genomics?|gene(?:tic|ric)?|oncolog(?:y|ic)|immuno(?:logy|therap)|cell\s*(?:therap|technolog)|gene\s*therap|medicines?|medical|laboratories|labs|sciences|clinical|antibody|antibodies|vaccines?|RNA|DNA|protein)\b/i;
+
+function inferSector(company: string | null | undefined): Sector | null {
+  if (!company) return null;
+  if (MINING_RE.test(company)) return "mining";
+  if (BIOTECH_RE.test(company)) return "biotech";
+  return null;
+}
+
 interface PreviewRow {
   id: number;
   ticker: string;
   company: string;
   sector: Sector;
+  // True zolang de gebruiker de sector niet handmatig heeft overruled.
+  // Zo kan de Yahoo-lookup de sector auto-detecteren obv company name
+  // zonder een eerdere user-keuze te overschrijven.
+  sectorAuto: boolean;
   selected: boolean;
   status: "pending" | "checking" | "recognized" | "unknown";
   exchange: string | null;
@@ -94,6 +115,7 @@ const EMPTY: Form = {
   deposit_type: "",
 };
 
+// `defaultSector` is alleen een fallback wanneer auto-detect (na lookup) faalt.
 function parseQuickAdd(
   text: string,
   defaultSector: Sector
@@ -204,7 +226,6 @@ export function TickersView({
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [batchText, setBatchText] = useState("");
-  const [batchSector, setBatchSector] = useState<Sector>("biotech");
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMode, setBatchMode] = useState<"quick" | "table">("quick");
   const [editing, setEditing] = useState<CardType | null>(null);
@@ -224,10 +245,12 @@ export function TickersView({
   const [wlBulkBusy, setWlBulkBusy] = useState(false);
 
   useEffect(() => {
+    // "biotech" is een placeholder fallback; inferSector() na de lookup
+    // bepaalt de echte sector.
     const parsed =
       batchMode === "quick"
-        ? parseQuickAdd(batchText, batchSector)
-        : parseBatch(batchText, batchSector);
+        ? parseQuickAdd(batchText, "biotech")
+        : parseBatch(batchText, "biotech");
     setParseErrors(parsed.errors);
     setRows((prev) => {
       const prevByTicker = new Map(prev.map((r) => [r.ticker, r]));
@@ -242,11 +265,19 @@ export function TickersView({
         if (existing) {
           next.push(existing);
         } else {
+          // CSV-mode kan expliciet sector="mining"/"biotech" leveren — dan is
+          // dat een handmatige keuze. parseQuickAdd geeft altijd defaultSector
+          // terug, dus daar is sectorAuto altijd true.
+          const csvHadSector =
+            batchMode === "table" && /(?:^|[,\t])sector(?:[,\t]|$)/i.test(
+              batchText.split(/\r?\n/, 1)[0] ?? ""
+            );
           next.push({
             id: nextIdRef.current++,
             ticker: p.ticker,
             company: p.company || p.ticker,
-            sector: p.sector ?? batchSector,
+            sector: p.sector ?? "biotech",
+            sectorAuto: !csvHadSector,
             selected: false,
             status: "pending",
             exchange: null,
@@ -255,7 +286,7 @@ export function TickersView({
       }
       return next;
     });
-  }, [batchText, batchSector, batchMode]);
+  }, [batchText, batchMode]);
 
   useEffect(() => {
     const pending = rows
@@ -276,11 +307,15 @@ export function TickersView({
             const res = map.get(r.ticker);
             if (!res) return r;
             if (res.recognized) {
+              const company = res.company ?? r.company;
+              const inferred = inferSector(company);
               return {
                 ...r,
                 status: "recognized",
-                company: res.company ?? r.company,
+                company,
                 exchange: res.exchange ?? null,
+                // Auto-update sector als gebruiker 'm niet handmatig had gezet
+                sector: r.sectorAuto && inferred ? inferred : r.sector,
               };
             }
             return { ...r, status: "unknown", exchange: null };
@@ -321,7 +356,9 @@ export function TickersView({
   }
   function setRowSector(id: number, sec: Sector) {
     setRows((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, sector: sec } : r))
+      prev.map((r) =>
+        r.id === id ? { ...r, sector: sec, sectorAuto: false } : r
+      )
     );
   }
   function removeRow(id: number) {
@@ -345,7 +382,9 @@ export function TickersView({
   }
   function applyBulkSector() {
     setRows((prev) =>
-      prev.map((r) => (r.selected ? { ...r, sector: bulkSector } : r))
+      prev.map((r) =>
+        r.selected ? { ...r, sector: bulkSector, sectorAuto: false } : r
+      )
     );
   }
   function removeSelected() {
@@ -616,17 +655,10 @@ export function TickersView({
 
         <Card className="p-4 space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">
-              Default sector
+            <span className="text-[11px] text-neutral-500">
+              Sector wordt auto-gedetecteerd uit bedrijfsnaam — per rij of in
+              bulk te overrulen.
             </span>
-            <Select
-              value={batchSector}
-              onChange={(e) => setBatchSector(e.target.value as Sector)}
-              className="w-32"
-            >
-              <option value="biotech">biotech</option>
-              <option value="mining">mining</option>
-            </Select>
 
             <div className="ml-auto flex items-center gap-3 text-xs">
               <span className="flex items-center gap-1.5">
@@ -673,9 +705,7 @@ export function TickersView({
             spellCheck={false}
             placeholder={
               batchMode === "quick"
-                ? batchSector === "mining"
-                  ? "OPHR.V; MEK.V; FILO.TO; NFG.TO; WA1.AX"
-                  : "VKTX; SAVA; AKRO; ETNB; MDGL"
+                ? "VKTX; SAVA; NFG.TO; FILO.TO; AKRO; WA1.AX  — sector wordt zelf gedetecteerd"
                 : "ticker,company,sector,commodity,jurisdiction\nFILO,Filo Mining,mining,Cu,Argentina"
             }
             className="w-full font-mono text-xs rounded-lg p-3 leading-relaxed"
