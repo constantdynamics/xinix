@@ -29,6 +29,16 @@ const COLOR_LABEL: Record<CardData["color"], string> = {
   yellow: "Pre",
   white: "Rust",
 };
+// Heatmap: tile bg subtiel gekleurd op basis van c.color zodat de
+// "heetheid" direct visueel afleesbaar is zonder badge. Border krijgt
+// dezelfde tint maar feller; box-shadow voor lichte glow rondom de
+// echt hete kaarten.
+const HEAT_BG: Record<CardData["color"], string> = {
+  white: "",
+  yellow: "bg-fog-watch/[0.06] border-fog-watch/25",
+  orange: "bg-fog-warn/[0.10] border-fog-warn/35",
+  red: "bg-fog-loss/[0.13] border-fog-loss/45 shadow-[0_0_24px_-8px_rgba(255,26,26,0.45)]",
+};
 
 const JOBS = [
   ["poll-prices-background", "Prijzen"],
@@ -52,7 +62,7 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
   // — andere tabs/storage events triggeren dit zonder full refresh.
   useEffect(() => {
     function onStorage(e: StorageEvent) {
-      if (e.key === "xinix_tile_prefs_v2") setTilePrefs(loadTilePrefs());
+      if (e.key === "xinix_tile_prefs_v3") setTilePrefs(loadTilePrefs());
     }
     function onVisible() {
       if (document.visibilityState === "visible") setTilePrefs(loadTilePrefs());
@@ -281,7 +291,11 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
     (prefs.showRange5y && has5y);
 
   return (
-    <Card hover className="p-4 group flex flex-col gap-3">
+    <Card
+      hover
+      className={`p-4 group flex flex-col gap-3 ${HEAT_BG[c.color]}`}
+      title={`Heat: ${COLOR_LABEL[c.color]}`}
+    >
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">

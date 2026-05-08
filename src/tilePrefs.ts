@@ -1,10 +1,9 @@
 // Tegel-customisatie — opgeslagen in localStorage zodat het per
 // browser/device persisteert zonder extra backend calls.
 
-// Bumped naar v2 toen de RangeBar layout veranderde — oude opgeslagen
-// prefs (showRange90d=false) zouden de bars verbergen die nu juist
-// duidelijker zichtbaar moeten zijn.
-const KEY = "xinix_tile_prefs_v2";
+// v3: showPhase default uit (heatheid zit nu in de tegel achtergrond)
+// v2: showRange90d default aan voor zichtbaarheid
+const KEY = "xinix_tile_prefs_v3";
 
 export interface TilePrefs {
   showSector: boolean;
@@ -24,7 +23,7 @@ export interface TilePrefs {
 
 export const DEFAULT_TILE_PREFS: TilePrefs = {
   showSector: true,
-  showPhase: true,
+  showPhase: false, // heat zit nu in tegel-achtergrond
   showScore: true,
   showDetailMeta: true,
   showPriceDelta: true,
@@ -40,7 +39,7 @@ export const DEFAULT_TILE_PREFS: TilePrefs = {
 
 export const TILE_PREF_LABELS: Record<keyof TilePrefs, string> = {
   showSector: "Sector badge (BIO/MIN)",
-  showPhase: "Phase badge (Hot/Warm/Pre/Rust)",
+  showPhase: "Heat-label (Hot/Warm/Pre/Rust) — naast tegel-achtergrond",
   showScore: "Goud-score (rechtsboven)",
   showDetailMeta: "Detail meta (commodity/modaliteit)",
   showPriceDelta: "Prijs + 1d delta",
