@@ -1,9 +1,10 @@
 // Tegel-customisatie — opgeslagen in localStorage zodat het per
 // browser/device persisteert zonder extra backend calls.
 
-// v3: showPhase default uit (heatheid zit nu in de tegel achtergrond)
+// v4: defaults verschoven naar 1y + 5y meters (90d uit), heat is bg
+// v3: showPhase default uit (heat zit in tegel achtergrond)
 // v2: showRange90d default aan voor zichtbaarheid
-const KEY = "xinix_tile_prefs_v3";
+const KEY = "xinix_tile_prefs_v4";
 
 export interface TilePrefs {
   showSector: boolean;
@@ -23,13 +24,13 @@ export interface TilePrefs {
 
 export const DEFAULT_TILE_PREFS: TilePrefs = {
   showSector: true,
-  showPhase: false, // heat zit nu in tegel-achtergrond
+  showPhase: false, // heat zit in tegel-achtergrond
   showScore: true,
   showDetailMeta: true,
   showPriceDelta: true,
-  showRange90d: true,
-  showRange1y: true,
-  showRange5y: false,
+  showRange90d: false, // 90d hebben we voor signal_price_summary maar
+  showRange1y: true, //   tonen we niet meer; 1y + 5y geeft beter beeld
+  showRange5y: true,
   showCatalyst: true,
   showTopSignal: true,
   showGoudType: false,

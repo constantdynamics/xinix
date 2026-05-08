@@ -62,7 +62,7 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
   // — andere tabs/storage events triggeren dit zonder full refresh.
   useEffect(() => {
     function onStorage(e: StorageEvent) {
-      if (e.key === "xinix_tile_prefs_v3") setTilePrefs(loadTilePrefs());
+      if (e.key === "xinix_tile_prefs_v4") setTilePrefs(loadTilePrefs());
     }
     function onVisible() {
       if (document.visibilityState === "visible") setTilePrefs(loadTilePrefs());
