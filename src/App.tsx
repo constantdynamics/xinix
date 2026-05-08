@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DashboardView } from "./views/Dashboard";
 import { SettingsView } from "./views/Settings";
 import { TickersView } from "./views/Tickers";
+import { LimitsView } from "./views/Limits";
 import { BacktestView } from "./views/Backtest";
 import { ScoresView } from "./views/Scores";
 import { TrackRecordView } from "./views/TrackRecord";
@@ -14,6 +15,7 @@ type Tab =
   | "dashboard"
   | "scores"
   | "tickers"
+  | "limits"
   | "backtest"
   | "track-record"
   | "legenda"
@@ -29,6 +31,7 @@ const TABS: TabDef[] = [
   { key: "dashboard", label: "Dashboard", tone: "pink" },
   { key: "scores", label: "Scores", tone: "lime" },
   { key: "tickers", label: "Watchlist", tone: "cyan" },
+  { key: "limits", label: "Limieten", tone: "lime" },
   { key: "backtest", label: "Backtest", tone: "watch" },
   { key: "track-record", label: "Track record", tone: "orange" },
   { key: "legenda", label: "Legenda", tone: "neutral" },
@@ -170,6 +173,9 @@ export function App() {
         {tab === "settings" && <SettingsView />}
         {tab === "tickers" && data && (
           <TickersView data={data} onRefresh={refresh} />
+        )}
+        {tab === "limits" && data && (
+          <LimitsView data={data} onRefresh={refresh} />
         )}
         {tab === "backtest" && <BacktestView />}
         {tab === "scores" && <ScoresView />}

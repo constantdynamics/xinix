@@ -69,6 +69,7 @@ export interface TickerInput {
   jurisdiction?: string;
   deposit_type?: string;
   share_count_millions?: number;
+  buy_limit?: number | null;
 }
 
 export async function addTicker(payload: TickerInput): Promise<void> {

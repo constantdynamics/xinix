@@ -61,6 +61,7 @@ export interface Card {
   deposit_type: string | null;
   factor_count: number;
   trigger_event: string | null;
+  buy_limit?: number | null;
   color: Color;
   signal_color: Color;
   baseline_color: Color;

@@ -1,0 +1,698 @@
+import { useEffect, useMemo, useState } from "react";
+import type { Dashboard, Card as CardData, Sector } from "../types";
+import {
+  batchAddTickers,
+  lookupTickers,
+  patchTicker,
+  type TickerInput,
+} from "../api";
+import { googleFinanceUrl } from "../tickerLinks";
+import {
+  Card,
+  Button,
+  Pill,
+  Badge,
+  Dot,
+  SectionHeader,
+  RangeBar,
+} from "../components/ui";
+
+const VIEW_KEY = "xinix_limit_view";
+
+// Distance = limit/price, capped op 1.0. Hoger = dichter bij entry.
+function distanceFraction(price: number, limit: number): number {
+  if (price <= 0 || limit <= 0) return 0;
+  if (price <= limit) return 1;
+  return limit / price;
+}
+
+function distanceTone(d: number): {
+  bg: string;
+  text: string;
+  ring: string;
+  label: string;
+} {
+  if (d >= 1)
+    return {
+      bg: "bg-fog-lime",
+      text: "text-fog-lime",
+      ring: "ring-fog-lime/40",
+      label: "BUY!",
+    };
+  if (d >= 0.95)
+    return {
+      bg: "bg-fog-lime/80",
+      text: "text-fog-lime",
+      ring: "ring-fog-lime/30",
+      label: "≤5% boven",
+    };
+  if (d >= 0.85)
+    return {
+      bg: "bg-fog-info",
+      text: "text-fog-info",
+      ring: "ring-fog-info/30",
+      label: "≤15% boven",
+    };
+  if (d >= 0.7)
+    return {
+      bg: "bg-fog-warn",
+      text: "text-fog-warn",
+      ring: "ring-fog-warn/30",
+      label: "≤30% boven",
+    };
+  if (d >= 0.5)
+    return {
+      bg: "bg-fog-warn/70",
+      text: "text-fog-warn",
+      ring: "ring-fog-warn/20",
+      label: "≤50% boven",
+    };
+  return {
+    bg: "bg-fog-loss/70",
+    text: "text-fog-loss",
+    ring: "ring-fog-loss/20",
+    label: ">50% boven",
+  };
+}
+
+function fmt(v: number): string {
+  if (v < 1) return v.toFixed(3);
+  if (v < 100) return v.toFixed(2);
+  return v.toFixed(1);
+}
+
+interface LimitRow {
+  ticker: string;
+  company: string;
+  sector: Sector;
+  current: number | null;
+  limit: number;
+  distance: number; // 0..1
+  pct1d: number | null;
+  low_1y: number | null;
+  high_1y: number | null;
+  low_5y: number | null;
+  high_5y: number | null;
+}
+
+export function LimitsView({
+  data,
+  onRefresh,
+}: {
+  data: Dashboard;
+  onRefresh: () => void;
+}) {
+  const [view, setView] = useState<"list" | "tiles">(() => {
+    const saved = localStorage.getItem(VIEW_KEY);
+    return saved === "tiles" ? "tiles" : "list";
+  });
+  function pickView(v: "list" | "tiles") {
+    setView(v);
+    localStorage.setItem(VIEW_KEY, v);
+  }
+
+  const rows: LimitRow[] = useMemo(() => {
+    return data.cards
+      .filter((c) => c.buy_limit != null)
+      .map((c) => {
+        const price = c.summary?.last_close ?? null;
+        const limit = c.buy_limit as number;
+        return {
+          ticker: c.ticker,
+          company: c.company,
+          sector: c.sector,
+          current: price,
+          limit,
+          distance: price != null ? distanceFraction(price, limit) : 0,
+          pct1d: c.summary?.pct_change_1d ?? null,
+          low_1y: c.summary?.low_1y ?? null,
+          high_1y: c.summary?.high_1y ?? null,
+          low_5y: c.summary?.low_5y ?? null,
+          high_5y: c.summary?.high_5y ?? null,
+        };
+      })
+      .sort((a, b) => b.distance - a.distance);
+  }, [data.cards]);
+
+  const buyNowCount = rows.filter((r) => r.distance >= 1).length;
+  const closeCount = rows.filter(
+    (r) => r.distance >= 0.85 && r.distance < 1
+  ).length;
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow="Aankoop"
+        title="Limiet-watcher"
+        subtitle={`${rows.length} tickers met limit · ${buyNowCount} op/onder · ${closeCount} dicht (<15% boven)`}
+        aside={
+          <div className="flex gap-1.5">
+            <Pill
+              tone="lime"
+              active={view === "list"}
+              onClick={() => pickView("list")}
+              size="sm"
+            >
+              Lijst
+            </Pill>
+            <Pill
+              tone="cyan"
+              active={view === "tiles"}
+              onClick={() => pickView("tiles")}
+              size="sm"
+            >
+              Tegels
+            </Pill>
+          </div>
+        }
+      />
+
+      <BulkPaste data={data} onRefresh={onRefresh} />
+
+      {rows.length === 0 ? (
+        <Card className="p-10 text-center text-neutral-400 text-sm">
+          Geen tickers met aankooplimiet. Plak hierboven een lijst om te
+          beginnen.
+        </Card>
+      ) : view === "list" ? (
+        <LimitTable rows={rows} />
+      ) : (
+        <LimitTiles rows={rows} />
+      )}
+    </div>
+  );
+}
+
+function LimitTable({ rows }: { rows: LimitRow[] }) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="overflow-auto">
+        <table className="w-full text-sm">
+          <thead className="text-[10px] uppercase tracking-wider text-neutral-300 bg-ink-3/40">
+            <tr>
+              <th className="text-left p-3 font-semibold">Ticker</th>
+              <th className="text-left p-3 font-semibold">Bedrijf</th>
+              <th className="text-right p-3 font-semibold">Koers</th>
+              <th className="text-right p-3 font-semibold">Limit</th>
+              <th className="text-left p-3 font-semibold w-56">Distance</th>
+              <th className="text-right p-3 font-semibold">Dag</th>
+              <th className="text-left p-3 font-semibold w-64">1y range</th>
+              <th className="p-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const tone = distanceTone(r.distance);
+              const pct = Math.round(r.distance * 100);
+              return (
+                <tr
+                  key={r.ticker}
+                  className="border-t border-ink-5 hover:bg-ink-3/40 transition"
+                >
+                  <td className="p-3 font-bold whitespace-nowrap">
+                    <Badge
+                      tone={r.sector === "mining" ? "watch" : "cyan"}
+                      className="mr-2"
+                    >
+                      {r.sector === "mining" ? "MIN" : "BIO"}
+                    </Badge>
+                    <a
+                      href={googleFinanceUrl(r.ticker)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-fog-pink hover:underline"
+                    >
+                      {r.ticker}
+                    </a>
+                  </td>
+                  <td className="p-3 text-neutral-300 truncate max-w-xs">
+                    {r.company}
+                  </td>
+                  <td className="p-3 text-right tabular text-neutral-100">
+                    {r.current != null ? `$${fmt(r.current)}` : "—"}
+                  </td>
+                  <td className="p-3 text-right tabular text-neutral-300">
+                    ${fmt(r.limit)}
+                  </td>
+                  <td className="p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex-1 h-2.5 rounded-full bg-ink-5 overflow-hidden">
+                        <span
+                          className={`absolute inset-y-0 left-0 ${tone.bg}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </span>
+                      <span
+                        className={`text-[11px] tabular font-bold w-12 text-right ${tone.text}`}
+                      >
+                        {r.distance >= 1 ? "BUY!" : `${pct}%`}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="p-3 text-right tabular">
+                    <span
+                      className={
+                        (r.pct1d ?? 0) >= 0
+                          ? "text-fog-lime"
+                          : "text-fog-loss"
+                      }
+                    >
+                      {r.pct1d == null
+                        ? "—"
+                        : `${r.pct1d >= 0 ? "+" : ""}${r.pct1d.toFixed(1)}%`}
+                    </span>
+                  </td>
+                  <td className="p-3">
+                    {r.low_1y != null &&
+                    r.high_1y != null &&
+                    r.current != null ? (
+                      <RangeBar
+                        low={r.low_1y}
+                        high={r.high_1y}
+                        current={r.current}
+                      />
+                    ) : (
+                      <span className="text-[11px] text-neutral-400 italic">
+                        nog ophalen
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-3 text-right">
+                    <RemoveLimitButton ticker={r.ticker} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function LimitTiles({ rows }: { rows: LimitRow[] }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+      {rows.map((r) => {
+        const tone = distanceTone(r.distance);
+        const pct = Math.round(r.distance * 100);
+        const pctAbove = r.current != null && r.current > r.limit
+          ? ((r.current - r.limit) / r.limit) * 100
+          : null;
+        return (
+          <a
+            key={r.ticker}
+            href={googleFinanceUrl(r.ticker)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`block rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5 hover:scale-[1.02] transition cursor-pointer`}
+            title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}`}
+          >
+            <div className="flex items-center justify-between gap-1 mb-1">
+              <span className="font-bold text-sm text-ink-0 truncate">
+                {r.ticker}
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-ink-0/70 font-bold">
+                {r.sector === "mining" ? "MIN" : "BIO"}
+              </span>
+            </div>
+            <div className="font-bold tabular text-ink-0 text-base leading-none">
+              {r.distance >= 1 ? "BUY!" : `${pct}%`}
+            </div>
+            <div className="text-[10px] tabular text-ink-0/80 mt-1 leading-tight">
+              {r.current != null ? `$${fmt(r.current)}` : "—"}
+              <span className="text-ink-0/60"> / </span>
+              ${fmt(r.limit)}
+            </div>
+            {pctAbove != null && (
+              <div className="text-[9px] tabular text-ink-0/70 mt-0.5">
+                +{pctAbove.toFixed(0)}% boven limit
+              </div>
+            )}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function RemoveLimitButton({ ticker }: { ticker: string }) {
+  const [busy, setBusy] = useState(false);
+  async function clear() {
+    if (!confirm(`Limit voor ${ticker} verwijderen?`)) return;
+    setBusy(true);
+    try {
+      await patchTicker(ticker, { buy_limit: null });
+      window.location.reload(); // simpel: dwing dashboard refresh
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Button size="sm" variant="ghost" onClick={clear} disabled={busy}>
+      ✕
+    </Button>
+  );
+}
+
+interface PasteRow {
+  ticker: string;
+  limit: number;
+  inWatchlist: boolean;
+  recognized: boolean | null; // null = nog niet gecheckt
+  company: string | null;
+  selected: boolean; // alleen relevant voor onbekende
+  status: "pending" | "checking" | "done";
+}
+
+function parseLimitPaste(text: string): { rows: PasteRow[]; errors: string[] } {
+  const errors: string[] = [];
+  const rows: PasteRow[] = [];
+  const seen = new Set<string>();
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const parts = line.split(/[\s,;\t]+/).filter(Boolean);
+    if (parts.length < 2) {
+      errors.push(`'${raw}' mist een prijs`);
+      continue;
+    }
+    const ticker = parts[0].toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9.-]*$/.test(ticker)) {
+      errors.push(`'${parts[0]}' is geen geldig ticker`);
+      continue;
+    }
+    const price = Number(parts[1].replace(",", "."));
+    if (!Number.isFinite(price) || price <= 0) {
+      errors.push(`'${parts[1]}' is geen geldige prijs voor ${ticker}`);
+      continue;
+    }
+    if (seen.has(ticker)) continue;
+    seen.add(ticker);
+    rows.push({
+      ticker,
+      limit: price,
+      inWatchlist: false,
+      recognized: null,
+      company: null,
+      selected: false,
+      status: "pending",
+    });
+  }
+  return { rows, errors };
+}
+
+const MINING_RE =
+  /\b(mining|miner|mines|metals?|minerals?|resources?|exploration|drill(?:ing)?|royalt(?:y|ies)|streaming|gold|silver|copper|lithium|uranium|nickel|cobalt|graphite|zinc|platinum|palladium|tin|tungsten|molybdenum|rare\s*earth|potash|iron\s*ore|coal)\b/i;
+function inferSector(company: string | null | undefined): Sector {
+  if (company && MINING_RE.test(company)) return "mining";
+  return "biotech";
+}
+
+function BulkPaste({
+  data,
+  onRefresh,
+}: {
+  data: Dashboard;
+  onRefresh: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [rows, setRows] = useState<PasteRow[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const watchlistTickers = useMemo(
+    () => new Set(data.cards.map((c) => c.ticker)),
+    [data.cards]
+  );
+  const companyByTicker = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of data.cards) m.set(c.ticker, c.company);
+    return m;
+  }, [data.cards]);
+
+  // Re-parse on text change
+  useEffect(() => {
+    const parsed = parseLimitPaste(text);
+    setParseErrors(parsed.errors);
+    setRows((prev) => {
+      const prevByTicker = new Map(prev.map((r) => [r.ticker, r]));
+      return parsed.rows.map((p) => {
+        const inWatchlist = watchlistTickers.has(p.ticker);
+        const existing = prevByTicker.get(p.ticker);
+        if (existing && existing.limit === p.limit) {
+          return { ...existing, inWatchlist };
+        }
+        return {
+          ...p,
+          inWatchlist,
+          company: companyByTicker.get(p.ticker) ?? null,
+          // existing watchlist items zijn automatisch geselecteerd
+          selected: inWatchlist,
+        };
+      });
+    });
+  }, [text, watchlistTickers, companyByTicker]);
+
+  // Lookup voor onbekende tickers (debounced)
+  useEffect(() => {
+    const pending = rows.filter(
+      (r) => !r.inWatchlist && r.recognized === null && r.status === "pending"
+    );
+    if (pending.length === 0) return;
+    const timer = setTimeout(async () => {
+      const targets = pending.map((r) => r.ticker);
+      setRows((prev) =>
+        prev.map((r) =>
+          targets.includes(r.ticker) ? { ...r, status: "checking" } : r
+        )
+      );
+      try {
+        const results = await lookupTickers(targets);
+        const map = new Map(results.map((r) => [r.ticker, r]));
+        setRows((prev) =>
+          prev.map((r) => {
+            const res = map.get(r.ticker);
+            if (!res) return r;
+            return {
+              ...r,
+              recognized: res.recognized,
+              company: res.company ?? r.company,
+              status: "done",
+              // Yahoo herkende ticker = vóór-vink, anders niet
+              selected: res.recognized,
+            };
+          })
+        );
+      } catch (e) {
+        setError(`Lookup mislukt: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [rows]);
+
+  const newRows = rows.filter((r) => !r.inWatchlist);
+  const updateRows = rows.filter((r) => r.inWatchlist);
+  const newSelected = newRows.filter((r) => r.selected);
+  const checking = rows.filter((r) => r.status === "checking").length;
+
+  async function apply() {
+    setBusy(true);
+    setError(null);
+    setMsg(null);
+    try {
+      // 1) Bestaande tickers: update buy_limit per stuk via PATCH
+      let updated = 0;
+      for (const r of updateRows) {
+        await patchTicker(r.ticker, { buy_limit: r.limit });
+        updated++;
+      }
+      // 2) Nieuwe tickers (geselecteerd): batch insert met sector + limit
+      let inserted = 0;
+      if (newSelected.length > 0) {
+        const payload: TickerInput[] = newSelected.map((r) => ({
+          ticker: r.ticker,
+          company: r.company || r.ticker,
+          sector: inferSector(r.company),
+          buy_limit: r.limit,
+        }));
+        const res = await batchAddTickers(payload);
+        inserted = res.inserted;
+      }
+      setMsg(
+        `${updated} limit(s) bijgewerkt, ${inserted} nieuwe ticker(s) toegevoegd`
+      );
+      setText("");
+      setRows([]);
+      onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-wider font-bold text-neutral-300">
+            Bulk import
+          </div>
+          <div className="text-[11px] text-neutral-400 mt-0.5">
+            Eén regel per ticker:{" "}
+            <code className="text-fog-pink">ticker prijs</code>. Bestaande
+            tickers krijgen de limit; nieuwe worden eerst gecheckt en kun je
+            aan/uit vinken.
+          </div>
+        </div>
+      </div>
+
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={5}
+        spellCheck={false}
+        placeholder={"chn.ax 1.3\ndef 0.1\ncweb 0.12\nasb 18.7"}
+        className="w-full font-mono text-xs rounded-lg p-3 leading-relaxed"
+      />
+
+      {parseErrors.length > 0 && (
+        <ul className="text-[11px] text-fog-warn list-disc list-inside space-y-0.5">
+          {parseErrors.slice(0, 5).map((e, i) => (
+            <li key={i}>{e}</li>
+          ))}
+          {parseErrors.length > 5 && <li>… en meer</li>}
+        </ul>
+      )}
+
+      {rows.length > 0 && (
+        <div className="rounded-xl border border-ink-5 overflow-hidden bg-ink-1">
+          <div className="px-3 py-2 bg-ink-2 text-[11px] flex items-center gap-3 flex-wrap">
+            <span className="text-neutral-300">
+              <span className="font-bold text-fog-lime tabular">
+                {updateRows.length}
+              </span>{" "}
+              bestaande
+            </span>
+            <span className="text-neutral-300">
+              <span className="font-bold text-fog-pink tabular">
+                {newRows.length}
+              </span>{" "}
+              nieuw
+            </span>
+            {checking > 0 && (
+              <span className="flex items-center gap-1 text-fog-info">
+                <Dot tone="cyan" pulse />
+                {checking} bezig
+              </span>
+            )}
+            <span className="ml-auto text-neutral-400">
+              <span className="font-bold text-neutral-200 tabular">
+                {newSelected.length + updateRows.length}
+              </span>{" "}
+              wordt toegepast
+            </span>
+          </div>
+          <div className="max-h-72 overflow-auto">
+            <table className="w-full text-xs">
+              <tbody>
+                {rows.map((r) => {
+                  const checkboxDisabled = r.inWatchlist; // bestaande mag je niet uit-vinken
+                  return (
+                    <tr
+                      key={r.ticker}
+                      className="border-t border-ink-5 hover:bg-ink-3/40"
+                    >
+                      <td className="p-2 w-8 text-center">
+                        <input
+                          type="checkbox"
+                          checked={r.selected || r.inWatchlist}
+                          disabled={checkboxDisabled}
+                          onChange={() =>
+                            setRows((prev) =>
+                              prev.map((x) =>
+                                x.ticker === r.ticker
+                                  ? { ...x, selected: !x.selected }
+                                  : x
+                              )
+                            )
+                          }
+                        />
+                      </td>
+                      <td className="p-2 font-mono font-bold w-24">
+                        {r.ticker}
+                      </td>
+                      <td className="p-2 tabular text-fog-pink w-20">
+                        ${fmt(r.limit)}
+                      </td>
+                      <td className="p-2">
+                        {r.inWatchlist ? (
+                          <span className="text-fog-lime text-[11px]">
+                            ✓ in watchlist — limit wordt geüpdatet
+                          </span>
+                        ) : r.status === "checking" ? (
+                          <span className="text-neutral-400 italic text-[11px]">
+                            opzoeken…
+                          </span>
+                        ) : r.recognized ? (
+                          <span className="text-fog-info text-[11px]">
+                            nieuw · {r.company} — voeg toe
+                          </span>
+                        ) : r.recognized === false ? (
+                          <span className="text-fog-warn text-[11px]">
+                            niet herkend op Yahoo · vink uit als typo
+                          </span>
+                        ) : (
+                          <span className="text-neutral-400 text-[11px]">
+                            wachten op lookup
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <Button
+          variant="primary"
+          onClick={apply}
+          disabled={
+            busy ||
+            checking > 0 ||
+            (newSelected.length === 0 && updateRows.length === 0)
+          }
+        >
+          {busy
+            ? "Bezig…"
+            : checking > 0
+            ? `Lookup (${checking})…`
+            : `Toepassen (${updateRows.length}+${newSelected.length})`}
+        </Button>
+        {rows.length > 0 && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setText("");
+              setRows([]);
+            }}
+          >
+            Wis
+          </Button>
+        )}
+        {msg && <span className="text-fog-lime text-xs">{msg}</span>}
+        {error && <span className="text-fog-loss text-xs">{error}</span>}
+      </div>
+    </Card>
+  );
+}
