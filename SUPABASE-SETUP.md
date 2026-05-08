@@ -1,158 +1,143 @@
-# Volledige migratie naar Supabase + GitHub Pages
+# Supabase deploy — wat ik al heb gedaan, en wat jij nog moet doen
 
-Doel: Netlify volledig laten varen. Frontend op GitHub Pages, backend
-en cron op Supabase. Geen Netlify build minutes meer nodig.
+Project: **`zfcjugqgufsyltxhvkuu`** (naam: *maikel*, regio eu-west-1)
+Functions URL: `https://zfcjugqgufsyltxhvkuu.supabase.co/functions/v1`
 
-## Eindplaatje
+## ✅ Al gedaan via Supabase MCP
 
-| Onderdeel | Host |
-|---|---|
-| Frontend (HTML/JS/CSS) | GitHub Pages — `constantdynamics.github.io/xinix/` |
-| API (`/dashboard`, `/scores`, `/tickers`, …) | Supabase Edge Functions |
-| Background jobs (poll-prices, dispatch-alerts, …) | Supabase Edge Functions, gestart door pg_cron |
-| Database | Supabase Postgres (al in gebruik) |
-| Cron schedules | Supabase pg_cron via `pg_net.http_post` |
+1. **pg_cron + pg_net extensies geïnstalleerd** in de database.
+2. **`public.invoke_edge(fn TEXT)` helper** aangemaakt — leest functions_url + cron_secret uit een `_xinix_config` tabel en doet `net.http_post`.
+3. **`_xinix_config` tabel** gemaakt met RLS aan (geen policies, dus alleen service-role kan lezen) en gevuld:
+   - `functions_url` = `https://zfcjugqgufsyltxhvkuu.supabase.co/functions/v1`
+   - `cron_secret` = `d59af9416c38aa6c25f9647efb51f21a7d8233ac6b3fc41891f3918322d75718`
+4. **11 pg_cron jobs gescheduled** met de zelfde cron expressies als Netlify:
+   - `xinix-poll-prices` `0 22 * * 1-5`
+   - `xinix-poll-trials` `0 6 * * *`
+   - `xinix-poll-edgar` `*/30 * * * *`
+   - `xinix-poll-fda` `0 */6 * * *`
+   - `xinix-poll-biotech-news` `20 */2 * * *`
+   - `xinix-poll-mining-news` `15 */2 * * *`
+   - `xinix-poll-metals` `30 22 * * 1-5`
+   - `xinix-compute-signals` `0 5 * * *`
+   - `xinix-compute-scores` `0 6 * * *`
+   - `xinix-forward-returns` `30 7 * * *`
+   - `xinix-dispatch-alerts` `*/15 * * * *`
+5. **7 Edge Functions gedeployed** (zonder JWT verify, zoals afgesproken):
+   - `dashboard`, `trigger`, `settings`, `scores`, `backtest`, `ticker-lookup`, `tickers`
 
-## 1. Supabase CLI installeren (eenmalig, lokaal)
+## 🟡 Wat jij nog moet doen (~10 min)
+
+De Supabase MCP kan geen secrets zetten en geen massa‑deploy. De
+overgebleven 14 functions deploy je in één keer met de CLI, en de
+secrets moeten ook via de CLI of dashboard.
+
+### 1. Supabase CLI
 
 ```bash
 # macOS
 brew install supabase/tap/supabase
 
-# of via npm
+# of
 npm install -g supabase
 ```
 
-Inloggen + linken aan je project:
 ```bash
 supabase login
-supabase link --project-ref <jouw-project-ref>
+supabase link --project-ref zfcjugqgufsyltxhvkuu
 ```
 
-Project-ref vind je in de Supabase dashboard URL: `https://supabase.com/dashboard/project/<ref>`.
+### 2. Secrets zetten (ADMIN_TOKEN, RESEND, CRON_SECRET)
 
-## 2. Function secrets zetten
-
-Supabase Edge Functions hebben hun eigen env-store. Vul:
+**Belangrijk:** zonder ADMIN_TOKEN kunnen jouw frontend admin acties
+niet werken (watchlist toevoegen, settings opslaan). Zonder
+RESEND_API_KEY krijg je geen email alerts. CRON_SECRET móét matchen
+met wat in de DB staat — kopieer exact.
 
 ```bash
-supabase secrets set ADMIN_TOKEN="<dezelfde admin token als nu in Netlify>"
-supabase secrets set CRON_SECRET="<willekeurig geheim, bv. openssl rand -hex 32>"
-supabase secrets set RESEND_API_KEY="<huidige Resend key>"
-supabase secrets set RESEND_FROM="Xinix Signal <onboarding@resend.dev>"
-supabase secrets set SEC_USER_AGENT="Xinix contact@example.com"
-# SUPABASE_URL en SUPABASE_SERVICE_ROLE_KEY worden automatisch geïnjecteerd
-# door Supabase — niet apart zetten.
+supabase secrets set \
+  ADMIN_TOKEN="<dezelfde admin token als nu in Netlify>" \
+  CRON_SECRET="d59af9416c38aa6c25f9647efb51f21a7d8233ac6b3fc41891f3918322d75718" \
+  RESEND_API_KEY="<huidige Resend key>" \
+  RESEND_FROM="Xinix Signal <onboarding@resend.dev>" \
+  SEC_USER_AGENT="Xinix contact@example.com"
 ```
 
-## 3. Functions deployen
+`SUPABASE_URL` en `SUPABASE_SERVICE_ROLE_KEY` worden automatisch
+geïnjecteerd door Supabase — niet apart zetten.
 
-Eén commando deployt alle 21 functies. Cruciaal: `--no-verify-jwt` zodat
-GitHub Pages frontend ze direct kan aanroepen (we doen onze eigen auth
-in de function code zelf).
+### 3. Alle functies (her)deployen
 
 ```bash
 cd <repo>
 supabase functions deploy --no-verify-jwt
 ```
 
-Check in dashboard → Edge Functions of alle 21 erop staan.
+Dit upload **alle 21 functies** tegelijk (inclusief de 7 die ik al
+gedeployed heb — geen probleem, het is een upsert). Duurt ~30 sec.
 
-## 4. Database migraties draaien
+### 4. Frontend env zetten
 
-De pg_cron migratie installeert `pg_cron` + `pg_net` extensies en
-plant alle 11 schedules in.
+Op GitHub: **Repo settings → Secrets and variables → Actions →
+Variables**:
+- Name: `VITE_API_BASE_URL`
+- Value: `https://zfcjugqgufsyltxhvkuu.supabase.co/functions/v1`
+
+### 5. Push de branch
+
+De GitHub Action (`pages.yml` — al aanwezig) bouwt automatisch en
+deployt naar `https://constantdynamics.github.io/xinix/`.
+
+### 6. Netlify auto‑deploy uitzetten
+
+Netlify dashboard → Site settings → Build & deploy → **Stop builds**.
+
+## ✅ Verifiëren
+
+Na step 3 (deploy):
 
 ```bash
-supabase db push
+# Test dashboard endpoint
+curl -i https://zfcjugqgufsyltxhvkuu.supabase.co/functions/v1/dashboard
 ```
 
-Daarna éénmalig de runtime config zetten zodat pg_cron de functions
-kan aanroepen (in SQL editor van het dashboard):
-
+Test de cron handmatig:
 ```sql
--- Vervang <project-ref> en het secret door je eigen waarden
-ALTER DATABASE postgres SET xinix.functions_url
-  = 'https://<project-ref>.supabase.co/functions/v1';
-ALTER DATABASE postgres SET xinix.cron_secret
-  = '<dezelfde CRON_SECRET als bij stap 2>';
+-- in Supabase SQL editor
+SELECT public.invoke_edge('poll-prices-background');
+-- check signal_runs een paar minuten later voor de nieuwe rij
 ```
 
-Deze waarden worden uit `current_setting('xinix.functions_url')` gelezen
-in de `invoke_edge` helper. ALTER DATABASE blijft tussen restarts staan.
-
-Verifieer met:
-```sql
-SELECT jobname, schedule FROM cron.job WHERE jobname LIKE 'xinix-%';
--- moet 11 rijen geven
-```
-
-## 5. RLS-aware service code
-
-De Edge Functions gebruiken de service-role key (auto geïnjecteerd) en
-bypassen RLS — net als de Netlify functions deden. Geen RLS-aanpassing
-nodig.
-
-## 6. Frontend wijzen naar Supabase
-
-GitHub repo settings → **Variables** (zelfde tab als bij Pages setup):
-- `VITE_API_BASE_URL` → `https://<project-ref>.supabase.co/functions/v1`
-  (zonder trailing slash)
-
-De volgende push naar de branch triggert de Pages workflow, bouwt met
-deze URL ingebakken, en publiceert.
-
-## 7. Verifiëren
-
-1. Open `https://constantdynamics.github.io/xinix/` — dashboard moet
-   laden zonder CORS errors (Network tab kijken).
-2. Trigger handmatig een job: Settings tab → admin token invullen,
-   dan in Dashboard `⚙ jobs` popover → klik bv. `Prijzen`. Check
-   `signal_runs` tabel of er een nieuwe rij komt.
-3. Wacht 15 min — cron-bestuurde `dispatch-alerts` zou moeten draaien.
-   Check `signal_runs` voor ok=true.
-
-## 8. Netlify uitfaseren
-
-Als alles werkt:
-- Netlify dashboard → Site settings → **Stop builds**.
-- Eventueel Domain mapping verwijderen / site archiveren.
-- DNS niet meer naar Netlify pointen (als je dat had).
-- `netlify/` directory en `netlify.toml` mogen blijven staan voor
-  eventuele rollback; ze doen niets als de site niet meer deployt.
+Of vanuit de UI: Settings tab → admin token invullen → Dashboard
+`⚙ jobs` popover → klik bv. `Prijzen` → kijk in `signal_runs`.
 
 ## Kosten / limits
 
 | Resource | Free tier |
 |---|---|
 | Edge Function invocations | 500K / maand |
-| Edge Function CPU | 50ms / invocation gemiddeld |
 | Edge Function wall clock | 150s max per call |
 | pg_cron jobs | onbeperkt |
 | Database storage | 500 MB |
-| Bandwidth (egress) | 5 GB / maand |
 
-Onze 11 cron jobs tezamen ≈ ~3000 calls/dag worst case. Goed binnen
-de 500K/mnd budget. Heaviest functions (compute-scores, backtest,
-forward-returns) zijn lang maar bevatten alleen Yahoo throttling —
-zouden binnen 150s moeten passen voor een watchlist <50 tickers.
+11 cron jobs × ~30 calls/dag = ~3K calls/dag = ~90K/maand. Ruim
+binnen budget.
 
 ## Troubleshooting
 
-**Cron job draait niet:**
+**Cron draait niet:**
 ```sql
-SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 5;
--- toont laatste runs en eventuele errors
+SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;
 ```
 
-**Function geeft 401:**
-- Check dat het deploy commando `--no-verify-jwt` had.
-- Anders: dashboard → Edge Functions → die functie → Settings → "Verify JWT" uit.
+**`invoke_edge` faalt:**
+```sql
+SELECT * FROM public._xinix_config;
+-- moet 2 rijen geven: functions_url + cron_secret
+```
 
-**CORS errors in browser:**
-- Check `_shared/cors.ts` allowlist; `constantdynamics.github.io` moet erin staan.
-- Een kleine mismatch (bv. trailing slash op origin) breekt CORS.
+**CORS error in browser:**
+- `_shared/cors.ts` ALLOWED set moet je origin bevatten.
+- Dat staat al goed: `https://constantdynamics.github.io` + localhost.
 
-**Email/ntfy gaat niet:**
-- `supabase secrets list` om te bevestigen dat RESEND_API_KEY etc gezet zijn.
-- `signal_alerts_sent` tabel kijken voor failure rows met error kolom.
+**Function geeft 401 op CORS preflight:**
+- Check dat de deploy met `--no-verify-jwt` ging. Als niet, redeploy.

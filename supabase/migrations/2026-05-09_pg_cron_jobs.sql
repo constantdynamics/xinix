@@ -1,11 +1,10 @@
 -- pg_cron + http extensies + 11 cron jobs die de Supabase Edge Functions
 -- aanroepen op de schedules die voorheen in netlify.toml stonden.
 --
--- Vereiste runtime config (Database → Settings → Vault):
---   xinix.functions_url   bv. https://<project>.supabase.co/functions/v1
---   xinix.cron_secret     willekeurige geheim, ook in Edge Function env
---                         als CRON_SECRET zodat de functie de oorsprong
---                         kan verifiëren.
+-- Runtime config staat in tabel public._xinix_config (zie volgende
+-- migratie 2026-05-09_pg_cron_config_table.sql) — ALTER DATABASE SET
+-- vereist superuser op Supabase, dus we gebruiken een tabel + helper
+-- function in plaats van current_setting().
 --
 -- pg_cron draait elke ingeplande job in UTC tegen de Supabase database.
 -- Functions worden via http_post vanuit Postgres aangeroepen — async,
