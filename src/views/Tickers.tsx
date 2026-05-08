@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Card as CardType, Dashboard, Sector } from "../types";
 import {
   addTicker,
   batchAddTickers,
+  batchRemoveTickers,
   lookupTickers,
   removeTicker,
   type TickerInput,
@@ -216,6 +217,12 @@ export function TickersView({
   const nextIdRef = useRef(1);
   const extrasRef = useRef<Map<string, Partial<TickerInput>>>(new Map());
 
+  // Watchlist cleanup state
+  const [wlSelected, setWlSelected] = useState<Set<string>>(new Set());
+  const [wlUnrecognized, setWlUnrecognized] = useState<Set<string> | null>(null);
+  const [wlValidating, setWlValidating] = useState(false);
+  const [wlBulkBusy, setWlBulkBusy] = useState(false);
+
   useEffect(() => {
     const parsed =
       batchMode === "quick"
@@ -415,6 +422,144 @@ export function TickersView({
       onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // Dedupe-detectie op de huidige watchlist: groepeert op genormaliseerde
+  // bedrijfsnaam, vlagt alle behalve het alfabetisch eerste ticker als
+  // duplicaat. Lege/dezelfde-als-ticker company telt niet (dan is alleen
+  // de ticker zelf bekend, geen betrouwbare match mogelijk).
+  function normalizeCompany(s: string | null | undefined): string {
+    if (!s) return "";
+    return s
+      .toLowerCase()
+      .replace(/[.,]/g, " ")
+      .replace(
+        /\b(inc|corp|corporation|ltd|limited|plc|sa|nv|ag|llc|holdings?|group|co|company|the)\b/g,
+        ""
+      )
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  const wlDuplicates = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const c of data.cards) {
+      const key = normalizeCompany(c.company);
+      if (!key) continue;
+      // Skip wanneer company == ticker (geen echte naam)
+      if (key === c.ticker.toLowerCase()) continue;
+      const arr = groups.get(key) ?? [];
+      arr.push(c.ticker);
+      groups.set(key, arr);
+    }
+    const dupes = new Set<string>();
+    for (const arr of groups.values()) {
+      if (arr.length < 2) continue;
+      arr.sort(); // alfabetisch — eerste blijft, rest is duplicaat
+      for (let i = 1; i < arr.length; i++) dupes.add(arr[i]);
+    }
+    return dupes;
+  }, [data.cards]);
+
+  const wlDuplicateGroups = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const c of data.cards) {
+      const key = normalizeCompany(c.company);
+      if (!key) continue;
+      if (key === c.ticker.toLowerCase()) continue;
+      const arr = groups.get(key) ?? [];
+      arr.push(c.ticker);
+      groups.set(key, arr);
+    }
+    return [...groups.values()].filter((g) => g.length > 1);
+  }, [data.cards]);
+
+  async function validateWatchlist() {
+    setWlValidating(true);
+    setError(null);
+    try {
+      const tickers = data.cards.map((c) => c.ticker);
+      const recognized = new Set<string>();
+      // Chunks van 50 — endpoint cap.
+      for (let i = 0; i < tickers.length; i += 50) {
+        const chunk = tickers.slice(i, i + 50);
+        const results = await lookupTickers(chunk);
+        for (const r of results) {
+          if (r.recognized) recognized.add(r.ticker);
+        }
+      }
+      const unrecognized = new Set<string>();
+      for (const t of tickers) if (!recognized.has(t)) unrecognized.add(t);
+      setWlUnrecognized(unrecognized);
+      setMsg(
+        `${recognized.size}/${tickers.length} herkend bij Yahoo, ${unrecognized.size} niet gevonden`
+      );
+    } catch (e) {
+      setError(`Validatie mislukt: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setWlValidating(false);
+    }
+  }
+
+  function selectAllUnrecognized() {
+    if (!wlUnrecognized) return;
+    setWlSelected(new Set(wlUnrecognized));
+  }
+  function selectAllDuplicates() {
+    setWlSelected(new Set(wlDuplicates));
+  }
+  function toggleWlRow(ticker: string) {
+    setWlSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(ticker)) next.delete(ticker);
+      else next.add(ticker);
+      return next;
+    });
+  }
+  function clearWlSelection() {
+    setWlSelected(new Set());
+  }
+
+  async function removeWlSelection() {
+    if (wlSelected.size === 0) return;
+    const list = [...wlSelected];
+    if (
+      !confirm(
+        `${list.length} ticker(s) verwijderen uit watchlist?\n\n${list
+          .slice(0, 20)
+          .join(", ")}${list.length > 20 ? `, … (${list.length - 20} meer)` : ""}`
+      )
+    )
+      return;
+    setWlBulkBusy(true);
+    setError(null);
+    setMsg(null);
+    try {
+      const res = await batchRemoveTickers(list);
+      setMsg(
+        `${res.removed.length} verwijderd${
+          res.failed.length ? `, ${res.failed.length} mislukt` : ""
+        }`
+      );
+      if (res.failed.length) {
+        setError(
+          `Mislukt: ${res.failed
+            .slice(0, 3)
+            .map((f) => `${f.ticker} (${f.error})`)
+            .join("; ")}`
+        );
+      }
+      setWlSelected(new Set());
+      // Verwijder ook uit unrecognized cache zodat de UI klopt.
+      if (wlUnrecognized) {
+        const next = new Set(wlUnrecognized);
+        for (const t of res.removed) next.delete(t);
+        setWlUnrecognized(next);
+      }
+      onRefresh();
+    } finally {
+      setWlBulkBusy(false);
     }
   }
 
@@ -898,11 +1043,128 @@ export function TickersView({
           title="Huidige watchlist"
           subtitle={`${data.cards.length} tickers`}
         />
+
+        {/* Cleanup toolbar */}
+        <Card className="p-3 mb-3 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={validateWatchlist}
+              disabled={wlValidating || data.cards.length === 0}
+              title="Roept Yahoo-lookup aan voor alle watchlist tickers"
+            >
+              {wlValidating ? "Bezig…" : "Check geldigheid"}
+            </Button>
+            {wlUnrecognized && (
+              <span className="flex items-center gap-1.5 text-xs">
+                <Dot tone={wlUnrecognized.size > 0 ? "orange" : "lime"} />
+                <span className="tabular text-neutral-300">
+                  {wlUnrecognized.size}
+                </span>
+                <span className="text-neutral-500">niet herkend</span>
+                {wlUnrecognized.size > 0 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={selectAllUnrecognized}
+                  >
+                    selecteer
+                  </Button>
+                )}
+              </span>
+            )}
+
+            <span className="text-neutral-700 mx-1">·</span>
+
+            <span className="flex items-center gap-1.5 text-xs">
+              <Dot tone={wlDuplicates.size > 0 ? "loss" : "lime"} />
+              <span className="tabular text-neutral-300">
+                {wlDuplicates.size}
+              </span>
+              <span className="text-neutral-500">duplicaten</span>
+              {wlDuplicates.size > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={selectAllDuplicates}
+                  title={
+                    wlDuplicateGroups
+                      .map(
+                        (g) => `${g[0]} <-> ${g.slice(1).join(", ")}`
+                      )
+                      .slice(0, 5)
+                      .join("\n")
+                  }
+                >
+                  selecteer
+                </Button>
+              )}
+            </span>
+
+            {wlSelected.size > 0 && (
+              <>
+                <span className="text-neutral-700 mx-1">·</span>
+                <span className="font-bold text-fog-pink tabular text-xs">
+                  {wlSelected.size} geselecteerd
+                </span>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={removeWlSelection}
+                  disabled={wlBulkBusy}
+                >
+                  {wlBulkBusy ? "Bezig…" : "Verwijder selectie"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={clearWlSelection}>
+                  Deselect
+                </Button>
+              </>
+            )}
+          </div>
+
+          {wlDuplicateGroups.length > 0 && (
+            <div className="text-[11px] text-neutral-500 leading-relaxed">
+              <span className="text-neutral-400 font-semibold">
+                Duplicaat-groepen ({wlDuplicateGroups.length}):
+              </span>{" "}
+              {wlDuplicateGroups.slice(0, 8).map((g, i) => (
+                <span key={i} className="inline-block mr-3">
+                  <span className="text-fog-lime">{g[0]}</span>
+                  <span className="text-neutral-600"> ↔ </span>
+                  <span className="text-fog-loss">{g.slice(1).join(", ")}</span>
+                </span>
+              ))}
+              {wlDuplicateGroups.length > 8 &&
+                ` … en ${wlDuplicateGroups.length - 8} meer`}
+            </div>
+          )}
+        </Card>
+
         <Card className="overflow-hidden">
           <div className="overflow-auto">
             <table className="w-full text-sm">
               <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/40">
                 <tr>
+                  <th className="p-3 w-8">
+                    <input
+                      type="checkbox"
+                      checked={
+                        data.cards.length > 0 &&
+                        data.cards.every((c) => wlSelected.has(c.ticker))
+                      }
+                      onChange={() => {
+                        if (data.cards.every((c) => wlSelected.has(c.ticker))) {
+                          setWlSelected(new Set());
+                        } else {
+                          setWlSelected(
+                            new Set(data.cards.map((c) => c.ticker))
+                          );
+                        }
+                      }}
+                      title="Selecteer alles"
+                    />
+                  </th>
                   <th className="text-left p-3 font-semibold">Sector</th>
                   <th className="text-left p-3 font-semibold">Ticker</th>
                   <th className="text-left p-3 font-semibold">Bedrijf</th>
@@ -914,62 +1176,97 @@ export function TickersView({
                 </tr>
               </thead>
               <tbody>
-                {data.cards.map((c) => (
-                  <tr
-                    key={c.ticker}
-                    className="border-t border-ink-5 hover:bg-ink-3/40 transition"
-                  >
-                    <td className="p-3">
-                      <Badge tone={c.sector === "mining" ? "watch" : "cyan"}>
-                        {c.sector === "mining" ? "MIN" : "BIO"}
-                      </Badge>
-                    </td>
-                    <td className="p-3 font-bold">
-                      <a
-                        href={googleFinanceUrl(c.ticker)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-fog-pink hover:underline"
-                      >
-                        {c.ticker}
-                      </a>
-                    </td>
-                    <td className="p-3 text-neutral-300">{c.company}</td>
-                    <td className="p-3 tabular text-neutral-200">
-                      {c.goud_score ?? "—"}
-                    </td>
-                    <td className="p-3 text-neutral-500">{c.goud_type ?? "—"}</td>
-                    <td className="p-3 text-neutral-500">
-                      {c.sector === "mining"
-                        ? [c.commodity, c.jurisdiction, c.deposit_type]
-                            .filter(Boolean)
-                            .join(" / ")
-                        : [c.phase, c.modality, c.disease_area]
-                            .filter(Boolean)
-                            .join(" / ")}
-                    </td>
-                    <td className="p-3 text-neutral-500 truncate max-w-xs">
-                      {c.trigger_event ?? "—"}
-                    </td>
-                    <td className="p-3 text-right space-x-1 whitespace-nowrap">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setEditing(c)}
-                      >
-                        details
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => remove(c.ticker)}
-                        className="hover:text-fog-loss"
-                      >
-                        ✕
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {data.cards.map((c) => {
+                  const isSelected = wlSelected.has(c.ticker);
+                  const isUnrecognized = wlUnrecognized?.has(c.ticker) ?? false;
+                  const isDuplicate = wlDuplicates.has(c.ticker);
+                  const accent = isSelected
+                    ? "bg-fog-pink/[0.06]"
+                    : isUnrecognized
+                    ? "bg-fog-warn/[0.05]"
+                    : isDuplicate
+                    ? "bg-fog-loss/[0.05]"
+                    : "";
+                  return (
+                    <tr
+                      key={c.ticker}
+                      className={`border-t border-ink-5 hover:bg-ink-3/40 transition ${accent}`}
+                    >
+                      <td className="p-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleWlRow(c.ticker)}
+                        />
+                      </td>
+                      <td className="p-3">
+                        <Badge tone={c.sector === "mining" ? "watch" : "cyan"}>
+                          {c.sector === "mining" ? "MIN" : "BIO"}
+                        </Badge>
+                      </td>
+                      <td className="p-3 font-bold">
+                        <a
+                          href={googleFinanceUrl(c.ticker)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-fog-pink hover:underline"
+                        >
+                          {c.ticker}
+                        </a>
+                        {isUnrecognized && (
+                          <Dot
+                            tone="orange"
+                            className="ml-2 inline-block"
+                            title="Niet herkend op Yahoo"
+                          />
+                        )}
+                        {isDuplicate && (
+                          <Dot
+                            tone="loss"
+                            className="ml-2 inline-block"
+                            title="Duplicaat (zelfde bedrijfsnaam als ander ticker)"
+                          />
+                        )}
+                      </td>
+                      <td className="p-3 text-neutral-300">{c.company}</td>
+                      <td className="p-3 tabular text-neutral-200">
+                        {c.goud_score ?? "—"}
+                      </td>
+                      <td className="p-3 text-neutral-500">
+                        {c.goud_type ?? "—"}
+                      </td>
+                      <td className="p-3 text-neutral-500">
+                        {c.sector === "mining"
+                          ? [c.commodity, c.jurisdiction, c.deposit_type]
+                              .filter(Boolean)
+                              .join(" / ")
+                          : [c.phase, c.modality, c.disease_area]
+                              .filter(Boolean)
+                              .join(" / ")}
+                      </td>
+                      <td className="p-3 text-neutral-500 truncate max-w-xs">
+                        {c.trigger_event ?? "—"}
+                      </td>
+                      <td className="p-3 text-right space-x-1 whitespace-nowrap">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEditing(c)}
+                        >
+                          details
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => remove(c.ticker)}
+                          className="hover:text-fog-loss"
+                        >
+                          ✕
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -116,6 +116,23 @@ export async function removeTicker(ticker: string): Promise<void> {
   if (!res.ok) throw new Error(`remove ticker ${res.status}`);
 }
 
+export async function batchRemoveTickers(
+  tickers: string[]
+): Promise<{ removed: string[]; failed: { ticker: string; error: string }[] }> {
+  const removed: string[] = [];
+  const failed: { ticker: string; error: string }[] = [];
+  // Sequentieel om de admin endpoint niet te overspoelen — mutates 1 row each.
+  for (const t of tickers) {
+    try {
+      await removeTicker(t);
+      removed.push(t);
+    } catch (e) {
+      failed.push({ ticker: t, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { removed, failed };
+}
+
 export interface LookupResult {
   ticker: string;
   recognized: boolean;
