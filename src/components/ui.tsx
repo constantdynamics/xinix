@@ -370,10 +370,11 @@ export function RangeBar({
   );
 }
 
-// ─── Thermometer — verticale fill bar met green->yellow->orange->red ──
-// Vulling = pctAboveLow / 200, capped op 1.0. Dus +200% boven low = vol.
-// Kleur volgt de fill via een vertical gradient zodat de top altijd rood
-// en de bodem altijd lime is, ongeacht hoe hoog de stand staat.
+// ─── Thermometer — verticale fill bar; voller = goedkoper ──────────────
+// Vulling = 1 - clamp(pctAboveLow / 200, 0, 1). Bij koers op de low =
+// vol (200% rijk = leeg). Regenboog gradient bottom-up: lime -> yellow
+// -> orange -> red -> pink. Dus een volledig gevulde bar laat de hele
+// regenboog zien (cheap = celebration). Halfvol toont alleen lime/yellow.
 export function Thermometer({
   low,
   high,
@@ -396,17 +397,16 @@ export function Thermometer({
     return null;
   }
   const pctAboveLow = ((current - low) / low) * 100;
-  const fill = Math.max(0, Math.min(1, pctAboveLow / 200));
-  // Tekstkleur = de top-kleur die nu zichtbaar is (vulhoogte bepaalt
-  // welk gedeelte van de gradient de huidige stand is).
+  const cheapness = Math.max(0, 1 - Math.min(pctAboveLow / 200, 1));
+  // Label-kleur = "hoe goedkoop". Dichtbij low = lime, ver erboven = pink.
   const textTone =
-    fill < 0.25
+    pctAboveLow < 30
       ? "text-fog-lime"
-      : fill < 0.5
-      ? "text-fog-watch"
-      : fill < 0.75
+      : pctAboveLow < 100
+      ? "text-fog-info"
+      : pctAboveLow < 200
       ? "text-fog-warn"
-      : "text-fog-loss";
+      : "text-fog-pink";
   function fmt(v: number) {
     if (v < 1) return `$${v.toFixed(3)}`;
     if (v < 100) return `$${v.toFixed(2)}`;
@@ -423,15 +423,11 @@ export function Thermometer({
         <div
           className="absolute inset-x-0 bottom-0 transition-[height] duration-300"
           style={{
-            height: `${fill * 100}%`,
+            height: `${cheapness * 100}%`,
             background:
-              "linear-gradient(to top, #a7ff1f 0%, #ffd400 35%, #ff8c00 65%, #ff1a1a 100%)",
+              "linear-gradient(to top, #a7ff1f 0%, #ffd400 25%, #ff8c00 50%, #ff5a3a 75%, #ff1f8f 100%)",
           }}
-        />
-        <div
-          className="absolute inset-x-0 border-t border-white/30"
-          style={{ bottom: `${fill * 100}%` }}
-          title={`current ${fmt(current)} = +${pctAboveLow.toFixed(0)}% boven low`}
+          title={`current ${fmt(current)} = +${pctAboveLow.toFixed(0)}% boven low (cheapness ${(cheapness * 100).toFixed(0)}%)`}
         />
       </div>
       <div className={cx("text-[10px] tabular font-bold", textTone)}>
