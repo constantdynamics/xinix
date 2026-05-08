@@ -361,6 +361,10 @@ interface PasteRow {
   ticker: string;
   limit: number;
   inWatchlist: boolean;
+  // Het echte ticker in de watchlist als er fuzzy match was (bv. user
+  // typte "EDCU" maar watchlist heeft "EDCU.AX"). Wordt gebruikt voor
+  // PATCH zodat we de limit op de juiste rij zetten.
+  matchedTicker?: string;
   recognized: boolean | null; // null = nog niet gecheckt
   company: string | null;
   selected: boolean; // alleen relevant voor onbekende
@@ -435,6 +439,19 @@ function BulkPaste({
     for (const c of data.cards) m.set(c.ticker, c.company);
     return m;
   }, [data.cards]);
+  // Index op base-ticker (alles voor de eerste punt). Zo kan "EDCU"
+  // matchen met "EDCU.AX" / "EDCU.V" / "EDCU.TO" in de watchlist zonder
+  // dat de gebruiker de beurscode hoeft mee te typen. Bij meerdere
+  // varianten pakken we de eerste; ambigue gevallen zijn zeldzaam in
+  // een persoonlijke watchlist.
+  const watchlistByBase = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of data.cards) {
+      const base = c.ticker.split(".")[0].toUpperCase();
+      if (!m.has(base)) m.set(base, c.ticker);
+    }
+    return m;
+  }, [data.cards]);
 
   // Re-parse on text change
   useEffect(() => {
@@ -443,21 +460,33 @@ function BulkPaste({
     setRows((prev) => {
       const prevByTicker = new Map(prev.map((r) => [r.ticker, r]));
       return parsed.rows.map((p) => {
-        const inWatchlist = watchlistTickers.has(p.ticker);
+        const exact = watchlistTickers.has(p.ticker);
+        const base = p.ticker.split(".")[0];
+        // Alleen base-match proberen als de getypte ticker zelf geen
+        // beurssuffix heeft (anders had user expliciet die suffix
+        // bedoeld). Plus zelf niet bestaat.
+        const noSuffix = !p.ticker.includes(".");
+        const fuzzyMatch =
+          !exact && noSuffix ? watchlistByBase.get(base) ?? null : null;
+        const matchedTicker = fuzzyMatch && fuzzyMatch !== p.ticker ? fuzzyMatch : undefined;
+        const inWatchlist = exact || !!matchedTicker;
+        const effectiveTicker = matchedTicker ?? p.ticker;
         const existing = prevByTicker.get(p.ticker);
         if (existing && existing.limit === p.limit) {
-          return { ...existing, inWatchlist };
+          return { ...existing, inWatchlist, matchedTicker };
         }
         return {
           ...p,
           inWatchlist,
-          company: companyByTicker.get(p.ticker) ?? null,
-          // existing watchlist items zijn automatisch geselecteerd
+          matchedTicker,
+          company: companyByTicker.get(effectiveTicker) ?? null,
+          // existing watchlist items (exact + fuzzy) zijn automatisch
+          // geselecteerd. Yahoo lookup wordt overgeslagen.
           selected: inWatchlist,
         };
       });
     });
-  }, [text, watchlistTickers, companyByTicker]);
+  }, [text, watchlistTickers, companyByTicker, watchlistByBase]);
 
   // Lookup voor onbekende tickers (debounced)
   useEffect(() => {
@@ -506,10 +535,13 @@ function BulkPaste({
     setError(null);
     setMsg(null);
     try {
-      // 1) Bestaande tickers: update buy_limit per stuk via PATCH
+      // 1) Bestaande tickers: update buy_limit per stuk via PATCH.
+      //    matchedTicker (fuzzy match op base) krijgt voorrang zodat
+      //    "EDCU 0.05" landt op de "EDCU.AX" rij.
       let updated = 0;
       for (const r of updateRows) {
-        await patchTicker(r.ticker, { buy_limit: r.limit });
+        const target = r.matchedTicker ?? r.ticker;
+        await patchTicker(target, { buy_limit: r.limit });
         updated++;
       }
       // 2) Nieuwe tickers (geselecteerd): batch insert met sector + limit
@@ -634,7 +666,17 @@ function BulkPaste({
                       <td className="p-2">
                         {r.inWatchlist ? (
                           <span className="text-fog-lime text-[11px]">
-                            ✓ in watchlist — limit wordt geüpdatet
+                            ✓ in watchlist
+                            {r.matchedTicker && (
+                              <span className="text-fog-info">
+                                {" "}
+                                als{" "}
+                                <span className="font-mono font-bold">
+                                  {r.matchedTicker}
+                                </span>
+                              </span>
+                            )}
+                            {" "}— limit wordt geüpdatet
                           </span>
                         ) : r.status === "checking" ? (
                           <span className="text-neutral-400 italic text-[11px]">
