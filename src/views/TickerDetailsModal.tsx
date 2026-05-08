@@ -195,9 +195,9 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
   const overallPct = totalFields ? totalFilled / totalFields : 0;
   function light(filled: number, total: number): string {
     const r = total ? filled / total : 0;
-    if (r >= 0.7) return "bg-emerald-500";
-    if (r >= 0.4) return "bg-amber-500";
-    return "bg-red-500";
+    if (r >= 0.7) return "bg-fog-lime";
+    if (r >= 0.4) return "bg-fog-warn";
+    return "bg-fog-loss";
   }
 
   async function save() {
@@ -226,72 +226,75 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-start justify-center overflow-y-auto p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-lg max-w-3xl w-full my-8 shadow-2xl">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-4 animate-fade-up">
+      <div className="bg-ink-2 border border-ink-5 rounded-2xl max-w-3xl w-full my-8 shadow-glow">
+        <div className="p-5 border-b border-ink-5 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold">
+            <h2 className="text-lg font-bold flex items-center gap-3">
               <a
                 href={googleFinanceUrl(card.ticker)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sky-300 hover:underline"
+                className="text-fog-pink hover:underline"
                 title={`Open ${card.ticker} op Google Finance`}
               >
                 {card.ticker}
-              </a>{" "}
-              <span className="text-xs text-slate-400 uppercase ml-2">
+              </a>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-md border border-ink-6 text-neutral-400">
                 {card.sector}
               </span>
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-neutral-500 mt-1">
               {card.company} · pre‑event details (briefing v1.1)
             </p>
             <div className="mt-2 flex items-center gap-3 text-[11px]">
-              <span className="text-slate-400">Compleetheid:</span>
-              <span className="flex items-center gap-1">
+              <span className="text-neutral-500 uppercase tracking-wider font-bold text-[10px]">
+                Compleetheid
+              </span>
+              <span className="flex items-center gap-1.5">
                 <span
                   className={`inline-block w-2 h-2 rounded-full ${light(
                     groupCounts.shared.filled,
                     groupCounts.shared.total
                   )}`}
                 />
-                <span className="text-slate-300">
+                <span className="text-neutral-300 tabular">
                   shared {groupCounts.shared.filled}/{groupCounts.shared.total}
                 </span>
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1.5">
                 <span
                   className={`inline-block w-2 h-2 rounded-full ${light(
                     groupCounts.sector.filled,
                     groupCounts.sector.total
                   )}`}
                 />
-                <span className="text-slate-300">
+                <span className="text-neutral-300 tabular">
                   {card.sector} {groupCounts.sector.filled}/
                   {groupCounts.sector.total}
                 </span>
               </span>
-              <span className="text-slate-500">
-                totaal {(overallPct * 100).toFixed(0)}%
+              <span className="text-fog-pink font-bold tabular">
+                {(overallPct * 100).toFixed(0)}%
               </span>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="px-2 py-1 text-xs text-slate-400 hover:text-slate-200"
+            className="h-8 w-8 rounded-lg hover:bg-ink-3 text-neutral-400 hover:text-fog-pink transition flex items-center justify-center"
+            title="Sluiten"
           >
-            ✕ Sluiten
+            ✕
           </button>
         </div>
 
-        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+        <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           {fields.map((f) => (
             <div key={f.key as string} className="space-y-1">
-              <label className="block text-xs text-slate-400">
+              <label className="block text-[10px] uppercase tracking-wider font-bold text-neutral-500">
                 {f.label}
                 {f.hint && (
-                  <span className="block text-[10px] text-slate-600">
+                  <span className="block text-[10px] normal-case tracking-normal text-neutral-700 font-normal mt-0.5">
                     {f.hint}
                   </span>
                 )}
@@ -311,7 +314,7 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
                       e.target.value === "" ? "" : e.target.value === "true"
                     )
                   }
-                  className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded"
+                  className="w-full h-9 px-2.5 rounded-lg"
                 >
                   <option value="">— onbekend —</option>
                   <option value="true">ja</option>
@@ -321,7 +324,7 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
                 <select
                   value={(form[f.key as string] ?? "") as string}
                   onChange={(e) => setField(f.key as string, e.target.value)}
-                  className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded"
+                  className="w-full h-9 px-2.5 rounded-lg"
                 >
                   {f.options!.map((o) => (
                     <option key={o} value={o}>
@@ -335,7 +338,7 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
                   step="any"
                   value={(form[f.key as string] ?? "") as string | number}
                   onChange={(e) => setField(f.key as string, e.target.value)}
-                  className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded font-mono"
+                  className="w-full h-9 px-2.5 rounded-lg font-mono"
                 />
               )}
             </div>
@@ -343,20 +346,22 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
         </div>
 
         {error && (
-          <div className="px-4 pb-2 text-sm text-red-400">{error}</div>
+          <div className="mx-5 mb-2 rounded-lg border border-fog-loss/40 bg-fog-loss/10 p-2 text-sm text-fog-loss">
+            {error}
+          </div>
         )}
 
-        <div className="p-4 border-t border-slate-800 flex justify-end gap-2">
+        <div className="p-5 border-t border-ink-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-sm border border-slate-700 rounded text-slate-300"
+            className="h-9 px-4 text-sm rounded-lg border border-ink-5 text-neutral-300 hover:bg-ink-3"
           >
             Annuleer
           </button>
           <button
             onClick={save}
             disabled={busy}
-            className="px-4 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded text-white"
+            className="h-9 px-5 text-sm rounded-lg bg-fog-pink hover:bg-fog-pink-soft text-black font-bold disabled:opacity-40 shadow-glow"
           >
             {busy ? "Bezig..." : "Opslaan"}
           </button>

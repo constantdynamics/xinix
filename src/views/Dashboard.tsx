@@ -1,109 +1,240 @@
-import type { Dashboard, Card } from "../types";
-import { COLOR_BG, COLOR_DOT, COLOR_LABEL_NL } from "../colors";
+import { useMemo, useState } from "react";
+import type { Dashboard, Card as CardData } from "../types";
 import { triggerJob } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
-import { useState } from "react";
+import {
+  Card,
+  Badge,
+  Button,
+  Pill,
+  Stat,
+  SectionHeader,
+  Dot,
+  DotBar,
+  MiniDelta,
+} from "../components/ui";
+
+type ToneByColor = "lime" | "watch" | "orange" | "loss";
+const COLOR_TONE: Record<CardData["color"], ToneByColor> = {
+  white: "lime",
+  yellow: "watch",
+  orange: "orange",
+  red: "loss",
+};
+const COLOR_LABEL: Record<CardData["color"], string> = {
+  red: "Hot",
+  orange: "Warm",
+  yellow: "Pre",
+  white: "Rust",
+};
 
 const JOBS = [
   ["poll-prices-background", "Prijzen"],
-  ["poll-trials-background", "Klinische trials"],
+  ["poll-trials-background", "Trials"],
   ["poll-edgar-background", "SEC 8-K"],
-  ["poll-fda-background", "FDA approvals"],
-  ["poll-biotech-news-background", "Biotech nieuws"],
-  ["poll-metals-background", "Metalen / DXY"],
-  ["poll-mining-news-background", "Mining nieuws"],
-  ["compute-signals-background", "Pre-catalyst signalen"],
-  ["dispatch-alerts-background", "Verstuur alerts"],
+  ["poll-fda-background", "FDA"],
+  ["poll-biotech-news-background", "Biotech nws"],
+  ["poll-metals-background", "Metalen"],
+  ["poll-mining-news-background", "Mining nws"],
+  ["compute-signals-background", "Signals"],
+  ["compute-scores-background", "Scores"],
+  ["dispatch-alerts-background", "Alerts"],
 ];
 
-export function DashboardView({
-  data,
-}: {
-  data: Dashboard;
-  onRefresh: () => void;
-}) {
-  const counts = data.cards.reduce(
-    (acc, c) => {
-      acc[c.color]++;
-      return acc;
-    },
-    { white: 0, yellow: 0, orange: 0, red: 0 }
-  );
-  return (
-    <div className="space-y-6">
-      <Legend counts={counts} />
-      <JobControls />
-      <CardGrid cards={data.cards} />
-      <Catalysts data={data} />
-      <RecentSignals data={data} />
-      <RunLog data={data} />
-    </div>
-  );
-}
+type ColorFilter = "all" | "red" | "orange" | "yellow" | "white";
 
-function Legend({
-  counts,
-}: {
-  counts: Record<"white" | "yellow" | "orange" | "red", number>;
-}) {
+export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void }) {
+  const [filter, setFilter] = useState<ColorFilter>("all");
+
+  const counts = useMemo(
+    () =>
+      data.cards.reduce(
+        (acc, c) => {
+          acc[c.color]++;
+          return acc;
+        },
+        { white: 0, yellow: 0, orange: 0, red: 0 }
+      ),
+    [data.cards]
+  );
+
+  const visibleCards = useMemo(
+    () =>
+      filter === "all"
+        ? data.cards
+        : data.cards.filter((c) => c.color === filter),
+    [data.cards, filter]
+  );
+
+  // KPIs
+  const totalSignals = data.cards.reduce((s, c) => s + c.active_signals, 0);
+  const upcomingNext30 = data.upcoming_catalysts.filter((c) => {
+    if (!c.expected_date) return false;
+    const days =
+      (new Date(c.expected_date).getTime() - Date.now()) / 86400000;
+    return days >= 0 && days <= 30;
+  }).length;
+  const recentRedSignals = data.recent_signals.filter(
+    (s) => s.severity === "red"
+  ).length;
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-      {(["red", "orange", "yellow", "white"] as const).map((c) => (
-        <div
-          key={c}
-          className="flex items-center gap-2 px-3 py-2 bg-slate-900 rounded border border-slate-800"
+    <div className="space-y-8">
+      {/* KPI rij */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Stat
+          label="Watchlist"
+          value={data.cards.length}
+          tone="pink"
+          hint={`${counts.red + counts.orange} actief`}
+        />
+        <Stat
+          label="Actieve signalen"
+          value={totalSignals}
+          hint={`${recentRedSignals} rood (24u)`}
+        />
+        <Stat
+          label="Catalysts ≤30d"
+          value={upcomingNext30}
+          hint="Binnenkomende events"
+        />
+        <Stat
+          label="Laatste run"
+          value={
+            data.run_log[0]
+              ? new Date(data.run_log[0].started_at).toLocaleTimeString(
+                  "nl-NL",
+                  { hour: "2-digit", minute: "2-digit" }
+                )
+              : "—"
+          }
+          hint={data.run_log[0]?.job ?? ""}
+        />
+      </div>
+
+      {/* Filter pills + jobs */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Pill
+          tone="neutral"
+          active={filter === "all"}
+          count={data.cards.length}
+          onClick={() => setFilter("all")}
         >
-          <span
-            className={`inline-block w-3 h-3 rounded-full ring-2 ${COLOR_DOT[c]}`}
-          />
-          <span className="text-sm text-slate-300">
-            {COLOR_LABEL_NL[c]}{" "}
-            <span className="text-slate-500">({counts[c]})</span>
-          </span>
+          Alles
+        </Pill>
+        <Pill
+          tone="loss"
+          active={filter === "red"}
+          count={counts.red}
+          onClick={() => setFilter("red")}
+        >
+          Hot
+        </Pill>
+        <Pill
+          tone="orange"
+          active={filter === "orange"}
+          count={counts.orange}
+          onClick={() => setFilter("orange")}
+        >
+          Warm
+        </Pill>
+        <Pill
+          tone="watch"
+          active={filter === "yellow"}
+          count={counts.yellow}
+          onClick={() => setFilter("yellow")}
+        >
+          Pre
+        </Pill>
+        <Pill
+          tone="lime"
+          active={filter === "white"}
+          count={counts.white}
+          onClick={() => setFilter("white")}
+        >
+          Rust
+        </Pill>
+        <div className="ml-auto">
+          <JobControls />
         </div>
-      ))}
+      </div>
+
+      {/* Cards grid */}
+      <CardGrid cards={visibleCards} />
+
+      {/* Catalysts */}
+      <Catalysts data={data} />
+
+      {/* Recent signals */}
+      <RecentSignals data={data} />
+
+      {/* Run log */}
+      <RunLog data={data} />
     </div>
   );
 }
 
 function JobControls() {
   const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
   async function run(job: string) {
     setBusy(job);
     setMsg(null);
     try {
       await triggerJob(job);
-      setMsg(`${job}: getriggerd. Resultaat verschijnt in run log over 1-2 min.`);
+      setMsg(`${job} getriggerd`);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
   }
+
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded p-3">
-      <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">
-        Handmatig triggeren (vereist admin token)
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {JOBS.map(([job, label]) => (
-          <button
-            key={job}
-            onClick={() => run(job)}
-            disabled={busy === job}
-            className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-50"
-          >
-            {busy === job ? "..." : label}
-          </button>
-        ))}
-      </div>
-      {msg && <div className="mt-2 text-xs text-slate-300">{msg}</div>}
+    <div className="relative">
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => setOpen((v) => !v)}
+      >
+        ⚙ jobs
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full mt-2 z-20 w-72 animate-fade-up">
+          <Card className="p-3">
+            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-fog-pink mb-2">
+              Handmatig triggeren
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {JOBS.map(([job, label]) => (
+                <button
+                  key={job}
+                  onClick={() => run(job)}
+                  disabled={busy === job}
+                  className="px-2 py-1.5 text-xs rounded-md bg-ink-3 hover:bg-ink-4 border border-ink-5 disabled:opacity-40 text-left"
+                >
+                  {busy === job ? "…" : label}
+                </button>
+              ))}
+            </div>
+            {msg && <div className="mt-2 text-[11px] text-neutral-400">{msg}</div>}
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
 
-function CardGrid({ cards }: { cards: Card[] }) {
+function CardGrid({ cards }: { cards: CardData[] }) {
+  if (cards.length === 0) {
+    return (
+      <Card className="p-10 text-center text-neutral-500 text-sm">
+        Niets in deze filter. Voeg tickers toe via Watchlist.
+      </Card>
+    );
+  }
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
       {cards.map((c) => (
@@ -113,35 +244,53 @@ function CardGrid({ cards }: { cards: Card[] }) {
   );
 }
 
-function CardTile({ card: c }: { card: Card }) {
+function CardTile({ card: c }: { card: CardData }) {
   const px = c.summary;
+  const tone = COLOR_TONE[c.color];
+
+  // proximity: dichter bij 90d-low = goede entry. dotbar laat zien hoe
+  // ver boven de low de prijs zit (dichter bij low = meer rood).
+  const aboveLow = px?.pct_above_90d_low ?? null;
+  const proximity = aboveLow != null ? Math.min(1, aboveLow / 100) : null;
+
   return (
-    <a
-      href={googleFinanceUrl(c.ticker)}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`block rounded-lg border-2 p-3 shadow-sm hover:ring-2 hover:ring-sky-400 transition ${COLOR_BG[c.color]}`}
-      title={`${c.color} = ${COLOR_LABEL_NL[c.color]} · open ${c.ticker} op Google Finance`}
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="flex items-baseline gap-1">
-          <span className="font-bold text-lg underline-offset-2 hover:underline">
-            {c.ticker}
-          </span>
-          <span className="text-[10px] uppercase opacity-60 tracking-wide">
-            {c.sector === "mining" ? "MIN" : "BIO"}
-          </span>
+    <Card hover className="p-4 group flex flex-col gap-3">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <a
+              href={googleFinanceUrl(c.ticker)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold text-base tracking-tight text-neutral-50 group-hover:text-fog-pink transition"
+              title={`Open ${c.ticker} op Google Finance`}
+            >
+              {c.ticker}
+            </a>
+            <Badge tone={c.sector === "mining" ? "watch" : "cyan"}>
+              {c.sector === "mining" ? "MIN" : "BIO"}
+            </Badge>
+            <Badge tone={tone}>{COLOR_LABEL[c.color]}</Badge>
+          </div>
+          <div className="text-xs text-neutral-400 truncate mt-0.5">
+            {c.company}
+          </div>
         </div>
-        <div className="text-xs opacity-80">
-          score {c.goud_score ?? "?"}
-          {c.sector === "mining" && c.factor_count > 0
-            ? ` · ${c.factor_count}f`
-            : ""}
-          {c.goud_type ? ` · ${c.goud_type}` : ""}
-        </div>
+        {c.goud_score != null && (
+          <div className="text-right shrink-0">
+            <div className="text-[10px] uppercase tracking-wider text-neutral-600">
+              Score
+            </div>
+            <div className="text-lg font-bold tabular text-neutral-100">
+              {c.goud_score}
+            </div>
+          </div>
+        )}
       </div>
-      <div className="text-xs opacity-90 truncate">{c.company}</div>
-      <div className="text-xs opacity-75 truncate">
+
+      {/* Detail meta */}
+      <div className="text-[11px] text-neutral-500 truncate">
         {c.sector === "mining"
           ? [c.commodity, c.jurisdiction, c.deposit_type]
               .filter(Boolean)
@@ -149,49 +298,88 @@ function CardTile({ card: c }: { card: Card }) {
           : [c.modality, c.disease_area, c.phase].filter(Boolean).join(" · ")}
       </div>
 
+      {/* Price + DotBar */}
       {px && (
-        <div className="mt-2 text-xs opacity-90">
-          ${px.last_close?.toFixed(2)}{" "}
-          <span
-            className={
-              (px.pct_change_1d ?? 0) > 0
-                ? "text-emerald-700"
-                : (px.pct_change_1d ?? 0) < 0
-                ? "text-red-900"
-                : ""
-            }
-          >
-            ({(px.pct_change_1d ?? 0).toFixed(1)}% 1d)
-          </span>
-          {" · "}
-          {(px.pct_above_90d_low ?? 0).toFixed(0)}% boven 90d-low
-        </div>
-      )}
-
-      {c.next_catalyst && (
-        <div className="mt-2 text-xs opacity-90">
-          ⏱ {c.next_catalyst.catalyst_type} over {c.days_to_next_catalyst}d
-          <div className="opacity-75 truncate">
-            {c.next_catalyst.description}
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <div className="text-lg font-bold tabular">
+              ${px.last_close?.toFixed(2)}
+            </div>
+            <MiniDelta value={px.pct_change_1d ?? 0} />
           </div>
-        </div>
-      )}
-
-      {c.top_signal && (
-        <div className="mt-2 pt-2 border-t border-current/20 text-xs">
-          <div className="font-semibold">{c.top_signal.title}</div>
-          {c.top_signal.detail && (
-            <div className="opacity-80 line-clamp-2">{c.top_signal.detail}</div>
+          {proximity != null && (
+            <div className="flex flex-col items-end gap-1">
+              <div className="text-[10px] uppercase tracking-wider text-neutral-600">
+                90d low
+              </div>
+              <DotBar progress={proximity} count={10} />
+              <div className="text-[10px] tabular text-neutral-500">
+                +{Math.round(aboveLow ?? 0)}%
+              </div>
+            </div>
           )}
         </div>
       )}
 
-      {c.active_signals > 1 && (
-        <div className="mt-1 text-[10px] opacity-70">
-          {c.active_signals} actieve signalen
+      {/* Catalyst */}
+      {c.next_catalyst && (
+        <div className="rounded-lg bg-ink-3 border border-ink-5 p-2.5">
+          <div className="flex items-center gap-2">
+            <Dot tone="pink" />
+            <span className="text-[10px] uppercase tracking-wider text-fog-pink font-bold">
+              Catalyst
+            </span>
+            {c.days_to_next_catalyst != null && (
+              <span className="ml-auto text-xs tabular text-neutral-400">
+                {c.days_to_next_catalyst}d
+              </span>
+            )}
+          </div>
+          <div className="mt-1 text-xs text-neutral-200 truncate">
+            {c.next_catalyst.catalyst_type}
+          </div>
+          {c.next_catalyst.description && (
+            <div className="text-[11px] text-neutral-500 truncate">
+              {c.next_catalyst.description}
+            </div>
+          )}
         </div>
       )}
-    </a>
+
+      {/* Top signal */}
+      {c.top_signal && (
+        <div className="rounded-lg border border-ink-5 p-2.5">
+          <div className="flex items-center gap-2">
+            <Dot
+              tone={
+                c.top_signal.severity === "red"
+                  ? "loss"
+                  : c.top_signal.severity === "orange"
+                  ? "orange"
+                  : "watch"
+              }
+              pulse={c.top_signal.severity === "red"}
+            />
+            <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+              {c.top_signal.signal_type}
+            </span>
+            {c.active_signals > 1 && (
+              <span className="ml-auto text-[10px] text-neutral-600">
+                +{c.active_signals - 1}
+              </span>
+            )}
+          </div>
+          <div className="mt-1 text-xs font-medium text-neutral-200 line-clamp-1">
+            {c.top_signal.title}
+          </div>
+          {c.top_signal.detail && (
+            <div className="text-[11px] text-neutral-500 line-clamp-2">
+              {c.top_signal.detail}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -200,46 +388,70 @@ function Catalysts({ data }: { data: Dashboard }) {
   if (cats.length === 0) return null;
   return (
     <section>
-      <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">
-        Verwachte katalysators
-      </h2>
-      <div className="bg-slate-900 border border-slate-800 rounded">
+      <SectionHeader
+        eyebrow="Komende"
+        title="Verwachte katalysators"
+        subtitle="Tot 30 dagen vooruit · gesorteerd op datum"
+      />
+      <Card className="overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="text-xs text-slate-400">
+          <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/40">
             <tr>
-              <th className="text-left p-2">Datum</th>
-              <th className="text-left p-2">Ticker</th>
-              <th className="text-left p-2">Type</th>
-              <th className="text-left p-2">Omschrijving</th>
-              <th className="text-left p-2">Bron</th>
+              <th className="text-left p-3 font-semibold">Datum</th>
+              <th className="text-left p-3 font-semibold">Ticker</th>
+              <th className="text-left p-3 font-semibold">Type</th>
+              <th className="text-left p-3 font-semibold">Omschrijving</th>
+              <th className="text-left p-3 font-semibold">Bron</th>
             </tr>
           </thead>
           <tbody>
-            {cats.map((c) => (
-              <tr key={c.id} className="border-t border-slate-800">
-                <td className="p-2 whitespace-nowrap text-slate-300">
-                  {c.expected_date}
-                </td>
-                <td className="p-2 font-semibold">
-                  <a
-                    href={googleFinanceUrl(c.ticker)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sky-300 hover:underline"
-                  >
-                    {c.ticker}
-                  </a>
-                </td>
-                <td className="p-2 text-slate-300">{c.catalyst_type}</td>
-                <td className="p-2 text-slate-400 truncate max-w-md">
-                  {c.description}
-                </td>
-                <td className="p-2 text-xs text-slate-500">{c.source}</td>
-              </tr>
-            ))}
+            {cats.map((c) => {
+              const days = c.expected_date
+                ? Math.round(
+                    (new Date(c.expected_date).getTime() - Date.now()) /
+                      86400000
+                  )
+                : null;
+              return (
+                <tr
+                  key={c.id}
+                  className="border-t border-ink-5 hover:bg-ink-3/40"
+                >
+                  <td className="p-3 whitespace-nowrap">
+                    <div className="tabular text-neutral-200">
+                      {c.expected_date}
+                    </div>
+                    {days != null && (
+                      <div className="text-[10px] tabular text-neutral-500">
+                        {days >= 0 ? `over ${days}d` : `${-days}d geleden`}
+                      </div>
+                    )}
+                  </td>
+                  <td className="p-3 font-bold">
+                    <a
+                      href={googleFinanceUrl(c.ticker)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-fog-pink hover:underline"
+                    >
+                      {c.ticker}
+                    </a>
+                  </td>
+                  <td className="p-3">
+                    <Badge tone="cyan">{c.catalyst_type}</Badge>
+                  </td>
+                  <td className="p-3 text-neutral-400 truncate max-w-md">
+                    {c.description}
+                  </td>
+                  <td className="p-3 text-[11px] text-neutral-600">
+                    {c.source}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-      </div>
+      </Card>
     </section>
   );
 }
@@ -249,35 +461,60 @@ function RecentSignals({ data }: { data: Dashboard }) {
   if (sigs.length === 0) return null;
   return (
     <section>
-      <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">
-        Recente signalen
-      </h2>
-      <div className="space-y-1">
-        {sigs.map((s) => (
-          <div
-            key={s.id}
-            className={`flex items-start gap-2 p-2 rounded border ${COLOR_BG[s.severity]}`}
-          >
-            <a
-              href={googleFinanceUrl(s.ticker)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-bold w-16 hover:underline"
-              onClick={(e) => e.stopPropagation()}
+      <SectionHeader
+        eyebrow="Activiteit"
+        title="Recente signalen"
+        subtitle="Laatste 24-48 uur · alle severities"
+      />
+      <div className="space-y-1.5">
+        {sigs.map((s) => {
+          const tone =
+            s.severity === "red"
+              ? "loss"
+              : s.severity === "orange"
+              ? "orange"
+              : "watch";
+          return (
+            <Card
+              key={s.id}
+              hover
+              className="p-3 flex items-start gap-3"
             >
-              {s.ticker}
-            </a>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium">{s.title}</div>
-              {s.detail && (
-                <div className="text-xs opacity-80 truncate">{s.detail}</div>
-              )}
-            </div>
-            <span className="text-xs opacity-70 whitespace-nowrap">
-              {new Date(s.detected_at).toLocaleString("nl-NL")}
-            </span>
-          </div>
-        ))}
+              <div className="flex flex-col items-center gap-1 pt-0.5">
+                <Dot tone={tone} pulse={s.severity === "red"} />
+              </div>
+              <a
+                href={googleFinanceUrl(s.ticker)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold text-sm w-20 hover:text-fog-pink"
+              >
+                {s.ticker}
+              </a>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <Badge tone={tone}>{s.signal_type}</Badge>
+                  <span className="text-sm font-medium text-neutral-100 truncate">
+                    {s.title}
+                  </span>
+                </div>
+                {s.detail && (
+                  <div className="text-xs text-neutral-500 truncate mt-0.5">
+                    {s.detail}
+                  </div>
+                )}
+              </div>
+              <span className="text-[11px] tabular text-neutral-600 whitespace-nowrap">
+                {new Date(s.detected_at).toLocaleString("nl-NL", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            </Card>
+          );
+        })}
       </div>
     </section>
   );
@@ -287,36 +524,33 @@ function RunLog({ data }: { data: Dashboard }) {
   if (data.run_log.length === 0) return null;
   return (
     <section>
-      <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">
-        Job log
-      </h2>
-      <div className="bg-slate-900 border border-slate-800 rounded text-xs">
+      <SectionHeader eyebrow="Systeem" title="Job log" />
+      <Card className="overflow-hidden">
         {data.run_log.slice(0, 10).map((r, i) => (
           <div
             key={i}
-            className="flex gap-3 p-2 border-t border-slate-800 first:border-t-0"
+            className="flex items-center gap-3 px-3 py-2 border-t border-ink-5 first:border-t-0 text-xs"
           >
-            <span
-              className={
-                r.ok === true
-                  ? "text-emerald-400"
-                  : r.ok === false
-                  ? "text-red-400"
-                  : "text-slate-500"
-              }
-            >
-              ●
+            <Dot
+              tone={r.ok === true ? "lime" : r.ok === false ? "loss" : "neutral"}
+            />
+            <span className="font-mono text-neutral-300 w-44 truncate">
+              {r.job}
             </span>
-            <span className="font-mono text-slate-300 w-44">{r.job}</span>
-            <span className="text-slate-500 w-44">
-              {new Date(r.started_at).toLocaleString("nl-NL")}
+            <span className="tabular text-neutral-600 w-32">
+              {new Date(r.started_at).toLocaleString("nl-NL", {
+                day: "2-digit",
+                month: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </span>
-            <span className="text-slate-400 truncate flex-1">
-              {r.message ?? (r.finished_at ? "ok" : "running...")}
+            <span className="text-neutral-400 truncate flex-1">
+              {r.message ?? (r.finished_at ? "ok" : "running…")}
             </span>
           </div>
         ))}
-      </div>
+      </Card>
     </section>
   );
 }

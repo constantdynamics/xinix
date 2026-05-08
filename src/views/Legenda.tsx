@@ -94,50 +94,49 @@ const TERMS: Term[] = [
   },
 ];
 
+import { Card, SectionHeader } from "../components/ui";
+
 export function LegendaView() {
   return (
-    <div className="space-y-4 max-w-3xl">
-      <header>
-        <h2 className="text-xl font-semibold">Legenda</h2>
-        <p className="text-xs text-slate-400">
-          Uitleg van de termen die in notificaties, scores en track record
-          gebruikt worden. Bedoeld als naslagwerk — niet als trading advies.
-        </p>
-      </header>
+    <div className="space-y-6 max-w-3xl">
+      <SectionHeader
+        eyebrow="Naslag"
+        title="Legenda"
+        subtitle="Uitleg van termen in notificaties, scores en track record. Bedoeld als naslagwerk, niet als trading advies."
+      />
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {TERMS.map((t) => (
-          <details
-            key={t.term}
-            className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden group"
-          >
-            <summary className="cursor-pointer p-3 hover:bg-slate-800/40 list-none flex items-start gap-3">
-              <span className="text-slate-500 text-xs mt-0.5 group-open:rotate-90 transition-transform">
-                ▸
-              </span>
-              <div className="flex-1">
-                <div className="font-semibold text-slate-100">{t.term}</div>
-                <div className="text-xs text-slate-400 mt-0.5">{t.short}</div>
-              </div>
-            </summary>
-            <div className="px-3 pb-3 pl-9 space-y-2 text-sm text-slate-300 border-t border-slate-800/50 bg-slate-950/30">
-              <p className="leading-relaxed">{t.long}</p>
-              {t.example && (
-                <div className="text-xs bg-slate-800/40 border-l-2 border-sky-700 pl-2 py-1 text-slate-300">
-                  <span className="text-slate-500 uppercase tracking-wide text-[10px] mr-1">
-                    voorbeeld
-                  </span>
-                  {t.example}
+          <Card key={t.term} className="overflow-hidden">
+            <details className="group">
+              <summary className="cursor-pointer p-4 hover:bg-ink-3/40 transition list-none flex items-start gap-3">
+                <span className="text-fog-pink text-sm mt-0.5 group-open:rotate-90 transition-transform">
+                  ▸
+                </span>
+                <div className="flex-1">
+                  <div className="font-bold text-neutral-50">{t.term}</div>
+                  <div className="text-xs text-neutral-400 mt-1">{t.short}</div>
                 </div>
-              )}
-            </div>
-          </details>
+              </summary>
+              <div className="px-4 pb-4 pl-11 space-y-3 text-sm text-neutral-300 border-t border-ink-5 bg-ink-1/40 pt-3">
+                <p className="leading-relaxed">{t.long}</p>
+                {t.example && (
+                  <div className="text-xs rounded-lg bg-fog-pink/[0.06] border-l-2 border-fog-pink pl-3 py-2 pr-3 text-neutral-300">
+                    <span className="text-fog-pink uppercase tracking-wider text-[10px] font-bold mr-2">
+                      voorbeeld
+                    </span>
+                    {t.example}
+                  </div>
+                )}
+              </div>
+            </details>
+          </Card>
         ))}
       </div>
 
-      <p className="text-xs text-slate-500 italic pt-4 border-t border-slate-800">
+      <p className="text-xs text-neutral-600 italic pt-4 border-t border-ink-5">
         Briefing §6 (scoring), §9 (caveats), §10 (validatie). Cijfers zijn
-        historische medianen 2018-2024 — gebruik als prior, niet als belofte.
+        historische medianen 2018‑2024 — gebruik als prior, niet als belofte.
       </p>
     </div>
   );

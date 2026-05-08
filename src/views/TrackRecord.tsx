@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Card, SectionHeader, Stat } from "../components/ui";
 
 interface BucketStats {
   signals: number;
@@ -56,32 +57,58 @@ export function TrackRecordView() {
       .finally(() => setLoading(false));
   }, [minCompleteness]);
 
-  if (loading && !data) return <div className="text-slate-400">laden...</div>;
-  if (error) return <div className="text-red-400 text-sm">{error}</div>;
+  if (loading && !data)
+    return <div className="text-neutral-500 text-sm">laden…</div>;
+  if (error)
+    return (
+      <div className="rounded-xl border border-fog-loss/40 bg-fog-loss/10 p-3 text-sm text-fog-loss">
+        {error}
+      </div>
+    );
   if (!data) return null;
 
   return (
     <div className="space-y-6">
-      <header>
-        <h2 className="text-xl font-semibold">Track record</h2>
-        <p className="text-xs text-slate-400">
-          Forward returns per actie/sector/catalyst over de laatste{" "}
-          {data.window_days} dagen. {data.total_signals} signalen
-          {data.total_signals !== data.total_signals_unfiltered && (
-            <span className="text-slate-500">
-              {" "}
-              ({data.total_signals_unfiltered - data.total_signals} gefilterd op
-              completeness)
-            </span>
-          )}
-          , {data.total_returns_recorded} returns vastgelegd.
-        </p>
-        <div className="mt-2 flex items-center gap-3 text-xs">
-          <label className="text-slate-400">
-            Min data completeness:{" "}
-            <span className="font-mono text-slate-200">
-              {(minCompleteness * 100).toFixed(0)}%
-            </span>
+      <SectionHeader
+        eyebrow="Validatie"
+        title="Track record"
+        subtitle={`Forward returns over de laatste ${data.window_days} dagen.`}
+      />
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Stat
+          label="Signalen"
+          value={data.total_signals.toString()}
+          hint={
+            data.total_signals_unfiltered !== data.total_signals
+              ? `${
+                  data.total_signals_unfiltered - data.total_signals
+                } gefilterd`
+              : "alle in scope"
+          }
+          tone="pink"
+        />
+        <Stat
+          label="Returns gemeten"
+          value={data.total_returns_recorded.toString()}
+          hint="met 7/14/30/90d data"
+        />
+        <Stat
+          label="Window"
+          value={`${data.window_days}d`}
+          hint="rolling lookback"
+        />
+        <Stat
+          label="Completeness filter"
+          value={`${(minCompleteness * 100).toFixed(0)}%`}
+          hint="min veld-vulling"
+        />
+      </div>
+
+      <Card className="p-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">
+            Min data completeness
           </label>
           <input
             type="range"
@@ -90,14 +117,20 @@ export function TrackRecordView() {
             step={0.1}
             value={minCompleteness}
             onChange={(e) => setMinCompleteness(Number(e.target.value))}
-            className="w-48"
+            className="w-56"
           />
-          <span className="text-slate-600">
-            (filter slecht‑gevulde tickers eruit)
+          <span className="text-fog-pink font-bold tabular text-sm">
+            {(minCompleteness * 100).toFixed(0)}%
+          </span>
+          <span className="text-xs text-neutral-500">
+            Filter ondergevulde tickers eruit om signaal van ruis te scheiden.
           </span>
         </div>
-        <p className="mt-1 text-xs text-amber-400">⚠ {data.caveat}</p>
-      </header>
+      </Card>
+
+      <div className="rounded-xl border border-fog-warn/30 bg-fog-warn/10 p-3 text-xs text-fog-warn">
+        ⚠ {data.caveat}
+      </div>
 
       <Section title="Overall (alle sectoren)">
         <ActionTable stats={data.overall} />
@@ -111,17 +144,14 @@ export function TrackRecordView() {
 
       {Object.keys(data.by_catalyst).length > 0 && (
         <Section title="Per catalyst type (top 10 by signal count)">
-          <div className="space-y-4">
+          <div className="space-y-3">
             {Object.entries(data.by_catalyst).map(([cat, stats]) => (
-              <div
-                key={cat}
-                className="border border-slate-800 rounded p-3 bg-slate-900/50"
-              >
-                <div className="text-sm font-mono text-violet-300 mb-2">
+              <Card key={cat} className="p-3">
+                <div className="text-[11px] uppercase tracking-wider font-bold text-fog-pink mb-2">
                   {cat}
                 </div>
                 <ActionTable stats={stats} compact />
-              </div>
+              </Card>
             ))}
           </div>
         </Section>
@@ -139,7 +169,9 @@ function Section({
 }) {
   return (
     <section>
-      <h3 className="text-sm font-semibold mb-2 text-slate-200">{title}</h3>
+      <h3 className="text-[11px] uppercase tracking-[0.2em] font-bold text-neutral-500 mb-2">
+        {title}
+      </h3>
       {children}
     </section>
   );
@@ -153,78 +185,78 @@ function ActionTable({
   compact?: boolean;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs border border-slate-800">
-        <thead className="bg-slate-900 text-slate-400">
-          <tr>
-            <th className="p-2 text-left">Actie</th>
-            <th className="p-2 text-left">Horizon</th>
-            <th className="p-2 text-right">Signals</th>
-            <th className="p-2 text-right">N (met return)</th>
-            <th className="p-2 text-right">Mean</th>
-            <th className="p-2 text-right">Median</th>
-            {!compact && <th className="p-2 text-right">P25/P75</th>}
-            <th className="p-2 text-right">Hit ≥50%</th>
-            <th className="p-2 text-right">Hit ≥100%</th>
-            <th className="p-2 text-right">Loss ≥25%</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ACTIONS.flatMap((a) =>
-            HORIZONS.map((h) => {
-              const b = stats[a]?.[h];
-              if (!b) return null;
-              return (
-                <tr
-                  key={`${a}-${h}`}
-                  className="border-t border-slate-800 hover:bg-slate-900/40"
-                >
-                  <td className="p-2">
-                    <span
-                      className={
-                        a === "STRONG_BUY"
-                          ? "text-emerald-400 font-semibold"
-                          : a === "BUY"
-                          ? "text-cyan-400"
-                          : "text-slate-400"
-                      }
-                    >
-                      {a}
-                    </span>
-                  </td>
-                  <td className="p-2 text-slate-400">{h}</td>
-                  <td className="p-2 text-right">{b.signals}</td>
-                  <td className="p-2 text-right">{b.n}</td>
-                  <td
-                    className={`p-2 text-right font-mono ${
-                      b.mean >= 0 ? "text-emerald-400" : "text-red-400"
-                    }`}
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500">
+            <tr>
+              <th className="p-2.5 text-left">Actie</th>
+              <th className="p-2.5 text-left">Horizon</th>
+              <th className="p-2.5 text-right">Signals</th>
+              <th className="p-2.5 text-right">N</th>
+              <th className="p-2.5 text-right">Mean</th>
+              <th className="p-2.5 text-right">Median</th>
+              {!compact && <th className="p-2.5 text-right">P25/P75</th>}
+              <th className="p-2.5 text-right">≥50%</th>
+              <th className="p-2.5 text-right">≥100%</th>
+              <th className="p-2.5 text-right">≤−25%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ACTIONS.flatMap((a) =>
+              HORIZONS.map((h) => {
+                const b = stats[a]?.[h];
+                if (!b) return null;
+                const actionClass =
+                  a === "STRONG_BUY"
+                    ? "text-fog-lime font-bold"
+                    : a === "BUY"
+                    ? "text-fog-pink font-semibold"
+                    : "text-neutral-400";
+                return (
+                  <tr
+                    key={`${a}-${h}`}
+                    className="border-t border-ink-5 hover:bg-ink-3/40"
                   >
-                    {b.n ? ret(b.mean) : "—"}
-                  </td>
-                  <td className="p-2 text-right font-mono">
-                    {b.n ? ret(b.median) : "—"}
-                  </td>
-                  {!compact && (
-                    <td className="p-2 text-right font-mono text-slate-500">
-                      {b.n ? `${ret(b.p25)} / ${ret(b.p75)}` : "—"}
+                    <td className="p-2.5">
+                      <span className={actionClass}>{a}</span>
                     </td>
-                  )}
-                  <td className="p-2 text-right">
-                    {b.n ? pct(b.hit_rate_50pct) : "—"}
-                  </td>
-                  <td className="p-2 text-right">
-                    {b.n ? pct(b.hit_rate_100pct) : "—"}
-                  </td>
-                  <td className="p-2 text-right text-red-400">
-                    {b.n ? pct(b.loss_rate_25pct) : "—"}
-                  </td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
-    </div>
+                    <td className="p-2.5 text-neutral-500 tabular">{h}</td>
+                    <td className="p-2.5 text-right tabular">{b.signals}</td>
+                    <td className="p-2.5 text-right tabular text-neutral-400">
+                      {b.n}
+                    </td>
+                    <td
+                      className={`p-2.5 text-right tabular ${
+                        b.mean >= 0 ? "text-fog-lime" : "text-fog-loss"
+                      }`}
+                    >
+                      {b.n ? ret(b.mean) : "—"}
+                    </td>
+                    <td className="p-2.5 text-right tabular">
+                      {b.n ? ret(b.median) : "—"}
+                    </td>
+                    {!compact && (
+                      <td className="p-2.5 text-right tabular text-neutral-500">
+                        {b.n ? `${ret(b.p25)} / ${ret(b.p75)}` : "—"}
+                      </td>
+                    )}
+                    <td className="p-2.5 text-right tabular">
+                      {b.n ? pct(b.hit_rate_50pct) : "—"}
+                    </td>
+                    <td className="p-2.5 text-right tabular">
+                      {b.n ? pct(b.hit_rate_100pct) : "—"}
+                    </td>
+                    <td className="p-2.5 text-right tabular text-fog-loss">
+                      {b.n ? pct(b.loss_rate_25pct) : "—"}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }

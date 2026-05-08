@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { fetchSettings, saveSettings } from "../api";
 import type { Settings, Severity } from "../types";
+import {
+  Card,
+  Button,
+  Input,
+  Select,
+  SectionHeader,
+} from "../components/ui";
 
 export function SettingsView() {
   const [s, setS] = useState<Settings | null>(null);
@@ -24,128 +31,154 @@ export function SettingsView() {
     }
   }
 
-  if (error) return <div className="text-red-400">Fout: {error}</div>;
-  if (!s) return <div className="text-slate-400">Laden...</div>;
+  if (error)
+    return (
+      <div className="rounded-xl border border-fog-loss/40 bg-fog-loss/10 p-3 text-sm text-fog-loss">
+        Fout: {error}
+      </div>
+    );
+  if (!s) return <div className="text-neutral-500 text-sm">Laden…</div>;
 
   return (
-    <div className="max-w-2xl space-y-4 bg-slate-900 border border-slate-800 rounded p-4">
-      <h2 className="text-lg font-semibold">Alert instellingen</h2>
+    <div className="max-w-2xl space-y-6">
+      <SectionHeader
+        eyebrow="Configuratie"
+        title="Alert instellingen"
+        subtitle="Welke meldingen je krijgt, op welke kanalen, en wanneer."
+      />
 
-      <label className="block bg-slate-800/50 border border-slate-700 rounded p-3 cursor-pointer">
-        <div className="flex items-start gap-3">
+      {/* Goud-events toggle als prominent feature card */}
+      <Card
+        className="p-4 cursor-pointer"
+        glow={s.alert_only_goud_events ? "lime" : undefined}
+      >
+        <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"
             checked={s.alert_only_goud_events}
             onChange={(e) =>
               setS({ ...s, alert_only_goud_events: e.target.checked })
             }
-            className="mt-1"
+            className="mt-1 h-4 w-4 cursor-pointer"
           />
           <div className="flex-1">
-            <div className="font-semibold text-sm">
+            <div className="font-bold text-sm text-neutral-100">
               Alleen goud‑medaille events alerten
             </div>
-            <div className="text-xs text-slate-400 mt-1">
-              Aan = alleen meldingen voor evenementen die <em>nu</em> gebeurd
-              zijn én historisch tot een 20×‑spike kunnen leiden: bonanza
-              assays, FDA approval, trial completed, permit grant, takeover
-              bid, DFS, first pour, material 8‑K, prijs‑spike +15% met volume.
+            <div className="text-xs text-neutral-400 mt-1.5 leading-relaxed">
+              Aan = meldingen alléén voor events die nú gebeurd zijn én
+              historisch tot een 20×-spike kunnen leiden: bonanza assays,
+              FDA approval, trial completed, permit grant, takeover bid,
+              first pour, material 8-K, prijs-spike +15% met volume.
               <br />
-              Uit = ook proximity‑signalen ("over X dagen…"), volume blips,
-              90d‑low en macro tide.
+              <span className="text-neutral-600">
+                Uit = ook proximity-signalen ("over X dagen…"), volume blips,
+                90d-low en macro tide.
+              </span>
             </div>
           </div>
+        </label>
+      </Card>
+
+      <Card className="p-4 space-y-4">
+        <Field label="E-mail (Resend stuurt naar dit adres)">
+          <Input
+            type="email"
+            value={s.email ?? ""}
+            onChange={(e) => setS({ ...s, email: e.target.value })}
+            placeholder="jij@voorbeeld.nl"
+            className="w-full"
+          />
+        </Field>
+
+        <Field label="ntfy.sh topic (telefoon push)">
+          <Input
+            type="text"
+            value={s.ntfy_topic ?? ""}
+            onChange={(e) => setS({ ...s, ntfy_topic: e.target.value })}
+            placeholder="biotech-signals-jouwgeheim"
+            className="w-full"
+          />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Verzin een lange willekeurige naam. Installeer de{" "}
+            <a
+              href="https://ntfy.sh/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-fog-pink hover:underline"
+            >
+              ntfy app
+            </a>
+            , open en abonneer op deze topic.
+          </p>
+        </Field>
+
+        <Field label="ntfy server">
+          <Input
+            type="text"
+            value={s.ntfy_server}
+            onChange={(e) => setS({ ...s, ntfy_server: e.target.value })}
+            className="w-full"
+          />
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="E-mail drempel">
+            <SeveritySelect
+              value={s.alert_email_threshold}
+              onChange={(v) => setS({ ...s, alert_email_threshold: v })}
+            />
+          </Field>
+          <Field label="Push drempel">
+            <SeveritySelect
+              value={s.alert_ntfy_threshold}
+              onChange={(v) => setS({ ...s, alert_ntfy_threshold: v })}
+            />
+          </Field>
         </div>
-      </label>
 
-      <Field label="E-mail (Resend stuurt naar dit adres)">
-        <input
-          type="email"
-          value={s.email ?? ""}
-          onChange={(e) => setS({ ...s, email: e.target.value })}
-          className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm"
-          placeholder="jij@voorbeeld.nl"
-        />
-      </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Quiet hours start (uur UTC, leeg = uit)">
+            <Input
+              type="number"
+              min={0}
+              max={23}
+              value={s.quiet_hours_start ?? ""}
+              onChange={(e) =>
+                setS({
+                  ...s,
+                  quiet_hours_start:
+                    e.target.value === "" ? null : Number(e.target.value),
+                })
+              }
+              className="w-full"
+            />
+          </Field>
+          <Field label="Quiet hours eind (uur UTC)">
+            <Input
+              type="number"
+              min={0}
+              max={23}
+              value={s.quiet_hours_end ?? ""}
+              onChange={(e) =>
+                setS({
+                  ...s,
+                  quiet_hours_end:
+                    e.target.value === "" ? null : Number(e.target.value),
+                })
+              }
+              className="w-full"
+            />
+          </Field>
+        </div>
 
-      <Field label="ntfy.sh topic (telefoon push)">
-        <input
-          type="text"
-          value={s.ntfy_topic ?? ""}
-          onChange={(e) => setS({ ...s, ntfy_topic: e.target.value })}
-          className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm"
-          placeholder="biotech-signals-jouwgeheim"
-        />
-        <p className="text-xs text-slate-400 mt-1">
-          Verzin een lange willekeurige naam. Installeer de ntfy app, open en
-          abonneer op deze topic.
-        </p>
-      </Field>
-
-      <Field label="ntfy server">
-        <input
-          type="text"
-          value={s.ntfy_server}
-          onChange={(e) => setS({ ...s, ntfy_server: e.target.value })}
-          className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm"
-        />
-      </Field>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="E-mail drempel">
-          <SeveritySelect
-            value={s.alert_email_threshold}
-            onChange={(v) => setS({ ...s, alert_email_threshold: v })}
-          />
-        </Field>
-        <Field label="Push drempel">
-          <SeveritySelect
-            value={s.alert_ntfy_threshold}
-            onChange={(v) => setS({ ...s, alert_ntfy_threshold: v })}
-          />
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Quiet hours start (uur UTC, leeg = uit)">
-          <input
-            type="number"
-            min={0}
-            max={23}
-            value={s.quiet_hours_start ?? ""}
-            onChange={(e) =>
-              setS({
-                ...s,
-                quiet_hours_start: e.target.value === "" ? null : Number(e.target.value),
-              })
-            }
-            className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm"
-          />
-        </Field>
-        <Field label="Quiet hours eind (uur UTC)">
-          <input
-            type="number"
-            min={0}
-            max={23}
-            value={s.quiet_hours_end ?? ""}
-            onChange={(e) =>
-              setS({
-                ...s,
-                quiet_hours_end: e.target.value === "" ? null : Number(e.target.value),
-              })
-            }
-            className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm"
-          />
-        </Field>
-      </div>
-
-      <button
-        onClick={save}
-        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-white"
-      >
-        Opslaan
-      </button>
-      {msg && <span className="ml-3 text-emerald-400 text-sm">{msg}</span>}
+        <div className="flex items-center gap-3 pt-2">
+          <Button variant="primary" onClick={save}>
+            Opslaan
+          </Button>
+          {msg && <span className="text-fog-lime text-sm">{msg}</span>}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -159,7 +192,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <div className="text-xs uppercase tracking-wide text-slate-400 mb-1">
+      <div className="text-[10px] uppercase tracking-wider font-bold text-neutral-500 mb-1.5">
         {label}
       </div>
       {children}
@@ -175,14 +208,14 @@ function SeveritySelect({
   onChange: (v: Severity) => void;
 }) {
   return (
-    <select
+    <Select
       value={value}
       onChange={(e) => onChange(e.target.value as Severity)}
-      className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded text-sm"
+      className="w-full"
     >
       <option value="yellow">geel en hoger</option>
       <option value="orange">oranje en hoger</option>
       <option value="red">alleen rood</option>
-    </select>
+    </Select>
   );
 }
