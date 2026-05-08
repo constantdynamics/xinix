@@ -2,15 +2,22 @@ import type { Dashboard, Settings } from "./types";
 
 const TOKEN_KEY = "biotech_admin_token";
 
-// Bij hosten via GitHub Pages staat de frontend op een ander origin dan
-// de Netlify Functions backend. Vite vult `import.meta.env.VITE_API_BASE_URL`
-// op build-time. Leeg laten = same-origin (Netlify hosting van zowel
-// frontend als functions).
+// Frontend op GitHub Pages, backend op Supabase Edge Functions.
+// `VITE_API_BASE_URL` op build-time = bv. https://<project>.supabase.co/functions/v1
+// Supabase function paden hebben geen `/api` prefix; we strippen die hier
+// automatisch zodat de call sites in de UI nog gewoon `/api/dashboard`
+// kunnen schrijven (handig voor lokaal Netlify dev en herkenbaarheid).
+//
+// Leeg laten = same-origin met `/api/*` redirect (oude Netlify hosting).
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export function apiUrl(path: string): string {
   if (path.startsWith("http")) return path;
-  return `${API_BASE}${path}`;
+  if (!API_BASE) return path;
+  // Strip "/api" prefix wanneer we naar Supabase wijzen — daar zijn de
+  // functies bv. https://x.supabase.co/functions/v1/dashboard zonder /api.
+  const stripped = path.replace(/^\/api\//, "/");
+  return `${API_BASE}${stripped}`;
 }
 
 export function getToken(): string | null {
