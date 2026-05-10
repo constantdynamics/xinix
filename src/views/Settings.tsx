@@ -70,17 +70,20 @@ export function SettingsView() {
           />
           <div className="flex-1">
             <div className="font-bold text-sm text-neutral-100">
-              Alleen goud‑medaille events alerten
+              Alleen very-hot events alerten
             </div>
             <div className="text-xs text-neutral-400 mt-1.5 leading-relaxed">
-              Aan = meldingen alléén voor events die nú gebeurd zijn én
-              historisch tot een 20×-spike kunnen leiden: bonanza assays,
-              FDA approval, trial completed, permit grant, takeover bid,
-              first pour, material 8-K, prijs-spike +15% met volume.
+              Aan = meldingen alléén voor onmiskenbare buy-triggers:
+              <strong className="text-fog-pink"> jouw aankooplimiet geraakt</strong>,
+              bonanza assays (Au/Ag/Cu), discovery announcement, mining permit,
+              first pour, FDA approval, topline positive, phase success,
+              breakthrough designation, definitive buyout (target).
               <br />
               <span className="text-neutral-400">
-                Uit = ook proximity-signalen ("over X dagen…"), volume blips,
-                90d-low en macro tide.
+                Uit = óók news-regex matches (8-K filings, JV strategic),
+                price-spikes, takeover bids waar jouw ticker de koper is,
+                pre-catalyst countdowns, volume blips, near-low en macro tide.
+                Verwacht 10-50× zo veel alerts.
               </span>
             </div>
           </div>
