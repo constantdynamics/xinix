@@ -73,11 +73,18 @@ export function SettingsView() {
               Alleen very-hot events alerten
             </div>
             <div className="text-xs text-neutral-400 mt-1.5 leading-relaxed">
-              Aan = meldingen alléén voor onmiskenbare buy-triggers:
-              <strong className="text-fog-pink"> jouw aankooplimiet geraakt</strong>,
-              bonanza assays (Au/Ag/Cu), discovery announcement, mining permit,
-              first pour, FDA approval, topline positive, phase success,
-              breakthrough designation, definitive buyout (target).
+              Aan = meldingen alléén voor onmiskenbare actie‑triggers:
+              <strong className="text-fog-pink">
+                {" "}
+                aankooplimiet bereikt of binnen 10% boven jouw limit
+              </strong>
+              ,{" "}
+              <strong className="text-fog-warn">
+                40%+ daling onder de 1y high
+              </strong>
+              , bonanza assays (Au/Ag/Cu), discovery announcement, mining
+              permit, first pour, FDA approval, topline positive, phase
+              success, breakthrough designation, definitive buyout (target).
               <br />
               <span className="text-neutral-400">
                 Uit = óók news-regex matches (8-K filings, JV strategic),
