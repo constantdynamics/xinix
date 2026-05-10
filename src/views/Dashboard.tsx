@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dashboard, Card as CardData } from "../types";
+import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import { triggerJob } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { loadTilePrefs, type TilePrefs } from "../tilePrefs";
@@ -310,8 +311,8 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
               {c.ticker}
             </a>
             {prefs.showSector && (
-              <Badge tone={c.sector === "mining" ? "watch" : "cyan"}>
-                {c.sector === "mining" ? "MIN" : "BIO"}
+              <Badge tone={SECTOR_TONE[c.sector]}>
+                {SECTOR_LABEL[c.sector]}
               </Badge>
             )}
             {prefs.showPhase && <Badge tone={tone}>{COLOR_LABEL[c.color]}</Badge>}

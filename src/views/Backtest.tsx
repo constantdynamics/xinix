@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { triggerJob, getToken, apiUrl } from "../api";
+import { SECTOR_TONE, type Sector } from "../types";
 import {
   Card,
   Button,
@@ -164,7 +165,7 @@ export function BacktestView() {
                       >
                         <td className="p-3">
                           <Badge
-                            tone={a.sector === "mining" ? "watch" : "cyan"}
+                            tone={SECTOR_TONE[(a.sector as Sector) ?? "other"] ?? "neutral"}
                           >
                             {a.sector}
                           </Badge>
@@ -239,7 +240,7 @@ export function BacktestView() {
                       className="border-t border-ink-5 hover:bg-ink-3/40"
                     >
                       <td className="p-2.5">
-                        <Badge tone={r.sector === "mining" ? "watch" : "cyan"}>
+                        <Badge tone={SECTOR_TONE[(r.sector as Sector) ?? "other"] ?? "neutral"}>
                           {r.sector}
                         </Badge>
                       </td>

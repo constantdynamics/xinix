@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dashboard, Card as CardData, Sector } from "../types";
+import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import {
   batchAddTickers,
   lookupTickers,
@@ -212,10 +213,10 @@ function LimitTable({ rows }: { rows: LimitRow[] }) {
                 >
                   <td className="p-3 font-bold whitespace-nowrap">
                     <Badge
-                      tone={r.sector === "mining" ? "watch" : "cyan"}
+                      tone={SECTOR_TONE[r.sector]}
                       className="mr-2"
                     >
-                      {r.sector === "mining" ? "MIN" : "BIO"}
+                      {SECTOR_LABEL[r.sector]}
                     </Badge>
                     <a
                       href={googleFinanceUrl(r.ticker)}
@@ -314,7 +315,7 @@ function LimitTiles({ rows }: { rows: LimitRow[] }) {
                 {r.ticker}
               </span>
               <span className="text-[9px] uppercase tracking-wider text-ink-0/70 font-bold">
-                {r.sector === "mining" ? "MIN" : "BIO"}
+                {SECTOR_LABEL[r.sector]}
               </span>
             </div>
             <div className="font-bold tabular text-ink-0 text-base leading-none">
@@ -474,9 +475,13 @@ function parseLimitPaste(text: string): { rows: PasteRow[]; errors: string[] } {
 
 const MINING_RE =
   /\b(mining|miner|mines|metals?|minerals?|resources?|exploration|drill(?:ing)?|royalt(?:y|ies)|streaming|gold|silver|copper|lithium|uranium|nickel|cobalt|graphite|zinc|platinum|palladium|tin|tungsten|molybdenum|rare\s*earth|potash|iron\s*ore|coal)\b/i;
+const BIOTECH_RE =
+  /\b(pharma(?:ceuticals?)?|biopharma|therapeutics|bio(?:science|tech(?:nology)?|logics|pharm)?|genomics?|gene(?:tic|ric)?|oncolog(?:y|ic)|immuno(?:logy|therap)|cell\s*(?:therap|technolog)|gene\s*therap|medicines?|medical|laboratories|labs|sciences|clinical|antibody|antibodies|vaccines?|RNA|DNA|protein)\b/i;
 function inferSector(company: string | null | undefined): Sector {
-  if (company && MINING_RE.test(company)) return "mining";
-  return "biotech";
+  if (!company) return "other";
+  if (MINING_RE.test(company)) return "mining";
+  if (BIOTECH_RE.test(company)) return "biotech";
+  return "other";
 }
 
 function BulkPaste({
@@ -546,15 +551,16 @@ function BulkPaste({
     });
   }, [text, watchlistTickers, companyByTicker, watchlistByBase]);
 
-  // Lookup voor onbekende tickers (debounced). Met currency/name hint
-  // om HK numerieke tickers en ambigue namen als ANTA correct te
-  // resolven naar bv. 2020.HK.
+  // Chunked lookup: max 30 per useEffect-fire zodat 5000-row CSV niet
+  // timeout op de edge function. Volgende fire pakt de volgende batch.
   useEffect(() => {
-    const pending = rows.filter(
-      (r) => !r.inWatchlist && r.recognized === null && r.status === "pending"
-    );
+    const pending = rows
+      .filter((r) => !r.inWatchlist && r.recognized === null && r.status === "pending")
+      .slice(0, 30);
     if (pending.length === 0) return;
+    let cancelled = false;
     const timer = setTimeout(async () => {
+      if (cancelled) return;
       const targets = pending.map((r) => r.ticker);
       setRows((prev) =>
         prev.map((r) =>
@@ -562,15 +568,11 @@ function BulkPaste({
         )
       );
       try {
-        // Stuur hints mee als beschikbaar (uit CSV currency/name kolom)
         const hints = pending.map((r) => ({
-          ticker: r.ticker,
-          name: r.name,
-          currency: r.currency,
+          ticker: r.ticker, name: r.name, currency: r.currency,
         }));
         const results = await lookupTickers(hints);
-        // Match op input_ticker (= origineel) zodat we de juiste rij
-        // bijwerken ook als yahoo een ander symbol terug gaf.
+        if (cancelled) return;
         const map = new Map(results.map((r) => [r.input_ticker ?? r.ticker, r]));
         setRows((prev) =>
           prev.map((r) => {
@@ -588,10 +590,11 @@ function BulkPaste({
           })
         );
       } catch (e) {
+        if (cancelled) return;
         setError(`Lookup mislukt: ${e instanceof Error ? e.message : String(e)}`);
       }
-    }, 600);
-    return () => clearTimeout(timer);
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [rows]);
 
   const newRows = rows.filter((r) => !r.inWatchlist);

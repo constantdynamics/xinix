@@ -57,7 +57,7 @@ export async function saveSettings(s: Partial<Settings>): Promise<void> {
 export interface TickerInput {
   ticker: string;
   company: string;
-  sector?: "biotech" | "mining";
+  sector?: "biotech" | "mining" | "other";
   goud_score?: number;
   goud_type?: string;
   trigger_event?: string;

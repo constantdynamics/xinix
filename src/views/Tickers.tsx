@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Card as CardType, Dashboard, Sector } from "../types";
+import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import {
   addTicker,
   batchAddTickers,
@@ -62,11 +63,11 @@ const MINING_RE =
 const BIOTECH_RE =
   /\b(pharma(?:ceuticals?)?|biopharma|therapeutics|bio(?:science|tech(?:nology)?|logics|pharm)?|genomics?|gene(?:tic|ric)?|oncolog(?:y|ic)|immuno(?:logy|therap)|cell\s*(?:therap|technolog)|gene\s*therap|medicines?|medical|laboratories|labs|sciences|clinical|antibody|antibodies|vaccines?|RNA|DNA|protein)\b/i;
 
-function inferSector(company: string | null | undefined): Sector | null {
-  if (!company) return null;
+function inferSector(company: string | null | undefined): Sector {
+  if (!company) return "other";
   if (MINING_RE.test(company)) return "mining";
   if (BIOTECH_RE.test(company)) return "biotech";
-  return null;
+  return "other";
 }
 
 interface PreviewRow {
@@ -276,7 +277,7 @@ export function TickersView({
             id: nextIdRef.current++,
             ticker: p.ticker,
             company: p.company || p.ticker,
-            sector: p.sector ?? "biotech",
+            sector: p.sector ?? "other",
             sectorAuto: !csvHadSector,
             selected: false,
             status: "pending",
@@ -288,19 +289,26 @@ export function TickersView({
     });
   }, [batchText, batchMode]);
 
+  // Chunked lookup: bij grote CSVs (paste van duizenden tickers) sturen
+  // we batches van 30 sequentieel zodat de edge function niet timeout
+  // en de UI tussendoor progress laat zien.
   useEffect(() => {
     const pending = rows
       .filter((r) => r.status === "pending")
-      .map((r) => r.ticker);
+      .slice(0, 30); // max 30 per useEffect-fire; volgende fire pakt de rest
     if (pending.length === 0) return;
+    const tickers = pending.map((r) => r.ticker);
+    let cancelled = false;
     const timer = setTimeout(async () => {
+      if (cancelled) return;
       setRows((prev) =>
         prev.map((r) =>
-          pending.includes(r.ticker) ? { ...r, status: "checking" } : r
+          tickers.includes(r.ticker) ? { ...r, status: "checking" } : r
         )
       );
       try {
-        const results = await lookupTickers(pending);
+        const results = await lookupTickers(tickers);
+        if (cancelled) return;
         const map = new Map(results.map((r) => [r.ticker, r]));
         setRows((prev) =>
           prev.map((r) => {
@@ -314,25 +322,28 @@ export function TickersView({
                 status: "recognized",
                 company,
                 exchange: res.exchange ?? null,
-                // Auto-update sector als gebruiker 'm niet handmatig had gezet
-                sector: r.sectorAuto && inferred ? inferred : r.sector,
+                sector: r.sectorAuto ? inferred : r.sector,
               };
             }
             return { ...r, status: "unknown", exchange: null };
           })
         );
       } catch (e) {
+        if (cancelled) return;
         setRows((prev) =>
           prev.map((r) =>
-            pending.includes(r.ticker) ? { ...r, status: "pending" } : r
+            tickers.includes(r.ticker) ? { ...r, status: "pending" } : r
           )
         );
         setError(
           `Lookup mislukt: ${e instanceof Error ? e.message : String(e)}`
         );
       }
-    }, 600);
-    return () => clearTimeout(timer);
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [rows]);
 
   function toggleRow(id: number) {
@@ -735,6 +746,7 @@ export function TickersView({
               >
                 <option value="biotech">biotech</option>
                 <option value="mining">mining</option>
+                <option value="other">other</option>
               </Select>
               <Button size="sm" variant="primary" onClick={applyBulkSector}>
                 Pas toe
@@ -877,6 +889,7 @@ export function TickersView({
                             >
                               <option value="biotech">biotech</option>
                               <option value="mining">mining</option>
+                <option value="other">other</option>
                             </Select>
                           </td>
                           <td className="p-2 text-right">
@@ -953,6 +966,7 @@ export function TickersView({
               >
                 <option value="biotech">biotech</option>
                 <option value="mining">mining</option>
+                <option value="other">other</option>
               </Select>
               <Input
                 placeholder="Ticker"
@@ -1230,8 +1244,8 @@ export function TickersView({
                         />
                       </td>
                       <td className="p-3">
-                        <Badge tone={c.sector === "mining" ? "watch" : "cyan"}>
-                          {c.sector === "mining" ? "MIN" : "BIO"}
+                        <Badge tone={SECTOR_TONE[c.sector]}>
+                          {SECTOR_LABEL[c.sector]}
                         </Badge>
                       </td>
                       <td className="p-3 font-bold">

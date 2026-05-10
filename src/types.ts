@@ -45,7 +45,18 @@ export interface Catalyst {
   status: string;
 }
 
-export type Sector = "biotech" | "mining";
+export type Sector = "biotech" | "mining" | "other";
+
+export const SECTOR_LABEL: Record<Sector, string> = {
+  biotech: "BIO",
+  mining: "MIN",
+  other: "OTH",
+};
+export const SECTOR_TONE: Record<Sector, "cyan" | "watch" | "neutral"> = {
+  biotech: "cyan",
+  mining: "watch",
+  other: "neutral",
+};
 
 export interface Card {
   ticker: string;
