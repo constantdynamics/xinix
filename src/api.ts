@@ -136,6 +136,7 @@ export async function batchRemoveTickers(
 
 export interface LookupResult {
   ticker: string;
+  input_ticker?: string; // origineel zoals user 'm typte
   recognized: boolean;
   company: string | null;
   currency: string | null;
@@ -143,7 +144,15 @@ export interface LookupResult {
   error?: string;
 }
 
-export async function lookupTickers(tickers: string[]): Promise<LookupResult[]> {
+export interface LookupHint {
+  ticker: string;
+  name?: string;
+  currency?: string;
+}
+
+export async function lookupTickers(
+  tickers: string[] | LookupHint[]
+): Promise<LookupResult[]> {
   if (tickers.length === 0) return [];
   const res = await fetch(apiUrl("/api/ticker-lookup"), {
     method: "POST",

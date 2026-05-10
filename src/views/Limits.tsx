@@ -359,17 +359,37 @@ function RemoveLimitButton({ ticker }: { ticker: string }) {
 }
 
 interface PasteRow {
-  ticker: string;
+  ticker: string;             // input ticker zoals user typte
+  resolvedTicker?: string;    // wat Yahoo daadwerkelijk vond (smart resolve)
   limit: number;
+  name?: string;              // CSV name kolom
+  currency?: string;          // CSV currency kolom (USD/HKD/EUR/etc)
   inWatchlist: boolean;
-  // Het echte ticker in de watchlist als er fuzzy match was (bv. user
-  // typte "EDCU" maar watchlist heeft "EDCU.AX"). Wordt gebruikt voor
-  // PATCH zodat we de limit op de juiste rij zetten.
   matchedTicker?: string;
-  recognized: boolean | null; // null = nog niet gecheckt
+  recognized: boolean | null;
   company: string | null;
-  selected: boolean; // alleen relevant voor onbekende
+  selected: boolean;
   status: "pending" | "checking" | "done";
+}
+
+// Detecteer CSV header met Ticker + Buy Limit kolommen (case
+// insensitive, kan ook ; \t als sep gebruiken). Returnt header-map of
+// null als het niet een CSV is.
+function detectCsvHeaders(line: string): { sep: string; cols: Record<string, number> } | null {
+  // Probeer comma, tab en puntkomma. Take de sep met meeste headers herkend.
+  let best: { sep: string; cols: Record<string, number> } | null = null;
+  for (const sep of [",", "\t", ";"]) {
+    const cells = line.split(sep).map((s) => s.trim().toLowerCase());
+    const cols: Record<string, number> = {};
+    cells.forEach((c, i) => { if (c) cols[c] = i; });
+    const hasTicker = "ticker" in cols;
+    const hasLimit = "buy limit" in cols || "buy_limit" in cols || "buylimit" in cols || "limit" in cols || "aankooplimiet" in cols;
+    if (hasTicker && hasLimit) {
+      const score = Object.keys(cols).length;
+      if (!best || score > Object.keys(best.cols).length) best = { sep, cols };
+    }
+  }
+  return best;
 }
 
 function parseLimitPaste(text: string): { rows: PasteRow[]; errors: string[] } {
@@ -377,6 +397,52 @@ function parseLimitPaste(text: string): { rows: PasteRow[]; errors: string[] } {
   const rows: PasteRow[] = [];
   const seen = new Set<string>();
   const lines = text.split(/\r?\n/);
+
+  // CSV met header detectie
+  const firstNonEmpty = lines.find((l) => l.trim().length > 0)?.trim() ?? "";
+  const csv = detectCsvHeaders(firstNonEmpty);
+
+  if (csv) {
+    const tIdx = csv.cols["ticker"];
+    const nIdx = csv.cols["name"] ?? csv.cols["naam"];
+    const cIdx = csv.cols["currency"] ?? csv.cols["valuta"] ?? csv.cols["ccy"];
+    const lIdx =
+      csv.cols["buy limit"] ??
+      csv.cols["buy_limit"] ??
+      csv.cols["buylimit"] ??
+      csv.cols["limit"] ??
+      csv.cols["aankooplimiet"];
+    const startIdx = lines.findIndex((l) => l.trim() === firstNonEmpty) + 1;
+    for (let i = startIdx; i < lines.length; i++) {
+      const raw = lines[i];
+      if (!raw || !raw.trim() || raw.trim().startsWith("#")) continue;
+      const cells = raw.split(csv.sep).map((s) => s.trim());
+      const ticker = (cells[tIdx] ?? "").toUpperCase();
+      if (!/^[A-Z0-9][A-Z0-9.-]*$/.test(ticker)) {
+        if (cells[tIdx]) errors.push(`'${cells[tIdx]}' is geen geldig ticker (regel ${i + 1})`);
+        continue;
+      }
+      const limitStr = (cells[lIdx] ?? "").replace(",", ".");
+      const limit = Number(limitStr);
+      if (!Number.isFinite(limit) || limit <= 0) {
+        errors.push(`${ticker}: '${cells[lIdx] ?? ""}' is geen geldige limit`);
+        continue;
+      }
+      const name = nIdx != null ? cells[nIdx] || undefined : undefined;
+      const currency = cIdx != null ? cells[cIdx]?.toUpperCase() || undefined : undefined;
+      const key = `${ticker}|${currency ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        ticker, limit, name, currency,
+        inWatchlist: false, recognized: null, company: name ?? null,
+        selected: false, status: "pending",
+      });
+    }
+    return { rows, errors };
+  }
+
+  // Fallback: simpele "ticker prijs" regels
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
@@ -398,13 +464,9 @@ function parseLimitPaste(text: string): { rows: PasteRow[]; errors: string[] } {
     if (seen.has(ticker)) continue;
     seen.add(ticker);
     rows.push({
-      ticker,
-      limit: price,
-      inWatchlist: false,
-      recognized: null,
-      company: null,
-      selected: false,
-      status: "pending",
+      ticker, limit: price,
+      inWatchlist: false, recognized: null, company: null,
+      selected: false, status: "pending",
     });
   }
   return { rows, errors };
@@ -463,9 +525,6 @@ function BulkPaste({
       return parsed.rows.map((p) => {
         const exact = watchlistTickers.has(p.ticker);
         const base = p.ticker.split(".")[0];
-        // Alleen base-match proberen als de getypte ticker zelf geen
-        // beurssuffix heeft (anders had user expliciet die suffix
-        // bedoeld). Plus zelf niet bestaat.
         const noSuffix = !p.ticker.includes(".");
         const fuzzyMatch =
           !exact && noSuffix ? watchlistByBase.get(base) ?? null : null;
@@ -473,23 +532,23 @@ function BulkPaste({
         const inWatchlist = exact || !!matchedTicker;
         const effectiveTicker = matchedTicker ?? p.ticker;
         const existing = prevByTicker.get(p.ticker);
-        if (existing && existing.limit === p.limit) {
+        if (existing && existing.limit === p.limit && existing.currency === p.currency) {
           return { ...existing, inWatchlist, matchedTicker };
         }
         return {
           ...p,
           inWatchlist,
           matchedTicker,
-          company: companyByTicker.get(effectiveTicker) ?? null,
-          // existing watchlist items (exact + fuzzy) zijn automatisch
-          // geselecteerd. Yahoo lookup wordt overgeslagen.
+          company: companyByTicker.get(effectiveTicker) ?? p.name ?? null,
           selected: inWatchlist,
         };
       });
     });
   }, [text, watchlistTickers, companyByTicker, watchlistByBase]);
 
-  // Lookup voor onbekende tickers (debounced)
+  // Lookup voor onbekende tickers (debounced). Met currency/name hint
+  // om HK numerieke tickers en ambigue namen als ANTA correct te
+  // resolven naar bv. 2020.HK.
   useEffect(() => {
     const pending = rows.filter(
       (r) => !r.inWatchlist && r.recognized === null && r.status === "pending"
@@ -503,18 +562,27 @@ function BulkPaste({
         )
       );
       try {
-        const results = await lookupTickers(targets);
-        const map = new Map(results.map((r) => [r.ticker, r]));
+        // Stuur hints mee als beschikbaar (uit CSV currency/name kolom)
+        const hints = pending.map((r) => ({
+          ticker: r.ticker,
+          name: r.name,
+          currency: r.currency,
+        }));
+        const results = await lookupTickers(hints);
+        // Match op input_ticker (= origineel) zodat we de juiste rij
+        // bijwerken ook als yahoo een ander symbol terug gaf.
+        const map = new Map(results.map((r) => [r.input_ticker ?? r.ticker, r]));
         setRows((prev) =>
           prev.map((r) => {
             const res = map.get(r.ticker);
             if (!res) return r;
+            const resolvedTicker = res.recognized && res.ticker !== r.ticker ? res.ticker : undefined;
             return {
               ...r,
               recognized: res.recognized,
+              resolvedTicker,
               company: res.company ?? r.company,
               status: "done",
-              // Yahoo herkende ticker = vóór-vink, anders niet
               selected: res.recognized,
             };
           })
@@ -545,11 +613,13 @@ function BulkPaste({
         await patchTicker(target, { buy_limit: r.limit });
         updated++;
       }
-      // 2) Nieuwe tickers (geselecteerd): batch insert met sector + limit
+      // 2) Nieuwe tickers (geselecteerd): batch insert met sector + limit.
+      //    Gebruik resolvedTicker (bv. 2020.HK voor "ANTA + HKD") zodat
+      //    we het correcte Yahoo-symbol opslaan, niet de gebruikersnotatie.
       let inserted = 0;
       if (newSelected.length > 0) {
         const payload: TickerInput[] = newSelected.map((r) => ({
-          ticker: r.ticker,
+          ticker: r.resolvedTicker ?? r.ticker,
           company: r.company || r.ticker,
           sector: inferSector(r.company),
           buy_limit: r.limit,
@@ -578,10 +648,11 @@ function BulkPaste({
             Bulk import
           </div>
           <div className="text-[11px] text-neutral-400 mt-0.5">
-            Eén regel per ticker:{" "}
-            <code className="text-fog-pink">ticker prijs</code>. Bestaande
-            tickers krijgen de limit; nieuwe worden eerst gecheckt en kun je
-            aan/uit vinken.
+            <code className="text-fog-pink">ticker prijs</code> per regel,{" "}
+            <em>of</em> CSV met header{" "}
+            <code className="text-fog-pink">Ticker,Name,Currency,Buy Limit</code>{" "}
+            (Currency hint helpt bij ambigue ticker als ANTA = ANTA Sports HK
+            of HK numeric ticker als 2382 = Sunny Optical).
           </div>
         </div>
       </div>
@@ -589,9 +660,11 @@ function BulkPaste({
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        rows={5}
+        rows={6}
         spellCheck={false}
-        placeholder={"chn.ax 1.3\ndef 0.1\ncweb 0.12\nasb 18.7"}
+        placeholder={
+          "chn.ax 1.3\ndef 0.1\ncweb 0.12\n\n— OF CSV met header:\n\nTicker,Name,Currency,Buy Limit\nANTA,ANTA Sports,HKD,48.20\n2382,Sunny Optical,HKD,52.50\nNVAX,Novavax Inc,USD,6.53"
+        }
         className="w-full font-mono text-xs rounded-lg p-3 leading-relaxed"
       />
 
@@ -658,8 +731,18 @@ function BulkPaste({
                           }
                         />
                       </td>
-                      <td className="p-2 font-mono font-bold w-24">
+                      <td className="p-2 font-mono font-bold w-32">
                         {r.ticker}
+                        {r.resolvedTicker && (
+                          <div className="text-[10px] font-normal text-fog-info">
+                            → {r.resolvedTicker}
+                          </div>
+                        )}
+                        {r.currency && (
+                          <div className="text-[10px] font-normal text-neutral-400">
+                            {r.currency}
+                          </div>
+                        )}
                       </td>
                       <td className="p-2 tabular text-fog-pink w-20">
                         ${fmt(r.limit)}
