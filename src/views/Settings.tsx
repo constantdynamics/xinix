@@ -74,11 +74,11 @@ export function SettingsView() {
             </div>
             <div className="text-xs text-neutral-400 mt-1.5 leading-relaxed">
               Aan = meldingen alléén voor onmiskenbare actie‑triggers:
-              <strong className="text-fog-pink">
-                {" "}
-                aankooplimiet bereikt of binnen 10% boven jouw limit
-              </strong>
-              ,{" "}
+              <strong className="text-fog-pink"> aankooplimiet bereikt</strong>{" "}
+              of binnen{" "}
+              <strong className="text-fog-pink">25%</strong> /{" "}
+              <strong className="text-fog-pink">10%</strong> boven jouw limit
+              (eenmaal per 6 maanden per drempel),{" "}
               <strong className="text-fog-warn">
                 40%+ daling onder de 1y high
               </strong>
