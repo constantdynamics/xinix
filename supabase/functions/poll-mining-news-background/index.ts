@@ -116,8 +116,10 @@ const NEWS_PATTERNS: MiningPattern[] = [
   },
   {
     type: "jv_strategic",
-    severity: "orange",
-    re: /(?:strategic\s+)?(?:joint\s+venture|earn[-\s]?in|cornerstone\s+investment)/i,
+    severity: "yellow",
+    // \b na "in" zodat "earnings" / "earning" niet matcht (was de oorzaak
+    // van duizenden valse jv_strategic events).
+    re: /(?:strategic\s+)?(?:joint\s+venture|earn[-\s]?in\b|cornerstone\s+investment)/i,
     label: "JV / strategic investment",
   },
   {

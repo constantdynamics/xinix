@@ -119,11 +119,17 @@ async function scoreOneTicker(
 // Binnen een tier: meest-stale eerst (NULL = nooit gescoord = bovenaan).
 // Zo krijgen tickers die kans maken op een hot/strong-buy positie veel
 // vaker een herscore; de 3600 no-data tickers rouleren traag door.
+//
+// In het weekend (markten dicht, alle tijd) vervalt de tier-prioriteit:
+// dan is het een vlakke round-robin over de hele watchlist met een grote
+// batch, zodat ook tier C volledig aan bod komt.
 const SCORE_BATCH = 250;
+const WEEKEND_BATCH = 600;
 const SCORE_BUDGET_MS = 110_000;
 const STALE_A_MS = 1 * 60 * 60 * 1000;
 const STALE_B_MS = 12 * 60 * 60 * 1000;
 const STALE_C_MS = 30 * 24 * 60 * 60 * 1000;
+const WEEKEND_STALE_MS = 1 * 60 * 60 * 1000;
 
 Deno.serve(
   runBackground("compute-scores", async () => {
@@ -200,22 +206,23 @@ Deno.serve(
       if ((t.factor_count ?? 0) >= 2 || recentSigSet.has(t.ticker)) return "B";
       return "C";
     };
-    const TIER_THRESH: Record<"A" | "B" | "C", number> = {
-      A: STALE_A_MS,
-      B: STALE_B_MS,
-      C: STALE_C_MS,
-    };
+    const day = new Date().getUTCDay(); // 0 = zondag, 6 = zaterdag
+    const isWeekend = day === 0 || day === 6;
+    const batchSize = isWeekend ? WEEKEND_BATCH : SCORE_BATCH;
+    const TIER_THRESH: Record<"A" | "B" | "C", number> = isWeekend
+      ? { A: WEEKEND_STALE_MS, B: WEEKEND_STALE_MS, C: WEEKEND_STALE_MS }
+      : { A: STALE_A_MS, B: STALE_B_MS, C: STALE_C_MS };
     const TIER_RANK: Record<"A" | "B" | "C", number> = { A: 0, B: 1, C: 2 };
 
     const queue = (tickers as TR[])
       .map((t) => ({ t, tier: tierOf(t), stale: staleMs(t) }))
       .filter((x) => x.stale >= TIER_THRESH[x.tier])
       .sort((a, b) => {
-        if (TIER_RANK[a.tier] !== TIER_RANK[b.tier])
+        if (!isWeekend && TIER_RANK[a.tier] !== TIER_RANK[b.tier])
           return TIER_RANK[a.tier] - TIER_RANK[b.tier];
         return b.stale - a.stale;
       })
-      .slice(0, SCORE_BATCH);
+      .slice(0, batchSize);
 
     if (queue.length === 0) {
       return { ok: true, message: "alle scores zijn vers", metrics: { scored: 0, queued: 0 } };
