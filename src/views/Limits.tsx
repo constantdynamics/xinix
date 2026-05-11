@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dashboard, Card as CardData, Sector } from "../types";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import {
@@ -551,16 +551,18 @@ function BulkPaste({
     });
   }, [text, watchlistTickers, companyByTicker, watchlistByBase]);
 
-  // Chunked lookup: max 30 per useEffect-fire zodat 5000-row CSV niet
-  // timeout op de edge function. Volgende fire pakt de volgende batch.
+  // In-flight ref voorkomt overlappende useEffect fires van het
+  // annuleren van een lookup batch. Verwerkt 30 pending tickers per
+  // batch; volgende batch start automatisch na completion.
+  const lookupBusy = useRef(false);
   useEffect(() => {
+    if (lookupBusy.current) return;
     const pending = rows
       .filter((r) => !r.inWatchlist && r.recognized === null && r.status === "pending")
       .slice(0, 30);
     if (pending.length === 0) return;
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      if (cancelled) return;
+    lookupBusy.current = true;
+    (async () => {
       const targets = pending.map((r) => r.ticker);
       setRows((prev) =>
         prev.map((r) =>
@@ -572,7 +574,6 @@ function BulkPaste({
           ticker: r.ticker, name: r.name, currency: r.currency,
         }));
         const results = await lookupTickers(hints);
-        if (cancelled) return;
         const map = new Map(results.map((r) => [r.input_ticker ?? r.ticker, r]));
         setRows((prev) =>
           prev.map((r) => {
@@ -590,11 +591,11 @@ function BulkPaste({
           })
         );
       } catch (e) {
-        if (cancelled) return;
         setError(`Lookup mislukt: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        lookupBusy.current = false;
       }
-    }, 400);
-    return () => { cancelled = true; clearTimeout(timer); };
+    })();
   }, [rows]);
 
   const newRows = rows.filter((r) => !r.inWatchlist);

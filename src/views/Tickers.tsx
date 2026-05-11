@@ -289,18 +289,19 @@ export function TickersView({
     });
   }, [batchText, batchMode]);
 
-  // Chunked lookup: bij grote CSVs (paste van duizenden tickers) sturen
-  // we batches van 30 sequentieel zodat de edge function niet timeout
-  // en de UI tussendoor progress laat zien.
+  // In-flight ref voorkomt dat overlappende useEffect fires (door
+  // setRows tussendoor) een lookup-batch annuleren. Pakt 30 pending
+  // tickers per batch; volgende batch start zodra deze klaar is.
+  const lookupBusy = useRef(false);
   useEffect(() => {
+    if (lookupBusy.current) return;
     const pending = rows
       .filter((r) => r.status === "pending")
-      .slice(0, 30); // max 30 per useEffect-fire; volgende fire pakt de rest
+      .slice(0, 30);
     if (pending.length === 0) return;
     const tickers = pending.map((r) => r.ticker);
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      if (cancelled) return;
+    lookupBusy.current = true;
+    (async () => {
       setRows((prev) =>
         prev.map((r) =>
           tickers.includes(r.ticker) ? { ...r, status: "checking" } : r
@@ -308,7 +309,6 @@ export function TickersView({
       );
       try {
         const results = await lookupTickers(tickers);
-        if (cancelled) return;
         const map = new Map(results.map((r) => [r.ticker, r]));
         setRows((prev) =>
           prev.map((r) => {
@@ -329,7 +329,6 @@ export function TickersView({
           })
         );
       } catch (e) {
-        if (cancelled) return;
         setRows((prev) =>
           prev.map((r) =>
             tickers.includes(r.ticker) ? { ...r, status: "pending" } : r
@@ -338,12 +337,10 @@ export function TickersView({
         setError(
           `Lookup mislukt: ${e instanceof Error ? e.message : String(e)}`
         );
+      } finally {
+        lookupBusy.current = false;
       }
-    }, 400);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+    })();
   }, [rows]);
 
   function toggleRow(id: number) {
