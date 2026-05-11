@@ -14,12 +14,14 @@ import {
   Pill,
   Badge,
   Dot,
+  Select,
   SectionHeader,
   RangeBar,
   BlockBar,
 } from "../components/ui";
 
 const VIEW_KEY = "xinix_limit_view";
+const FILTER_KEY = "xinix_limit_filter_v1";
 
 // Distance = limit/price, capped op 1.0. Hoger = dichter bij entry.
 function distanceFraction(price: number, limit: number): number {
@@ -35,52 +37,50 @@ function distanceTone(d: number): {
   label: string;
 } {
   if (d >= 1)
-    return {
-      bg: "bg-fog-lime",
-      text: "text-fog-lime",
-      ring: "ring-fog-lime/40",
-      label: "BUY!",
-    };
+    return { bg: "bg-fog-lime", text: "text-fog-lime", ring: "ring-fog-lime/40", label: "BUY!" };
   if (d >= 0.95)
-    return {
-      bg: "bg-fog-lime/80",
-      text: "text-fog-lime",
-      ring: "ring-fog-lime/30",
-      label: "≤5% boven",
-    };
+    return { bg: "bg-fog-lime/80", text: "text-fog-lime", ring: "ring-fog-lime/30", label: "≤5% boven" };
   if (d >= 0.85)
-    return {
-      bg: "bg-fog-info",
-      text: "text-fog-info",
-      ring: "ring-fog-info/30",
-      label: "≤15% boven",
-    };
+    return { bg: "bg-fog-info", text: "text-fog-info", ring: "ring-fog-info/30", label: "≤15% boven" };
   if (d >= 0.7)
-    return {
-      bg: "bg-fog-warn",
-      text: "text-fog-warn",
-      ring: "ring-fog-warn/30",
-      label: "≤30% boven",
-    };
+    return { bg: "bg-fog-warn", text: "text-fog-warn", ring: "ring-fog-warn/30", label: "≤30% boven" };
   if (d >= 0.5)
-    return {
-      bg: "bg-fog-warn/70",
-      text: "text-fog-warn",
-      ring: "ring-fog-warn/20",
-      label: "≤50% boven",
-    };
-  return {
-    bg: "bg-fog-loss/70",
-    text: "text-fog-loss",
-    ring: "ring-fog-loss/20",
-    label: ">50% boven",
-  };
+    return { bg: "bg-fog-warn/70", text: "text-fog-warn", ring: "ring-fog-warn/20", label: "≤50% boven" };
+  return { bg: "bg-fog-loss/70", text: "text-fog-loss", ring: "ring-fog-loss/20", label: ">50% boven" };
 }
 
 function fmt(v: number): string {
   if (v < 1) return v.toFixed(3);
   if (v < 100) return v.toFixed(2);
   return v.toFixed(1);
+}
+
+function totalMedals(r: { gold: number; silver: number; bronze: number }): number {
+  return r.gold + r.silver + r.bronze;
+}
+
+// Medaille-strip: 🥇3 🥈1 🥉5, lege medailles licht grijs.
+function MedalStrip({
+  gold,
+  silver,
+  bronze,
+  size = "sm",
+}: {
+  gold: number;
+  silver: number;
+  bronze: number;
+  size?: "sm" | "xs";
+}) {
+  const cls = size === "xs" ? "text-[10px]" : "text-xs";
+  if (gold + silver + bronze === 0)
+    return <span className={`${cls} text-neutral-500`}>—</span>;
+  return (
+    <span className={`${cls} tabular whitespace-nowrap`}>
+      {gold > 0 && <span className="text-fog-watch">🥇{gold} </span>}
+      {silver > 0 && <span className="text-neutral-300">🥈{silver} </span>}
+      {bronze > 0 && <span className="text-[#cd7f32]">🥉{bronze}</span>}
+    </span>
+  );
 }
 
 interface LimitRow {
@@ -95,6 +95,42 @@ interface LimitRow {
   high_1y: number | null;
   low_5y: number | null;
   high_5y: number | null;
+  gold: number;
+  silver: number;
+  bronze: number;
+}
+
+type ScopeFilter = "all" | "buy" | "close25" | "medals";
+type SortBy =
+  | "distance"
+  | "medals"
+  | "medals_price"
+  | "gold"
+  | "price_asc"
+  | "price_desc"
+  | "ticker";
+
+const SCOPE_LABELS: Record<ScopeFilter, string> = {
+  all: "Alle met limit",
+  buy: "Op/onder limit",
+  close25: "≤25% boven limit",
+  medals: "Heeft medailles",
+};
+const SORT_LABELS: Record<SortBy, string> = {
+  distance: "Afstand tot limit",
+  medals: "Medailleklassement (Olympisch)",
+  medals_price: "Medailles, dan koers (laag eerst)",
+  gold: "Aantal gouden medailles",
+  price_asc: "Koers laag → hoog",
+  price_desc: "Koers hoog → laag",
+  ticker: "Ticker A-Z",
+};
+
+function olympicCmp(a: LimitRow, b: LimitRow): number {
+  if (b.gold !== a.gold) return b.gold - a.gold;
+  if (b.silver !== a.silver) return b.silver - a.silver;
+  if (b.bronze !== a.bronze) return b.bronze - a.bronze;
+  return 0;
 }
 
 export function LimitsView({
@@ -113,7 +149,35 @@ export function LimitsView({
     localStorage.setItem(VIEW_KEY, v);
   }
 
-  const rows: LimitRow[] = useMemo(() => {
+  const [scope, setScope] = useState<ScopeFilter>(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}");
+      return (s.scope as ScopeFilter) ?? "all";
+    } catch {
+      return "all";
+    }
+  });
+  const [sectorF, setSectorF] = useState<Sector | "all">(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}");
+      return (s.sectorF as Sector | "all") ?? "all";
+    } catch {
+      return "all";
+    }
+  });
+  const [sortBy, setSortBy] = useState<SortBy>(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}");
+      return (s.sortBy as SortBy) ?? "distance";
+    } catch {
+      return "distance";
+    }
+  });
+  useEffect(() => {
+    localStorage.setItem(FILTER_KEY, JSON.stringify({ scope, sectorF, sortBy }));
+  }, [scope, sectorF, sortBy]);
+
+  const allRows: LimitRow[] = useMemo(() => {
     return data.cards
       .filter((c) => c.buy_limit != null)
       .map((c) => {
@@ -131,53 +195,132 @@ export function LimitsView({
           high_1y: c.summary?.high_1y ?? null,
           low_5y: c.summary?.low_5y ?? null,
           high_5y: c.summary?.high_5y ?? null,
+          gold: c.medal_gold ?? 0,
+          silver: c.medal_silver ?? 0,
+          bronze: c.medal_bronze ?? 0,
         };
-      })
-      .sort((a, b) => b.distance - a.distance);
+      });
   }, [data.cards]);
 
-  const buyNowCount = rows.filter((r) => r.distance >= 1).length;
-  const closeCount = rows.filter(
-    (r) => r.distance >= 0.85 && r.distance < 1
-  ).length;
+  const rows = useMemo(() => {
+    let r = allRows;
+    if (scope === "buy") r = r.filter((x) => x.distance >= 1);
+    else if (scope === "close25") r = r.filter((x) => x.distance >= 0.8);
+    else if (scope === "medals") r = r.filter((x) => totalMedals(x) > 0);
+    if (sectorF !== "all") r = r.filter((x) => x.sector === sectorF);
+    const sorted = [...r];
+    sorted.sort((a, b) => {
+      switch (sortBy) {
+        case "distance":
+          return b.distance - a.distance || olympicCmp(a, b) || a.ticker.localeCompare(b.ticker);
+        case "medals": {
+          const o = olympicCmp(a, b);
+          return o || b.distance - a.distance || a.ticker.localeCompare(b.ticker);
+        }
+        case "medals_price": {
+          const o = olympicCmp(a, b);
+          if (o) return o;
+          const pa = a.current ?? Infinity;
+          const pb = b.current ?? Infinity;
+          return pa - pb || a.ticker.localeCompare(b.ticker);
+        }
+        case "gold":
+          return b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || b.distance - a.distance;
+        case "price_asc":
+          return (a.current ?? Infinity) - (b.current ?? Infinity);
+        case "price_desc":
+          return (b.current ?? -Infinity) - (a.current ?? -Infinity);
+        case "ticker":
+          return a.ticker.localeCompare(b.ticker);
+      }
+    });
+    return sorted;
+  }, [allRows, scope, sectorF, sortBy]);
+
+  const buyNowCount = allRows.filter((r) => r.distance >= 1).length;
+  const closeCount = allRows.filter((r) => r.distance >= 0.85 && r.distance < 1).length;
+  const withMedals = allRows.filter((r) => totalMedals(r) > 0).length;
+  const totalGold = allRows.reduce((s, r) => s + r.gold, 0);
 
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Aankoop"
         title="Limiet-watcher"
-        subtitle={`${rows.length} tickers met limit · ${buyNowCount} op/onder · ${closeCount} dicht (<15% boven)`}
+        subtitle={`${allRows.length} met limit · ${buyNowCount} op/onder · ${closeCount} dicht · ${withMedals} met medaille · ${totalGold}× goud totaal`}
         aside={
           <div className="flex gap-1.5">
-            <Pill
-              tone="lime"
-              active={view === "list"}
-              onClick={() => pickView("list")}
-              size="sm"
-            >
+            <Pill tone="lime" active={view === "list"} onClick={() => pickView("list")} size="sm">
               Lijst
             </Pill>
-            <Pill
-              tone="cyan"
-              active={view === "tiles"}
-              onClick={() => pickView("tiles")}
-              size="sm"
-            >
+            <Pill tone="cyan" active={view === "tiles"} onClick={() => pickView("tiles")} size="sm">
               Tegels
             </Pill>
           </div>
         }
       />
 
-      {rows.length === 0 ? (
+      {/* Filter + sorteer bar */}
+      <Card className="p-3 flex items-center gap-3 flex-wrap text-xs">
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+          Toon
+        </span>
+        <Select
+          value={scope}
+          onChange={(e) => setScope(e.target.value as ScopeFilter)}
+          className="h-8 text-xs"
+        >
+          {(Object.keys(SCOPE_LABELS) as ScopeFilter[]).map((k) => (
+            <option key={k} value={k}>
+              {SCOPE_LABELS[k]}
+            </option>
+          ))}
+        </Select>
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+          Sector
+        </span>
+        <Select
+          value={sectorF}
+          onChange={(e) => setSectorF(e.target.value as Sector | "all")}
+          className="h-8 text-xs"
+        >
+          <option value="all">Alle</option>
+          <option value="biotech">biotech</option>
+          <option value="mining">mining</option>
+          <option value="other">other</option>
+        </Select>
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+          Sorteer
+        </span>
+        <Select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortBy)}
+          className="h-8 text-xs"
+        >
+          {(Object.keys(SORT_LABELS) as SortBy[]).map((k) => (
+            <option key={k} value={k}>
+              {SORT_LABELS[k]}
+            </option>
+          ))}
+        </Select>
+        <span className="ml-auto text-neutral-400 tabular">
+          {rows.length} getoond
+        </span>
+      </Card>
+
+      {allRows.length === 0 ? (
         <Card className="p-10 text-center text-neutral-400 text-sm">
           Geen tickers met aankooplimiet. Plak onderaan een lijst om te
           beginnen.
         </Card>
+      ) : rows.length === 0 ? (
+        <Card className="p-8 text-center text-neutral-400 text-sm">
+          Geen tickers in deze filter.
+        </Card>
       ) : view === "list" ? (
-        <LimitTable rows={rows} />
+        <LimitTable rows={rows} sortBy={sortBy} />
       ) : (
-        <LimitTiles rows={rows} />
+        <LimitTiles rows={rows} sortBy={sortBy} />
       )}
 
       <BulkPaste data={data} onRefresh={onRefresh} />
@@ -185,25 +328,28 @@ export function LimitsView({
   );
 }
 
-function LimitTable({ rows }: { rows: LimitRow[] }) {
+function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
+  const showRank = sortBy === "medals" || sortBy === "medals_price" || sortBy === "gold";
   return (
     <Card className="overflow-hidden">
       <div className="overflow-auto">
         <table className="w-full text-sm">
           <thead className="text-[10px] uppercase tracking-wider text-neutral-300 bg-ink-3/40">
             <tr>
+              {showRank && <th className="text-right p-3 font-semibold w-10">#</th>}
               <th className="text-left p-3 font-semibold">Ticker</th>
               <th className="text-left p-3 font-semibold">Bedrijf</th>
+              <th className="text-left p-3 font-semibold">Medailles</th>
               <th className="text-right p-3 font-semibold">Koers</th>
               <th className="text-right p-3 font-semibold">Limit</th>
-              <th className="text-left p-3 font-semibold w-56">Distance</th>
+              <th className="text-left p-3 font-semibold w-56">Afstand</th>
               <th className="text-right p-3 font-semibold">Dag</th>
               <th className="text-left p-3 font-semibold w-64">1y range</th>
               <th className="p-3"></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {rows.map((r, i) => {
               const tone = distanceTone(r.distance);
               const pct = Math.round(r.distance * 100);
               return (
@@ -211,11 +357,13 @@ function LimitTable({ rows }: { rows: LimitRow[] }) {
                   key={r.ticker}
                   className="border-t border-ink-5 hover:bg-ink-3/40 transition"
                 >
+                  {showRank && (
+                    <td className="p-3 text-right tabular text-neutral-400">
+                      {i + 1}
+                    </td>
+                  )}
                   <td className="p-3 font-bold whitespace-nowrap">
-                    <Badge
-                      tone={SECTOR_TONE[r.sector]}
-                      className="mr-2"
-                    >
+                    <Badge tone={SECTOR_TONE[r.sector]} className="mr-2">
                       {SECTOR_LABEL[r.sector]}
                     </Badge>
                     <a
@@ -230,6 +378,9 @@ function LimitTable({ rows }: { rows: LimitRow[] }) {
                   <td className="p-3 text-neutral-300 truncate max-w-xs">
                     {r.company}
                   </td>
+                  <td className="p-3">
+                    <MedalStrip gold={r.gold} silver={r.silver} bronze={r.bronze} />
+                  </td>
                   <td className="p-3 text-right tabular text-neutral-100">
                     {r.current != null ? `$${fmt(r.current)}` : "—"}
                   </td>
@@ -239,44 +390,23 @@ function LimitTable({ rows }: { rows: LimitRow[] }) {
                   <td className="p-3">
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-3.5">
-                        <BlockBar
-                          fill={r.distance}
-                          orientation="horizontal"
-                        />
+                        <BlockBar fill={r.distance} orientation="horizontal" />
                       </div>
-                      <span
-                        className={`text-[11px] tabular font-bold w-12 text-right ${tone.text}`}
-                      >
+                      <span className={`text-[11px] tabular font-bold w-12 text-right ${tone.text}`}>
                         {r.distance >= 1 ? "BUY!" : `${pct}%`}
                       </span>
                     </div>
                   </td>
                   <td className="p-3 text-right tabular">
-                    <span
-                      className={
-                        (r.pct1d ?? 0) >= 0
-                          ? "text-fog-lime"
-                          : "text-fog-loss"
-                      }
-                    >
-                      {r.pct1d == null
-                        ? "—"
-                        : `${r.pct1d >= 0 ? "+" : ""}${r.pct1d.toFixed(1)}%`}
+                    <span className={(r.pct1d ?? 0) >= 0 ? "text-fog-lime" : "text-fog-loss"}>
+                      {r.pct1d == null ? "—" : `${r.pct1d >= 0 ? "+" : ""}${r.pct1d.toFixed(1)}%`}
                     </span>
                   </td>
                   <td className="p-3">
-                    {r.low_1y != null &&
-                    r.high_1y != null &&
-                    r.current != null ? (
-                      <RangeBar
-                        low={r.low_1y}
-                        high={r.high_1y}
-                        current={r.current}
-                      />
+                    {r.low_1y != null && r.high_1y != null && r.current != null ? (
+                      <RangeBar low={r.low_1y} high={r.high_1y} current={r.current} />
                     ) : (
-                      <span className="text-[11px] text-neutral-400 italic">
-                        nog ophalen
-                      </span>
+                      <span className="text-[11px] text-neutral-400 italic">nog ophalen</span>
                     )}
                   </td>
                   <td className="p-3 text-right">
@@ -292,15 +422,17 @@ function LimitTable({ rows }: { rows: LimitRow[] }) {
   );
 }
 
-function LimitTiles({ rows }: { rows: LimitRow[] }) {
+function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
+  const showRank = sortBy === "medals" || sortBy === "medals_price" || sortBy === "gold";
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
-      {rows.map((r) => {
+      {rows.map((r, i) => {
         const tone = distanceTone(r.distance);
         const pct = Math.round(r.distance * 100);
-        const pctAbove = r.current != null && r.current > r.limit
-          ? ((r.current - r.limit) / r.limit) * 100
-          : null;
+        const pctAbove =
+          r.current != null && r.current > r.limit
+            ? ((r.current - r.limit) / r.limit) * 100
+            : null;
         return (
           <a
             key={r.ticker}
@@ -308,10 +440,13 @@ function LimitTiles({ rows }: { rows: LimitRow[] }) {
             target="_blank"
             rel="noopener noreferrer"
             className={`block rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5 hover:scale-[1.02] transition cursor-pointer`}
-            title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}`}
+            title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🥇${r.gold} 🥈${r.silver} 🥉${r.bronze}`}
           >
             <div className="flex items-center justify-between gap-1 mb-1">
               <span className="font-bold text-sm text-ink-0 truncate">
+                {showRank && (
+                  <span className="text-ink-0/60 mr-1">#{i + 1}</span>
+                )}
                 {r.ticker}
               </span>
               <span className="text-[9px] uppercase tracking-wider text-ink-0/70 font-bold">
@@ -326,7 +461,14 @@ function LimitTiles({ rows }: { rows: LimitRow[] }) {
               <span className="text-ink-0/60"> / </span>
               ${fmt(r.limit)}
             </div>
-            {pctAbove != null && (
+            {(r.gold + r.silver + r.bronze > 0) && (
+              <div className="text-[10px] tabular mt-0.5">
+                {r.gold > 0 && `🥇${r.gold} `}
+                {r.silver > 0 && `🥈${r.silver} `}
+                {r.bronze > 0 && `🥉${r.bronze}`}
+              </div>
+            )}
+            {pctAbove != null && r.gold + r.silver + r.bronze === 0 && (
               <div className="text-[9px] tabular text-ink-0/70 mt-0.5">
                 +{pctAbove.toFixed(0)}% boven limit
               </div>

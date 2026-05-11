@@ -78,6 +78,11 @@ export interface Card {
   price_fail_count?: number;
   price_benched?: boolean;
   price_last_error?: string | null;
+  // Medailleklassement (5y zigzag runs)
+  medal_gold?: number;
+  medal_silver?: number;
+  medal_bronze?: number;
+  medals_computed_at?: string | null;
   color: Color;
   signal_color: Color;
   baseline_color: Color;
