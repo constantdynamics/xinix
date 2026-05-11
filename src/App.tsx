@@ -180,7 +180,7 @@ export function App() {
         {tab === "dashboard" && data && (
           <DashboardView data={data} onRefresh={refresh} />
         )}
-        {tab === "settings" && <SettingsView />}
+        {tab === "settings" && <SettingsView data={data ?? undefined} />}
         {tab === "tickers" && data && (
           <TickersView data={data} onRefresh={refresh} />
         )}

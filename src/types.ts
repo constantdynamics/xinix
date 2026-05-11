@@ -73,6 +73,11 @@ export interface Card {
   factor_count: number;
   trigger_event: string | null;
   buy_limit?: number | null;
+  // Round-robin price-poll status
+  price_polled_at?: string | null;
+  price_fail_count?: number;
+  price_benched?: boolean;
+  price_last_error?: string | null;
   color: Color;
   signal_color: Color;
   baseline_color: Color;
@@ -121,11 +126,29 @@ export interface RunLog {
   message: string | null;
 }
 
+export interface PollStatus {
+  total: number;
+  never_polled: number;
+  benched: number;
+  oldest_polled_at: string | null;
+  newest_polled_at: string | null;
+  last_run: {
+    started_at: string;
+    ok: boolean | null;
+    message: string | null;
+    metrics: Record<string, unknown> | null;
+  } | null;
+  bench_after_fails: number;
+  batch_size: number;
+  interval_minutes: number;
+}
+
 export interface Dashboard {
   cards: Card[];
   recent_signals: Signal[];
   upcoming_catalysts: Catalyst[];
   run_log: RunLog[];
+  poll_status?: PollStatus;
   generated_at: string;
 }
 

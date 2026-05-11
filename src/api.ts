@@ -117,6 +117,30 @@ export async function removeTicker(ticker: string): Promise<void> {
   if (!res.ok) throw new Error(`remove ticker ${res.status}`);
 }
 
+// Bench-beheer (round-robin price-poll). Een ticker die 3x faalt bij
+// het scannen gaat 'op de bank'; deze functies halen 'm er weer af.
+export async function unbenchTicker(ticker: string): Promise<void> {
+  const res = await fetch(
+    apiUrl(`/api/tickers?ticker=${encodeURIComponent(ticker)}`),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ unbench: true }),
+    }
+  );
+  if (!res.ok) throw new Error(`unbench ${res.status}: ${await res.text()}`);
+}
+
+export async function unbenchAll(): Promise<{ unbenched: number }> {
+  const res = await fetch(apiUrl("/api/tickers?action=unbench-all"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`unbench-all ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { unbenched: number };
+}
+
 export async function batchRemoveTickers(
   tickers: string[]
 ): Promise<{ removed: string[]; failed: { ticker: string; error: string }[] }> {
