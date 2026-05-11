@@ -444,14 +444,30 @@ export function TickersView({
     }
     setBatchBusy(true);
     try {
-      const payload: TickerInput[] = rows.map((r) => ({
-        ticker: r.ticker,
-        company: r.company || r.ticker,
-        sector: r.sector,
-        ...(extrasRef.current.get(r.ticker) ?? {}),
-      }));
-      const res = await batchAddTickers(payload);
-      setMsg(`${res.inserted} ticker(s) toegevoegd / bijgewerkt`);
+      // Dedupe op ticker (laatste wint) zodat de upsert geen conflict-key
+      // dubbel ziet, en chunk in batches van 200 zodat de POST body niet
+      // te groot wordt bij duizenden rijen.
+      const byTicker = new Map<string, TickerInput>();
+      for (const r of rows) {
+        byTicker.set(r.ticker, {
+          ticker: r.ticker,
+          company: r.company || r.ticker,
+          sector: r.sector,
+          ...(extrasRef.current.get(r.ticker) ?? {}),
+        });
+      }
+      const all = [...byTicker.values()];
+      const CHUNK = 200;
+      let inserted = 0;
+      for (let i = 0; i < all.length; i += CHUNK) {
+        const chunk = all.slice(i, i + CHUNK);
+        const res = await batchAddTickers(chunk);
+        inserted += res.inserted;
+        setMsg(
+          `Bezig… ${Math.min(i + CHUNK, all.length)}/${all.length} verwerkt`
+        );
+      }
+      setMsg(`${inserted} ticker(s) toegevoegd / bijgewerkt`);
       setBatchText("");
       setRows([]);
       onRefresh();
@@ -726,6 +742,13 @@ export function TickersView({
               ))}
               {parseErrors.length > 5 && <li>… en meer</li>}
             </ul>
+          )}
+
+          {/* Onherkende tickers — uitklapbaar, met copy-knop */}
+          {unknownCount > 0 && (
+            <UnrecognizedList
+              tickers={rows.filter((r) => r.status === "unknown").map((r) => r.ticker)}
+            />
           )}
 
           {/* Bulk action toolbar */}
@@ -1313,6 +1336,50 @@ export function TickersView({
           </div>
         </Card>
       </section>
+    </div>
+  );
+}
+
+function UnrecognizedList({ tickers }: { tickers: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  if (tickers.length === 0) return null;
+  const text = tickers.join("\n");
+  return (
+    <div className="rounded-lg border border-fog-warn/40 bg-fog-warn/10 p-3 text-xs">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 font-bold text-fog-warn"
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        <span>{tickers.length} niet herkend op Yahoo</span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <textarea
+            readOnly
+            value={text}
+            rows={Math.min(12, tickers.length)}
+            className="w-full font-mono text-[11px] rounded p-2 leading-relaxed bg-ink-1"
+          />
+          <button
+            onClick={() => {
+              navigator.clipboard?.writeText(text);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }}
+            className="px-2 py-1 rounded bg-ink-3 hover:bg-ink-4 border border-ink-5 text-[11px]"
+          >
+            {copied ? "Gekopieerd" : "Kopieer lijst"}
+          </button>
+          <p className="text-[10px] text-neutral-400 leading-relaxed">
+            Plak deze in de chat zodat we kunnen kijken wat ze nodig hebben
+            (verkeerde suffix, andere notatie, niet op Yahoo, etc). Je kunt
+            ze ook gewoon meeselecteren — dan komen ze als-is in de
+            watchlist (price polling zal dan falen voor die rijen).
+          </p>
+        </div>
+      )}
     </div>
   );
 }
