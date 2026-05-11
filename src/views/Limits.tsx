@@ -423,7 +423,10 @@ function parseLimitPaste(text: string): { rows: PasteRow[]; errors: string[] } {
         if (cells[tIdx]) errors.push(`'${cells[tIdx]}' is geen geldig ticker (regel ${i + 1})`);
         continue;
       }
-      const limitStr = (cells[lIdx] ?? "").replace(",", ".");
+      const limitStr = (cells[lIdx] ?? "").replace(",", ".").trim();
+      // Lege of 0-limit: gewoon stil overslaan, geen "fout". Komt vaak
+      // voor in CSVs (nog geen koersdoel ingesteld voor dat aandeel).
+      if (limitStr === "" || limitStr === "0" || limitStr === "0.0" || limitStr === "0.00") continue;
       const limit = Number(limitStr);
       if (!Number.isFinite(limit) || limit <= 0) {
         errors.push(`${ticker}: '${cells[lIdx] ?? ""}' is geen geldige limit`);
