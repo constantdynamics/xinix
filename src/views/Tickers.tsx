@@ -171,6 +171,13 @@ function parseBatch(
         errors.push(`regel ${i + 1}: ticker ontbreekt`);
         continue;
       }
+      const limitRaw =
+        obj["buy_limit"] ?? obj["buy limit"] ?? obj["buylimit"] ??
+        obj["limit"] ?? obj["aankooplimiet"];
+      const buyLimit =
+        limitRaw && Number.isFinite(Number(limitRaw.replace(",", ".")))
+          ? Number(limitRaw.replace(",", "."))
+          : undefined;
       row = {
         ticker: obj.ticker.toUpperCase(),
         company: obj.company || obj.name || obj.ticker,
@@ -185,6 +192,9 @@ function parseBatch(
         phase: obj.phase || undefined,
         trigger_event: obj.trigger_event || undefined,
         trigger_date: obj.trigger_date || undefined,
+        // Alleen meegeven als de kolom een waarde had — anders zou de
+        // backend bij re-import een bestaande limit op NULL zetten.
+        ...(buyLimit !== undefined ? { buy_limit: buyLimit } : {}),
       };
     } else {
       const [ticker, company, sector, extra1, extra2] = parts;
@@ -258,10 +268,14 @@ export function TickersView({
       const next: PreviewRow[] = [];
       for (const p of parsed.rows) {
         const existing = prevByTicker.get(p.ticker);
-        const extras: Partial<TickerInput> = { ...p };
-        delete (extras as { ticker?: string }).ticker;
-        delete (extras as { company?: string }).company;
-        delete (extras as { sector?: string }).sector;
+        // Alleen velden mét waarde meenemen; undefined zou bij de
+        // backend bestaande kolommen op NULL zetten.
+        const extras: Partial<TickerInput> = {};
+        for (const [k, v] of Object.entries(p)) {
+          if (k === "ticker" || k === "company" || k === "sector") continue;
+          if (v !== undefined && v !== null && v !== "")
+            (extras as Record<string, unknown>)[k] = v;
+        }
         extrasRef.current.set(p.ticker, extras);
         if (existing) {
           next.push(existing);

@@ -169,11 +169,9 @@ export function LimitsView({
         }
       />
 
-      <BulkPaste data={data} onRefresh={onRefresh} />
-
       {rows.length === 0 ? (
         <Card className="p-10 text-center text-neutral-400 text-sm">
-          Geen tickers met aankooplimiet. Plak hierboven een lijst om te
+          Geen tickers met aankooplimiet. Plak onderaan een lijst om te
           beginnen.
         </Card>
       ) : view === "list" ? (
@@ -181,6 +179,8 @@ export function LimitsView({
       ) : (
         <LimitTiles rows={rows} />
       )}
+
+      <BulkPaste data={data} onRefresh={onRefresh} />
     </div>
   );
 }
