@@ -98,14 +98,17 @@ interface LimitRow {
   gold: number;
   silver: number;
   bronze: number;
+  dividend_yield: number | null;
 }
 
 type ScopeFilter = "all" | "buy" | "close25" | "medals";
+type DivFilter = "all" | "yes" | "no";
 type SortBy =
   | "distance"
   | "medals"
   | "medals_price"
   | "gold"
+  | "div_desc"
   | "price_asc"
   | "price_desc"
   | "ticker";
@@ -116,15 +119,28 @@ const SCOPE_LABELS: Record<ScopeFilter, string> = {
   close25: "≤25% boven limit",
   medals: "Heeft medailles",
 };
+const DIV_LABELS: Record<DivFilter, string> = {
+  all: "Alle",
+  yes: "Keert dividend uit",
+  no: "Geen dividend",
+};
 const SORT_LABELS: Record<SortBy, string> = {
   distance: "Afstand tot limit",
   medals: "Medailleklassement (Olympisch)",
   medals_price: "Medailles, dan koers (laag eerst)",
   gold: "Aantal gouden medailles",
+  div_desc: "Dividend % (hoog → laag)",
   price_asc: "Koers laag → hoog",
   price_desc: "Koers hoog → laag",
   ticker: "Ticker A-Z",
 };
+
+// dividend_yield is een fractie (0.025 = 2,5%). NULL = nog niet opgehaald.
+function fmtYield(y: number | null | undefined): string {
+  if (y == null) return "—";
+  if (y <= 0) return "0%";
+  return `${(y * 100).toFixed(y < 0.1 ? 2 : 1)}%`;
+}
 
 function olympicCmp(a: LimitRow, b: LimitRow): number {
   if (b.gold !== a.gold) return b.gold - a.gold;
@@ -165,6 +181,14 @@ export function LimitsView({
       return "all";
     }
   });
+  const [divF, setDivF] = useState<DivFilter>(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}");
+      return (s.divF as DivFilter) ?? "all";
+    } catch {
+      return "all";
+    }
+  });
   const [sortBy, setSortBy] = useState<SortBy>(() => {
     try {
       const s = JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}");
@@ -174,8 +198,8 @@ export function LimitsView({
     }
   });
   useEffect(() => {
-    localStorage.setItem(FILTER_KEY, JSON.stringify({ scope, sectorF, sortBy }));
-  }, [scope, sectorF, sortBy]);
+    localStorage.setItem(FILTER_KEY, JSON.stringify({ scope, sectorF, divF, sortBy }));
+  }, [scope, sectorF, divF, sortBy]);
 
   const allRows: LimitRow[] = useMemo(() => {
     return data.cards
@@ -198,6 +222,7 @@ export function LimitsView({
           gold: c.medal_gold ?? 0,
           silver: c.medal_silver ?? 0,
           bronze: c.medal_bronze ?? 0,
+          dividend_yield: c.dividend_yield ?? null,
         };
       });
   }, [data.cards]);
@@ -208,6 +233,9 @@ export function LimitsView({
     else if (scope === "close25") r = r.filter((x) => x.distance >= 0.8);
     else if (scope === "medals") r = r.filter((x) => totalMedals(x) > 0);
     if (sectorF !== "all") r = r.filter((x) => x.sector === sectorF);
+    // dividend: NULL = nog niet opgehaald — die vallen buiten zowel "ja" als "nee".
+    if (divF === "yes") r = r.filter((x) => x.dividend_yield != null && x.dividend_yield > 0);
+    else if (divF === "no") r = r.filter((x) => x.dividend_yield === 0);
     const sorted = [...r];
     sorted.sort((a, b) => {
       switch (sortBy) {
@@ -226,6 +254,11 @@ export function LimitsView({
         }
         case "gold":
           return b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || b.distance - a.distance;
+        case "div_desc": {
+          const ya = a.dividend_yield ?? -1;
+          const yb = b.dividend_yield ?? -1;
+          return yb - ya || b.distance - a.distance || a.ticker.localeCompare(b.ticker);
+        }
         case "price_asc":
           return (a.current ?? Infinity) - (b.current ?? Infinity);
         case "price_desc":
@@ -235,7 +268,7 @@ export function LimitsView({
       }
     });
     return sorted;
-  }, [allRows, scope, sectorF, sortBy]);
+  }, [allRows, scope, sectorF, divF, sortBy]);
 
   const buyNowCount = allRows.filter((r) => r.distance >= 1).length;
   const closeCount = allRows.filter((r) => r.distance >= 0.85 && r.distance < 1).length;
@@ -288,6 +321,20 @@ export function LimitsView({
           <option value="biotech">biotech</option>
           <option value="mining">mining</option>
           <option value="other">other</option>
+        </Select>
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+          Dividend
+        </span>
+        <Select
+          value={divF}
+          onChange={(e) => setDivF(e.target.value as DivFilter)}
+          className="h-8 text-xs"
+        >
+          {(Object.keys(DIV_LABELS) as DivFilter[]).map((k) => (
+            <option key={k} value={k}>
+              {DIV_LABELS[k]}
+            </option>
+          ))}
         </Select>
         <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
           Sorteer
@@ -344,6 +391,7 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
               <th className="text-right p-3 font-semibold">Limit</th>
               <th className="text-left p-3 font-semibold w-56">Afstand</th>
               <th className="text-right p-3 font-semibold">Dag</th>
+              <th className="text-right p-3 font-semibold">Div</th>
               <th className="text-left p-3 font-semibold w-64">1y range</th>
               <th className="p-3"></th>
             </tr>
@@ -402,6 +450,11 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
                       {r.pct1d == null ? "—" : `${r.pct1d >= 0 ? "+" : ""}${r.pct1d.toFixed(1)}%`}
                     </span>
                   </td>
+                  <td className="p-3 text-right tabular text-[11px]">
+                    <span className={r.dividend_yield != null && r.dividend_yield > 0 ? "text-fog-lime" : "text-neutral-500"}>
+                      {fmtYield(r.dividend_yield)}
+                    </span>
+                  </td>
                   <td className="p-3">
                     {r.low_1y != null && r.high_1y != null && r.current != null ? (
                       <RangeBar low={r.low_1y} high={r.high_1y} current={r.current} />
@@ -440,7 +493,7 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
             target="_blank"
             rel="noopener noreferrer"
             className={`block rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5 hover:scale-[1.02] transition cursor-pointer`}
-            title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🥇${r.gold} 🥈${r.silver} 🥉${r.bronze}`}
+            title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🥇${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}`}
           >
             <div className="flex items-center justify-between gap-1 mb-1">
               <span className="font-bold text-sm text-ink-0 truncate">
@@ -471,6 +524,11 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
             {pctAbove != null && r.gold + r.silver + r.bronze === 0 && (
               <div className="text-[9px] tabular text-ink-0/70 mt-0.5">
                 +{pctAbove.toFixed(0)}% boven limit
+              </div>
+            )}
+            {r.dividend_yield != null && r.dividend_yield > 0 && (
+              <div className="text-[9px] tabular text-ink-0 font-bold mt-0.5">
+                💰 {fmtYield(r.dividend_yield)} div
               </div>
             )}
           </a>

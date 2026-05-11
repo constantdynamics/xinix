@@ -73,6 +73,9 @@ export interface Card {
   factor_count: number;
   trigger_event: string | null;
   buy_limit?: number | null;
+  // Trailing-12m dividend yield als fractie (0.025 = 2.5%); NULL = nog
+  // niet opgehaald, 0 = betaalt geen dividend. Gevuld door poll-prices.
+  dividend_yield?: number | null;
   // Round-robin price-poll status
   price_polled_at?: string | null;
   price_fail_count?: number;
