@@ -1486,13 +1486,29 @@ async function scoreOneTicker(
   return true;
 }
 
+// Round-robin scoring met slimme prioriteit. Per run worden tot
+// SCORE_BATCH tickers gescoord, gekozen op tier:
+//   A (curated of buy_limit gezet)              -> herscore als score_at > 1u oud
+//   B (factor_count >= 2 of recent signaal 7d)  -> > 12u oud
+//   C (de rest, screening-junk)                 -> > 30 dagen oud
+// Binnen een tier: meest-stale eerst (NULL = nooit gescoord = bovenaan).
+// Zo krijgen tickers die kans maken op een hot/strong-buy positie veel
+// vaker een herscore; de 3600 no-data tickers rouleren traag door.
+const SCORE_BATCH = 250;
+const SCORE_BUDGET_MS = 110_000;
+const STALE_A_MS = 1 * 60 * 60 * 1000;
+const STALE_B_MS = 12 * 60 * 60 * 1000;
+const STALE_C_MS = 30 * 24 * 60 * 60 * 1000;
+
 Deno.serve(
   runBackground("compute-scores", async () => {
     const supabase = getServiceClient();
+    const startMs = Date.now();
     const scanDate = new Date().toISOString().slice(0, 10);
     const since30 = new Date(
       Date.now() - 30 * 24 * 60 * 60 * 1000
     ).toISOString();
+    const since7Ms = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
     const [
       { data: tickers },
@@ -1512,7 +1528,7 @@ Deno.serve(
         .order("date", { ascending: false }),
       supabase
         .from("signal_events")
-        .select("ticker, signal_type")
+        .select("ticker, signal_type, detected_at")
         .gt("detected_at", since30),
     ]);
 
@@ -1536,28 +1552,61 @@ Deno.serve(
     for (const p of (prices ?? []) as PriceSummary[])
       priceByTicker.set(p.ticker, p);
     const sigByTicker = new Map<string, Set<string>>();
+    const recentSigSet = new Set<string>();
     for (const e of events ?? []) {
       const s = sigByTicker.get(e.ticker) ?? new Set<string>();
       s.add(e.signal_type);
       sigByTicker.set(e.ticker, s);
+      const dt = (e as { detected_at?: string }).detected_at;
+      if (dt && new Date(dt).getTime() >= since7Ms) recentSigSet.add(e.ticker);
     }
 
-    const MAX_TICKERS_PER_RUN = 400;
-    const allTickers = tickers as TickerRow[];
-    const toScore = allTickers.slice(0, MAX_TICKERS_PER_RUN);
-    const skipped = allTickers.length - toScore.length;
-    if (skipped > 0) {
-      console.warn(
-        `compute-scores: ${skipped} tickers overslagen (cap=${MAX_TICKERS_PER_RUN}).`
-      );
+    type TR = TickerRow & {
+      goud_score?: number | null;
+      buy_limit?: number | null;
+      factor_count?: number | null;
+      score_at?: string | null;
+    };
+    const now = Date.now();
+    const staleMs = (t: TR): number =>
+      t.score_at ? now - new Date(t.score_at).getTime() : Number.MAX_SAFE_INTEGER;
+    const tierOf = (t: TR): "A" | "B" | "C" => {
+      if (t.goud_score != null || t.buy_limit != null) return "A";
+      if ((t.factor_count ?? 0) >= 2 || recentSigSet.has(t.ticker)) return "B";
+      return "C";
+    };
+    const TIER_THRESH: Record<"A" | "B" | "C", number> = {
+      A: STALE_A_MS,
+      B: STALE_B_MS,
+      C: STALE_C_MS,
+    };
+    const TIER_RANK: Record<"A" | "B" | "C", number> = { A: 0, B: 1, C: 2 };
+
+    const queue = (tickers as TR[])
+      .map((t) => ({ t, tier: tierOf(t), stale: staleMs(t) }))
+      .filter((x) => x.stale >= TIER_THRESH[x.tier])
+      .sort((a, b) => {
+        if (TIER_RANK[a.tier] !== TIER_RANK[b.tier])
+          return TIER_RANK[a.tier] - TIER_RANK[b.tier];
+        return b.stale - a.stale;
+      })
+      .slice(0, SCORE_BATCH);
+
+    if (queue.length === 0) {
+      return { ok: true, message: "alle scores zijn vers", metrics: { scored: 0, queued: 0 } };
     }
 
     let scored = 0;
     let failed = 0;
-    for (const t of toScore) {
+    let processed = 0;
+    const tierCounts = { A: 0, B: 0, C: 0 };
+    for (const { t, tier } of queue) {
+      if (Date.now() - startMs > SCORE_BUDGET_MS) break;
+      processed++;
+      tierCounts[tier]++;
       const ok = await scoreOneTicker(
         supabase,
-        t,
+        t as TickerRow,
         catByTicker.get(t.ticker) ?? [],
         priceByTicker.get(t.ticker) ?? null,
         (macro ?? []) as MacroRow[],
@@ -1565,14 +1614,31 @@ Deno.serve(
         "trader",
         scanDate
       );
+      // Markeer als gescoord (ook bij upsert-fout, anders blokkeert de
+      // ticker de queue). Fouten staan in de edge function logs.
+      await supabase
+        .from("signal_tickers")
+        .update({ score_at: new Date().toISOString() })
+        .eq("ticker", t.ticker);
       if (ok) scored++;
       else failed++;
     }
 
+    const stillStale =
+      (tickers as TR[]).filter((t) => staleMs(t) >= TIER_THRESH[tierOf(t)]).length -
+      processed;
     return {
-      ok: failed < toScore.length / 2,
-      message: `${scored} scored, ${failed} failed, ${skipped} skipped`,
-      metrics: { scored, failed, skipped },
+      ok: processed === 0 || failed < processed / 2,
+      message: `${scored} gescoord (A:${tierCounts.A} B:${tierCounts.B} C:${tierCounts.C}), ${failed} fout, ~${Math.max(0, stillStale)} nog te doen`,
+      metrics: {
+        scored,
+        failed,
+        processed,
+        tier_a: tierCounts.A,
+        tier_b: tierCounts.B,
+        tier_c: tierCounts.C,
+        queue_remaining: Math.max(0, stillStale),
+      },
     };
   })
 );
