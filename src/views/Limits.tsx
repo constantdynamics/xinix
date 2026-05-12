@@ -71,11 +71,13 @@ function MedalStrip({
   bronze: number;
   size?: "sm" | "xs";
 }) {
-  const cls = size === "xs" ? "text-[10px]" : "text-xs";
+  // Groter dan default — 🥇/🥈/🥉 verschillen vooral in kleur en zijn op
+  // 11-12px slecht te onderscheiden.
+  const cls = size === "xs" ? "text-sm" : "text-lg";
   if (gold + silver + bronze === 0)
-    return <span className={`${cls} text-neutral-500`}>—</span>;
+    return <span className="text-xs text-neutral-500">—</span>;
   return (
-    <span className={`${cls} tabular whitespace-nowrap`}>
+    <span className={`${cls} tabular whitespace-nowrap leading-none`}>
       {gold > 0 && <span className="text-fog-watch">🥇{gold} </span>}
       {silver > 0 && <span className="text-neutral-300">🥈{silver} </span>}
       {bronze > 0 && <span className="text-[#cd7f32]">🥉{bronze}</span>}
@@ -517,7 +519,7 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
               ${fmt(r.limit)}
             </div>
             {(r.gold + r.silver + r.bronze > 0) && (
-              <div className="text-[10px] tabular mt-0.5">
+              <div className="text-sm tabular mt-0.5 leading-none">
                 {r.gold > 0 && `🥇${r.gold} `}
                 {r.silver > 0 && `🥈${r.silver} `}
                 {r.bronze > 0 && `🥉${r.bronze}`}

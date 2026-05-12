@@ -337,7 +337,7 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
           {prefs.showMedals &&
             (c.medal_gold ?? 0) + (c.medal_silver ?? 0) + (c.medal_bronze ?? 0) > 0 && (
               <div
-                className="text-[11px] tabular mt-0.5 whitespace-nowrap"
+                className="text-lg tabular mt-1 whitespace-nowrap leading-none"
                 title="Medailleklassement (5y koers-runs)"
               >
                 {(c.medal_gold ?? 0) > 0 && <span className="text-fog-watch">🥇{c.medal_gold} </span>}
