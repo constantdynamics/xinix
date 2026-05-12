@@ -50,7 +50,8 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
 const MARKETS = ["america", "canada", "australia", "uk"]; // TradingView scanner regio's
 const LOSERS_PER_MARKET = 40; // top-N grootste dalers per markt bekijken
 const MAX_CANDIDATES = 140; // harde cap op aantal Yahoo-checks per run
-const MIN_GOLD = 2; // >= dit aantal gouden medailles -> toevoegen
+const MIN_GOLD = 1; // toevoegen vereist >= dit aantal gouden ...
+const MIN_SILVER = 1; // ... EN >= dit aantal zilveren medailles
 const BUDGET_MS = 130_000;
 const SLEEP_MS = 250; // langzaam langs Yahoo
 
@@ -226,7 +227,7 @@ Deno.serve(runBackground("scan-losers", async () => {
       const bars = await fetchYahoo5y(c.yahoo);
       if (bars.length < 3) continue;
       const medals = countMedals(bars);
-      if (medals.gold >= MIN_GOLD) {
+      if (medals.gold >= MIN_GOLD && medals.silver >= MIN_SILVER) {
         gems.push({ yahoo: c.yahoo, name: c.name, sector: inferSector(c.name), ...medals, changePct: c.changePct });
       }
     } catch (e) {
@@ -242,7 +243,7 @@ Deno.serve(runBackground("scan-losers", async () => {
     const rows = gems.map((g) => ({
       ticker: g.yahoo, company: g.name, sector: g.sector, active: true,
       medal_gold: g.gold, medal_silver: g.silver, medal_bronze: g.bronze, medals_computed_at: nowIso,
-      notes: `Auto-toegevoegd: biggest-loser-van-de-dag met ${g.gold}× goud${g.changePct != null ? ` (dag ${g.changePct.toFixed(1)}%)` : ""}.`,
+      notes: `Auto-toegevoegd: biggest-loser-van-de-dag met ${g.gold}× goud + ${g.silver}× zilver (5y koers-runs)${g.changePct != null ? ` — dag ${g.changePct.toFixed(1)}%` : ""}.`,
     }));
     const { error } = await sb.from("signal_tickers").upsert(rows, { onConflict: "ticker", ignoreDuplicates: false });
     if (!error) added = rows.length;
@@ -251,8 +252,8 @@ Deno.serve(runBackground("scan-losers", async () => {
     for (const g of gems) {
       await sb.from("signal_events").insert({
         ticker: g.yahoo, signal_type: "loser_gem", severity: "yellow",
-        title: `${g.yahoo} — grote daler met \u{1F947}${g.gold} (5y koers-runs)`,
-        detail: `${g.name}${g.changePct != null ? ` · vandaag ${g.changePct.toFixed(1)}%` : ""}. Auto-toegevoegd aan de watchlist omdat het minimaal ${MIN_GOLD}× goud heeft.`,
+        title: `${g.yahoo} — grote daler · \u{1F947}${g.gold} \u{1F948}${g.silver} (5y koers-runs)`,
+        detail: `${g.name}${g.changePct != null ? ` · vandaag ${g.changePct.toFixed(1)}%` : ""}. Auto-toegevoegd aan de watchlist (minimaal ${MIN_GOLD}× goud + ${MIN_SILVER}× zilver).`,
         payload: { source: "tradingview_losers", gold: g.gold, silver: g.silver, bronze: g.bronze, change_pct: g.changePct },
         // markeer meteen als alerted: de notificatie gaat hieronder rechtstreeks, niet via dispatch-alerts
         alerted: true,
@@ -265,12 +266,12 @@ Deno.serve(runBackground("scan-losers", async () => {
     const topic = settings?.ntfy_topic as string | null | undefined;
     if (topic) {
       const lines = gems
-        .sort((a, b) => b.gold - a.gold)
-        .map((g) => `\u{1F947}${g.gold} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}`);
+        .sort((a, b) => b.gold - a.gold || b.silver - a.silver)
+        .map((g) => `\u{1F947}${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}`);
       await sendNtfy(
         (settings?.ntfy_server as string) ?? "https://ntfy.sh",
         topic,
-        `\u{1F947} ${gems.length} grote daler${gems.length > 1 ? "s" : ""} met ≥${MIN_GOLD}× goud toegevoegd`,
+        `\u{1F947} ${gems.length} grote daler${gems.length > 1 ? "s" : ""} met ≥${MIN_GOLD}× goud + ≥${MIN_SILVER}× zilver toegevoegd`,
         lines.join("\n") + "\n\nUit de TradingView 'biggest losers' van vandaag; nu in je watchlist.",
       );
     }
@@ -279,7 +280,7 @@ Deno.serve(runBackground("scan-losers", async () => {
   const errs = [...marketErrors, ...yahooErrors];
   return {
     ok: marketErrors.length < MARKETS.length, // alleen fout als ALLE markten faalden
-    message: `${uniqueLosers.length} dalers, ${candidates.length} nieuw, ${checked} gecheckt, ${gems.length} met ≥${MIN_GOLD}× goud, ${added} toegevoegd` + (errs.length ? `; ${errs.slice(0, 3).join("; ")}` : ""),
+    message: `${uniqueLosers.length} dalers, ${candidates.length} nieuw, ${checked} gecheckt, ${gems.length} met ≥${MIN_GOLD}g+${MIN_SILVER}s, ${added} toegevoegd` + (errs.length ? `; ${errs.slice(0, 3).join("; ")}` : ""),
     metrics: { losers: uniqueLosers.length, candidates: candidates.length, checked, gems: gems.length, added, market_errors: marketErrors.length },
   };
 }));
