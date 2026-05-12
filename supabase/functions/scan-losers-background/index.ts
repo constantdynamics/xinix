@@ -55,8 +55,9 @@ const BUDGET_MS = 130_000;
 const SLEEP_MS = 250; // langzaam langs Yahoo
 
 // TradingView exchange-prefix -> Yahoo suffix ("" = US, geen suffix).
+// Bewust GEEN OTC/PINK: dat zijn de gemanipuleerde pink-sheet shells.
 const TV_EXCHANGE_TO_YAHOO_SUFFIX: Record<string, string> = {
-  NASDAQ: "", NYSE: "", AMEX: "", BATS: "", OTC: "", "OTCMKTS": "",
+  NASDAQ: "", NYSE: "", AMEX: "", BATS: "",
   TSX: ".TO", TSXV: ".V", CSE: ".CN", NEO: ".NE",
   ASX: ".AX",
   LSE: ".L", AQSE: ".L",
@@ -76,6 +77,7 @@ interface LoserRow { yahoo: string; name: string; changePct: number | null; clos
 async function fetchMarketLosers(market: string): Promise<LoserRow[]> {
   const body = {
     filter: [
+      { left: "type", operation: "equal", right: "stock" }, // alleen gewone aandelen, geen ETF/ETN/ETP/fund
       { left: "change", operation: "nempty" },
       { left: "close", operation: "in_range", right: [0.05, 100000] },
       { left: "volume", operation: "egreater", right: 10000 },
