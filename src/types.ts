@@ -76,6 +76,9 @@ export interface Card {
   // Trailing-12m dividend yield als fractie (0.025 = 2.5%); NULL = nog
   // niet opgehaald, 0 = betaalt geen dividend. Gevuld door poll-prices.
   dividend_yield?: number | null;
+  // Yahoo fullExchangeName (NasdaqGS / NYSE / NYSE MKT / ...); voor directe
+  // Google-Finance-links bij US-tickers. Gevuld door poll-prices.
+  exchange?: string | null;
   // Round-robin price-poll status
   price_polled_at?: string | null;
   price_fail_count?: number;

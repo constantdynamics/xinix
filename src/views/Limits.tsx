@@ -99,6 +99,7 @@ interface LimitRow {
   silver: number;
   bronze: number;
   dividend_yield: number | null;
+  exchange: string | null;
 }
 
 type ScopeFilter = "all" | "buy" | "close25" | "medals";
@@ -223,6 +224,7 @@ export function LimitsView({
           silver: c.medal_silver ?? 0,
           bronze: c.medal_bronze ?? 0,
           dividend_yield: c.dividend_yield ?? null,
+          exchange: c.exchange ?? null,
         };
       });
   }, [data.cards]);
@@ -415,7 +417,7 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
                       {SECTOR_LABEL[r.sector]}
                     </Badge>
                     <a
-                      href={googleFinanceUrl(r.ticker)}
+                      href={googleFinanceUrl(r.ticker, r.exchange)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-fog-pink hover:underline"
@@ -489,7 +491,7 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
         return (
           <a
             key={r.ticker}
-            href={googleFinanceUrl(r.ticker)}
+            href={googleFinanceUrl(r.ticker, r.exchange)}
             target="_blank"
             rel="noopener noreferrer"
             className={`block rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5 hover:scale-[1.02] transition cursor-pointer`}

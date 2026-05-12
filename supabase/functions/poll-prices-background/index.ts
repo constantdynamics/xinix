@@ -28,10 +28,11 @@ const BUDGET_MS = 110_000;
 const FAIL_BENCH_AT = 3;
 
 interface YahooBar { date: string; close: number | null; volume: number | null; }
-interface YahooFetch { bars: YahooBar[]; dividendTtm: number; }
+interface YahooFetch { bars: YahooBar[]; dividendTtm: number; exchange: string | null; }
 // range=1y zodat we (a) genoeg historie hebben voor de 90d/30d vensters en
 // (b) de volledige trailing-12m dividenduitkeringen kunnen optellen
-// (events=div geeft een map ts -> {amount,date}).
+// (events=div geeft een map ts -> {amount,date}). meta.fullExchangeName
+// gebruiken we om voor US-tickers de juiste Google-Finance exchange te kiezen.
 async function fetchYahoo(ticker: string): Promise<YahooFetch> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d&events=div`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; BiotechSignalBot/1.0; +https://github.com)" } });
@@ -42,6 +43,7 @@ async function fetchYahoo(ticker: string): Promise<YahooFetch> {
         timestamp: number[];
         indicators: { quote: Array<{ close: (number | null)[]; volume: (number | null)[] }> };
         events?: { dividends?: Record<string, { amount?: number; date?: number }> };
+        meta?: { fullExchangeName?: string; exchangeName?: string };
       }>;
       error?: { description?: string } | null;
     };
@@ -57,7 +59,8 @@ async function fetchYahoo(ticker: string): Promise<YahooFetch> {
   for (const d of Object.values(result.events?.dividends ?? {})) {
     if (typeof d?.amount === "number" && typeof d?.date === "number" && d.date >= cutoff) dividendTtm += d.amount;
   }
-  return { bars, dividendTtm };
+  const exchange = result.meta?.fullExchangeName ?? result.meta?.exchangeName ?? null;
+  return { bars, dividendTtm, exchange };
 }
 function pct(a: number, b: number): number { if (!b) return 0; return ((a - b) / b) * 100; }
 
@@ -82,7 +85,7 @@ Deno.serve(runBackground("poll-prices", async () => {
     const failCount = (tk as { price_fail_count?: number }).price_fail_count ?? 0;
     scanned++;
     try {
-      const { bars, dividendTtm } = await fetchYahoo(ticker);
+      const { bars, dividendTtm, exchange } = await fetchYahoo(ticker);
       const valid = bars.filter((b): b is YahooBar & { close: number } => b.close !== null);
       if (valid.length === 0) throw new Error("no valid bars");
       const rows = bars.filter((b) => b.close !== null).map((b) => ({ ticker, date: b.date, close: b.close, volume: b.volume }));
@@ -102,7 +105,9 @@ Deno.serve(runBackground("poll-prices", async () => {
       const summary = { ticker, last_close: last.close, last_volume: lastVol, low_90d: low90, high_90d: high90, pct_above_90d_low: low90 > 0 ? pct(last.close, low90) : 0, pct_change_1d: prev ? pct(last.close, prev.close) : 0, pct_change_5d: fiveAgo ? pct(last.close, fiveAgo.close) : 0, avg_volume_30d: Math.round(avgVol), volume_ratio: Number(volRatio.toFixed(2)), updated_at: new Date().toISOString() };
       await sb.from("signal_price_summary").upsert(summary, { onConflict: "ticker" });
       const divYield = last.close > 0 ? Number((dividendTtm / last.close).toFixed(5)) : 0;
-      await sb.from("signal_tickers").update({ price_polled_at: new Date().toISOString(), price_fail_count: 0, price_last_error: null, dividend_yield: divYield }).eq("ticker", ticker);
+      const tickerUpdate: Record<string, unknown> = { price_polled_at: new Date().toISOString(), price_fail_count: 0, price_last_error: null, dividend_yield: divYield };
+      if (exchange) tickerUpdate.exchange = exchange;
+      await sb.from("signal_tickers").update(tickerUpdate).eq("ticker", ticker);
       ok++;
       const today = new Date().toISOString().slice(0, 10);
       const expires7 = new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString();

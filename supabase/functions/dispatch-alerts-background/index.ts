@@ -40,8 +40,13 @@ const BULLISH_CATALYST_TYPES = new Set<string>([
 const POSITIVE_ACTIONS = new Set<string>(["BUY", "STRONG_BUY"]);
 
 // Bepaalt of een signaal überhaupt een notificatie waard is.
-function shouldNotify(signalType: string, action: string | null | undefined): boolean {
-  if (LIMIT_EVENT_TYPES.has(signalType)) return true;
+//  - buy_limit_hit (koers ≤ limiet): altijd.
+//  - buy_limit_close / buy_limit_warmup ("dicht bij de limiet"): alleen voor
+//    aandelen met minimaal 2 gouden medailles (wens owner — anders te veel ruis).
+//  - bullish catalyst: alleen als de score BUY/STRONG_BUY is.
+function shouldNotify(signalType: string, action: string | null | undefined, goldMedals: number): boolean {
+  if (signalType === "buy_limit_hit") return true;
+  if (signalType === "buy_limit_close" || signalType === "buy_limit_warmup") return goldMedals >= 2;
   if (BULLISH_CATALYST_TYPES.has(signalType) && action != null && POSITIVE_ACTIONS.has(action)) return true;
   return false;
 }
@@ -68,7 +73,22 @@ async function sendNtfy(server: string, topic: string, title: string, body: stri
   return { ok: true };
 }
 const SUFFIX_TO_EXCHANGE: Record<string, string> = { TO: "TSE", V: "CVE", CN: "CNSX", NE: "NEO", L: "LON", DE: "ETR", F: "FRA", SG: "STU", MU: "MUN", BE: "BER", DU: "DUS", HM: "HAM", SW: "SWX", VI: "VIE", PA: "EPA", AS: "AMS", BR: "EBR", LS: "ELI", MI: "BIT", MC: "BME", ST: "STO", OL: "OSL", CO: "CPH", HE: "HEL", WA: "WSE", AT: "ATH", HK: "HKG", T: "TYO", SS: "SHA", SZ: "SHE", KS: "KRX", KQ: "KOSDAQ", TW: "TPE", TWO: "TPE", NS: "NSE", BO: "BOM", SI: "SGX", JK: "IDX", KL: "KLSE", BK: "BKK", AX: "ASX", NZ: "NZE", TA: "TLV", IS: "IST", SR: "TADAWUL", JO: "JSE", SA: "BVMF", MX: "BMV", BA: "BCBA", SN: "SGO" };
-function googleFinanceUrl(ticker: string): string { const t = ticker.trim().toUpperCase(); const dot = t.indexOf("."); if (dot === -1) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`; const base = t.slice(0, dot); const exch = SUFFIX_TO_EXCHANGE[t.slice(dot + 1)]; if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`; return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`; }
+// Yahoo fullExchangeName/exchangeName -> Google-code (vooral US-tickers zonder
+// landsuffix; NMS/NYQ/... zijn de korte exchangeName-waardes).
+function googleExchangeCode(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const e = raw.trim().toLowerCase();
+  if (e.includes("nasdaq") || e === "nms" || e === "ngm" || e === "ncm") return "NASDAQ";
+  if (e.includes("arca") || e === "pcx") return "NYSEARCA";
+  if (e.includes("amex") || e === "ase" || e.includes("nyse mkt") || e.includes("nyse american")) return "NYSEAMERICAN";
+  if (e === "nyse" || e === "nyq" || e === "new york stock exchange") return "NYSE";
+  if (e.includes("cboe") || e.includes("bats") || e === "bts" || e === "bzx") return "BATS";
+  if (e.includes("otc") || e.includes("pink") || e === "pnk") return "OTCMKTS";
+  if (e.includes("toronto") && e.includes("vent")) return "CVE";
+  if (e === "toronto") return "TSE";
+  return null;
+}
+function googleFinanceUrl(ticker: string, exchange?: string | null): string { const t = ticker.trim().toUpperCase(); const dot = t.indexOf("."); if (dot === -1) { const code = googleExchangeCode(exchange); return code ? `https://www.google.com/finance/quote/${encodeURIComponent(t)}:${code}` : `https://www.google.com/finance/quote/${encodeURIComponent(t)}`; } const base = t.slice(0, dot); const exch = SUFFIX_TO_EXCHANGE[t.slice(dot + 1)]; if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`; return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`; }
 interface ScoreSnapshot { action: string; final_score: number; expected_outcome: { catalystLabel?: string; peakReturnEst?: number; t90ReturnEst?: number; hitRateBaseline?: number; expectedPeakPrice?: number | null; expectedT90Price?: number | null; exitWindowDays?: number; } | null; components: { nearest_catalyst?: { type?: string; daysUntil?: number | null; date?: string | null; } | null; } | null; trade_setup: { entry?: number; target?: number; stop?: number; rr?: number; } | null; }
 function pct(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `${x >= 0 ? "+" : ""}${(x * 100).toFixed(0)}%`; }
 function fmtPrice(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `$${x.toFixed(x < 5 ? 3 : 2)}`; }
@@ -176,10 +196,12 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
   }
   const companyByTicker = new Map<string, string>();
   const medalsByTicker = new Map<string, Medals>();
+  const exchangeByTicker = new Map<string, string>();
   if (tickers.length) {
-    const { data: tks } = await sb.from("signal_tickers").select("ticker, company, medal_gold, medal_silver, medal_bronze").in("ticker", tickers);
+    const { data: tks } = await sb.from("signal_tickers").select("ticker, company, exchange, medal_gold, medal_silver, medal_bronze").in("ticker", tickers);
     for (const row of tks ?? []) {
       if (row.company) companyByTicker.set(row.ticker as string, row.company as string);
+      if ((row as { exchange?: string | null }).exchange) exchangeByTicker.set(row.ticker as string, (row as { exchange: string }).exchange);
       const g = (row as { medal_gold?: number }).medal_gold ?? 0;
       const si = (row as { medal_silver?: number }).medal_silver ?? 0;
       const br = (row as { medal_bronze?: number }).medal_bronze ?? 0;
@@ -191,16 +213,16 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
   for (const sig of signals) {
     const score = scoreByTicker.get(sig.ticker) ?? null;
     const isLimit = LIMIT_EVENT_TYPES.has(sig.signal_type);
+    const medals = medalsByTicker.get(sig.ticker) ?? null;
 
-    if (!shouldNotify(sig.signal_type, score?.action ?? null)) {
+    if (!shouldNotify(sig.signal_type, score?.action ?? null, medals?.gold ?? 0)) {
       await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
       suppressed++;
       continue;
     }
 
     const company = companyByTicker.get(sig.ticker) ?? null;
-    const medals = medalsByTicker.get(sig.ticker) ?? null;
-    const clickUrl = googleFinanceUrl(sig.ticker);
+    const clickUrl = googleFinanceUrl(sig.ticker, exchangeByTicker.get(sig.ticker) ?? null);
     const view = formatAlert(sig, score, company, medals, clickUrl, isLimit);
 
     if (s.email) {

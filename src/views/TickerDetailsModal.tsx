@@ -232,7 +232,7 @@ export function TickerDetailsModal({ card, onClose, onSaved }: Props) {
           <div>
             <h2 className="text-lg font-bold flex items-center gap-3">
               <a
-                href={googleFinanceUrl(card.ticker)}
+                href={googleFinanceUrl(card.ticker, card.exchange)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-fog-pink hover:underline"

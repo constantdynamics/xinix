@@ -99,6 +99,7 @@ Deno.serve(async (req) => {
       factor_count: t.factor_count ?? 0, trigger_event: t.trigger_event,
       buy_limit: t.buy_limit ?? null,
       dividend_yield: t.dividend_yield ?? null,
+      exchange: t.exchange ?? null,
       price_polled_at: t.price_polled_at ?? null,
       price_fail_count: t.price_fail_count ?? 0,
       price_benched: t.price_benched ?? false,

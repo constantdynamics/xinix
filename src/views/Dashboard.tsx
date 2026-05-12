@@ -302,7 +302,7 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <a
-              href={googleFinanceUrl(c.ticker)}
+              href={googleFinanceUrl(c.ticker, c.exchange)}
               target="_blank"
               rel="noopener noreferrer"
               className="font-bold text-base tracking-tight text-neutral-50 group-hover:text-fog-pink transition"

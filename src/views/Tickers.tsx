@@ -1284,7 +1284,7 @@ export function TickersView({
                       </td>
                       <td className="p-3 font-bold">
                         <a
-                          href={googleFinanceUrl(c.ticker)}
+                          href={googleFinanceUrl(c.ticker, c.exchange)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-fog-pink hover:underline"
