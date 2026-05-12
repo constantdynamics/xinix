@@ -74,6 +74,15 @@ function pct(x: number | null | undefined): string { if (x == null || !Number.is
 function fmtPrice(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `$${x.toFixed(x < 5 ? 3 : 2)}`; }
 function fmtDate(iso: string | null | undefined): string | null { if (!iso) return null; return iso.slice(0, 10); }
 interface AlertView { title: string; body: string; priority: number; tags: string[]; }
+interface Medals { gold: number; silver: number; bronze: number; }
+function medalLine(m: Medals | null): string | null {
+  if (!m || (m.gold + m.silver + m.bronze) === 0) return null;
+  const parts: string[] = [];
+  if (m.gold > 0) parts.push(`\u{1F947}${m.gold}`);
+  if (m.silver > 0) parts.push(`\u{1F948}${m.silver}`);
+  if (m.bronze > 0) parts.push(`\u{1F949}${m.bronze}`);
+  return `${parts.join(" ")} (medailles, 5y koers-runs)`;
+}
 
 // Notificatie-presentatie. Twee smaken:
 //  - limiet-event: titel "💰 TICKER · <reden>" (geen score-actie in de titel
@@ -84,6 +93,7 @@ function formatAlert(
   sig: { ticker: string; signal_type: string; severity: Severity; title: string; detail: string | null; detected_at: string },
   score: ScoreSnapshot | null,
   company: string | null,
+  medals: Medals | null,
   gfUrl: string,
   isLimit: boolean,
 ): AlertView {
@@ -113,6 +123,8 @@ function formatAlert(
   const lines: string[] = [];
   lines.push(`${tickerDisp}${company ? ` (${company})` : ""}`);
   if (showAction && score) lines.push(`Actie: ${score.action} · score ${score.final_score.toFixed(2)}`);
+  const ml = medalLine(medals);
+  if (ml) lines.push(ml);
   lines.push("");
 
   if (exp && exp.peakReturnEst != null) {
@@ -163,9 +175,16 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     for (const row of scores ?? []) { const t = row.ticker as string; if (!scoreByTicker.has(t)) scoreByTicker.set(t, row as ScoreSnapshot); }
   }
   const companyByTicker = new Map<string, string>();
+  const medalsByTicker = new Map<string, Medals>();
   if (tickers.length) {
-    const { data: tks } = await sb.from("signal_tickers").select("ticker, company").in("ticker", tickers);
-    for (const row of tks ?? []) if (row.company) companyByTicker.set(row.ticker as string, row.company as string);
+    const { data: tks } = await sb.from("signal_tickers").select("ticker, company, medal_gold, medal_silver, medal_bronze").in("ticker", tickers);
+    for (const row of tks ?? []) {
+      if (row.company) companyByTicker.set(row.ticker as string, row.company as string);
+      const g = (row as { medal_gold?: number }).medal_gold ?? 0;
+      const si = (row as { medal_silver?: number }).medal_silver ?? 0;
+      const br = (row as { medal_bronze?: number }).medal_bronze ?? 0;
+      if (g + si + br > 0) medalsByTicker.set(row.ticker as string, { gold: g, silver: si, bronze: br });
+    }
   }
   let sentEmail = 0, sentNtfy = 0, suppressed = 0;
   const errors: string[] = [];
@@ -180,8 +199,9 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     }
 
     const company = companyByTicker.get(sig.ticker) ?? null;
+    const medals = medalsByTicker.get(sig.ticker) ?? null;
     const clickUrl = googleFinanceUrl(sig.ticker);
-    const view = formatAlert(sig, score, company, clickUrl, isLimit);
+    const view = formatAlert(sig, score, company, medals, clickUrl, isLimit);
 
     if (s.email) {
       const r = await sendEmail(s.email, `[XINIX] ${view.title}`, `${view.body}\nDetected: ${sig.detected_at}`);
