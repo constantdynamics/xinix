@@ -135,7 +135,12 @@ export function ScoresView() {
       await new Promise((r) => setTimeout(r, 3000));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(
+        msg.includes(" 401")
+          ? "Admin-token klopt niet (of is verlopen) — vul 'm bovenaan opnieuw in. Scores worden sowieso elke ~10 min automatisch herberekend."
+          : msg
+      );
     } finally {
       setBusy(false);
     }

@@ -80,7 +80,9 @@ export function BacktestView() {
     try {
       await triggerJob("backtest-background");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const m = e instanceof Error ? e.message : String(e);
+      setError(m.includes(" 401") ? "Admin-token klopt niet (of is verlopen) — vul 'm bovenaan opnieuw in." : m);
+      setMsg(null);
     } finally {
       setBusy(false);
     }
