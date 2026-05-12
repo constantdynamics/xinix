@@ -334,6 +334,17 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
           <div className="text-xs text-neutral-400 truncate mt-0.5">
             {c.company}
           </div>
+          {prefs.showMedals &&
+            (c.medal_gold ?? 0) + (c.medal_silver ?? 0) + (c.medal_bronze ?? 0) > 0 && (
+              <div
+                className="text-[11px] tabular mt-0.5 whitespace-nowrap"
+                title="Medailleklassement (5y koers-runs)"
+              >
+                {(c.medal_gold ?? 0) > 0 && <span className="text-fog-watch">🥇{c.medal_gold} </span>}
+                {(c.medal_silver ?? 0) > 0 && <span className="text-neutral-300">🥈{c.medal_silver} </span>}
+                {(c.medal_bronze ?? 0) > 0 && <span className="text-[#cd7f32]">🥉{c.medal_bronze}</span>}
+              </div>
+            )}
         </div>
         {prefs.showScore && c.goud_score != null && (
           <div className="text-right shrink-0">
