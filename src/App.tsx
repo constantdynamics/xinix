@@ -6,7 +6,7 @@ import { LimitsView } from "./views/Limits";
 import { BacktestView } from "./views/Backtest";
 import { ScoresView } from "./views/Scores";
 import { TrackRecordView } from "./views/TrackRecord";
-import { LegendaView } from "./views/Legenda";
+import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, getToken, setToken } from "./api";
 import type { Dashboard } from "./types";
 import { Button, Pill, Input } from "./components/ui";
@@ -18,7 +18,6 @@ type Tab =
   | "limits"
   | "backtest"
   | "track-record"
-  | "legenda"
   | "settings";
 
 interface TabDef {
@@ -34,9 +33,19 @@ const TABS: TabDef[] = [
   { key: "limits", label: "Limieten", tone: "lime" },
   { key: "backtest", label: "Backtest", tone: "watch" },
   { key: "track-record", label: "Track record", tone: "orange" },
-  { key: "legenda", label: "Legenda", tone: "neutral" },
   { key: "settings", label: "Instellingen", tone: "neutral" },
 ];
+
+// Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
+const HELP_PAGE: Record<Tab, string> = {
+  dashboard: "dashboard",
+  scores: "scores",
+  tickers: "watchlist",
+  limits: "limits",
+  backtest: "backtest",
+  "track-record": "trackrecord",
+  settings: "settings",
+};
 
 export function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -116,6 +125,14 @@ export function App() {
             </Button>
             <Button
               size="sm"
+              variant="ghost"
+              onClick={scrollToPageHelp}
+              title="Spring naar de uitleg onderaan deze pagina"
+            >
+              ↓<span className="hidden sm:inline">uitleg</span>
+            </Button>
+            <Button
+              size="sm"
               variant="secondary"
               onClick={refresh}
               disabled={loading}
@@ -190,7 +207,7 @@ export function App() {
         {tab === "backtest" && <BacktestView />}
         {tab === "scores" && <ScoresView />}
         {tab === "track-record" && <TrackRecordView />}
-        {tab === "legenda" && <LegendaView />}
+        <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>
 
       <footer className="border-t border-ink-5 mt-8">
