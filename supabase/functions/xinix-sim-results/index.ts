@@ -1,7 +1,7 @@
 // xinix-sim-results — rankings + lerende inzichten voor de 100-strategie simulatie.
-// Geeft per strategie: rang, rendement, win-rate, medaille.
+// Geeft per strategie: rang, rendement, win-rate, medaille, generatie, bescherming.
 // Geeft per configuratie-dimensie: welke waarde correleert met betere resultaten.
-// Geeft aanbevelingen voor het dashboard op basis van wat werkt.
+// Geeft evolutie-info: cycli, laatste cull, volgende verwachte cyclus, gepensioneerden.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -28,12 +28,19 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   try {
     const sb = getServiceClient();
-    const [stratRes, statesRes, closedRes, openRes, summaryRes] = await Promise.all([
-      sb.from("xinix_strategies").select("id, slug, name, grp, config").eq("active", true),
-      sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, last_run_at"),
+    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes] = await Promise.all([
+      sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected, parent_id").eq("active", true),
+      sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, last_run_at, started_at"),
       sb.from("xinix_strategy_positions").select("strategy_id, return_usd, return_pct, entry_signal_types, entry_sector").not("closed_at","is",null),
       sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price").is("closed_at", null),
       sb.from("signal_price_summary").select("ticker, last_close"),
+      sb.from("xinix_strategies").select("id, slug, name, grp, generation, retired_at, config")
+        .eq("active", false).order("retired_at", { ascending: false }).limit(30),
+      sb.from("signal_runs").select("ran_at, message")
+        .eq("job", "xinix-evolve").eq("ok", true)
+        .order("ran_at", { ascending: false }).limit(10),
+      sb.from("xinix_strategy_state").select("started_at")
+        .order("started_at", { ascending: true }).limit(1),
     ]);
 
     const priceMap = new Map<string, number>();
@@ -41,7 +48,6 @@ Deno.serve(async (req) => {
       if (r.last_close != null) priceMap.set(r.ticker as string, Number(r.last_close));
     }
 
-    // Aggregate per-strategy stats from closed positions
     type Agg = { realizedUsd: number; closed: number; wins: number; sumRetPct: number };
     const agg = new Map<number, Agg>();
     for (const p of (closedRes.data ?? [])) {
@@ -54,7 +60,6 @@ Deno.serve(async (req) => {
       agg.set(sid, a);
     }
 
-    // Open positions value per strategy
     const openVal = new Map<number, { val: number; cnt: number }>();
     for (const p of (openRes.data ?? [])) {
       const sid = p.strategy_id as number;
@@ -65,12 +70,12 @@ Deno.serve(async (req) => {
       openVal.set(sid, cur);
     }
 
-    // Build per-strategy result
     const stateByStrat = new Map<number, Record<string, unknown>>();
     for (const s of (statesRes.data ?? [])) stateByStrat.set(s.strategy_id as number, s as Record<string, unknown>);
 
     interface StratResult {
       id: number; slug: string; name: string; grp: string; config: Record<string, unknown>;
+      generation: number; protected: boolean; parent_id: number | null;
       rank: number; medal: string | null;
       total_equity: number; total_return_pct: number; total_return_usd: number;
       realized_usd: number; unrealized_usd: number;
@@ -93,10 +98,13 @@ Deno.serve(async (req) => {
       const totalReturnUsd = totalEquity - initial;
       const totalReturnPct = initial > 0 ? (totalReturnUsd / initial) * 100 : 0;
       const a = agg.get(sid) ?? { realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0 };
-      const unrealizedUsd = posVal - (openCnt * (initial / Math.max(1, (strat.config as Record<string, unknown>).maxPos as number))); // rough
+      const unrealizedUsd = posVal - (openCnt * (initial / Math.max(1, (strat.config as Record<string, unknown>).maxPos as number)));
       results.push({
         id: sid, slug: strat.slug as string, name: strat.name as string,
         grp: strat.grp as string, config: strat.config as Record<string, unknown>,
+        generation: (strat.generation as number) ?? 1,
+        protected: (strat.protected as boolean) ?? false,
+        parent_id: (strat.parent_id as number | null) ?? null,
         rank: 0, medal: null,
         total_equity: totalEquity, total_return_pct: totalReturnPct, total_return_usd: totalReturnUsd,
         realized_usd: a.realizedUsd, unrealized_usd: unrealizedUsd,
@@ -107,12 +115,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Rank by total_return_pct (beste eerst)
     results.sort((a, b) => b.total_return_pct - a.total_return_pct);
     const n = results.length;
     results.forEach((r, i) => {
       r.rank = i + 1;
-      // Medaille: top 10% → 🏆, volgende 20% → 🥈, volgende 30% → 🥉
       r.medal = i < Math.ceil(n * 0.10) ? "🏆"
               : i < Math.ceil(n * 0.30) ? "🥈"
               : i < Math.ceil(n * 0.60) ? "🥉"
@@ -120,7 +126,6 @@ Deno.serve(async (req) => {
     });
 
     // ── Lerende inzichten per configuratie-dimensie ───────────────────────────
-    // Voor elke dimensie: gemiddeld rendement per waarde, beste en slechtste
     type DimVal = { label: string; count: number; sumRet: number; sumWinRate: number };
 
     function dimensionInsight(dim: string, getValue: (cfg: Record<string, unknown>) => string | null) {
@@ -139,7 +144,7 @@ Deno.serve(async (req) => {
       const best = entries[0];
       const worst = entries[entries.length - 1];
       const diff = best.avgRet - worst.avgRet;
-      if (Math.abs(diff) < 0.1) return null; // geen zinvol verschil
+      if (Math.abs(diff) < 0.1) return null;
       return { dimension: dim, best: best.value, worst: worst.value, diff: Number(diff.toFixed(2)), entries };
     }
 
@@ -156,30 +161,27 @@ Deno.serve(async (req) => {
       dimensionInsight("Min goud-medailles", (cfg) => cfg.minGold != null ? `≥${cfg.minGold} goud` : null),
     ].filter(Boolean);
 
-    // ── Aanbevelingen voor het dashboard ─────────────────────────────────────
+    // ── Aanbevelingen ─────────────────────────────────────────────────────────
     const recommendations: string[] = [];
     for (const ins of insights) {
-      if (!ins || ins.diff < 1.0) continue; // minder dan 1% verschil → niet relevant
+      if (!ins || ins.diff < 1.0) continue;
       recommendations.push(`📊 **${ins.dimension}**: "${ins.best}" scoort gem. ${ins.diff > 0 ? "+" : ""}${ins.diff.toFixed(1)}% beter dan "${ins.worst}" — overweeg het dashboard hierop af te stellen.`);
     }
     if (results.length >= 10) {
       const top10 = results.slice(0, Math.ceil(n * 0.10));
       const bottom10 = results.slice(-Math.ceil(n * 0.10));
-      // Wat hebben top-10 gemeen?
       const topGrps = new Map<string, number>();
       for (const r of top10) { topGrps.set(r.grp, (topGrps.get(r.grp) ?? 0) + 1); }
       const dominantGrp = [...topGrps.entries()].sort((a,b) => b[1]-a[1])[0];
       if (dominantGrp && dominantGrp[1] >= 3) {
         recommendations.push(`🏆 Groep "${dominantGrp[0]}" heeft ${dominantGrp[1]} van de top-${Math.ceil(n*0.10)} strategieën — de parameters in deze groep werken consistent goed.`);
       }
-      // Sector die het beste scoort in top
       const topSectors = new Map<string, number>();
       for (const r of top10) { const s = (r.config.sector as string) || "all"; topSectors.set(s, (topSectors.get(s) ?? 0) + 1); }
       const bestSector = [...topSectors.entries()].sort((a,b) => b[1]-a[1])[0];
       if (bestSector && bestSector[0] !== "all" && bestSector[1] >= 3) {
-        recommendations.push(`🎯 Sector "${bestSector[0]}" domineert de top-${Math.ceil(n*0.10)}: ${bestSector[1]} van de beste strategieën richten zich hierop. Overweeg de sector-weging in de score te verhogen.`);
+        recommendations.push(`🎯 Sector "${bestSector[0]}" domineert de top-${Math.ceil(n*0.10)}: ${bestSector[1]} van de beste strategieën richten zich hierop.`);
       }
-      // Verliezers — welke groep domineert de bodem?
       const btmGrps = new Map<string, number>();
       for (const r of bottom10) btmGrps.set(r.grp, (btmGrps.get(r.grp) ?? 0) + 1);
       const worstGrp = [...btmGrps.entries()].sort((a,b) => b[1]-a[1])[0];
@@ -191,7 +193,23 @@ Deno.serve(async (req) => {
       recommendations.push("⏳ Nog onvoldoende gesloten posities voor betrouwbare inzichten. Inzichten worden rijker na 30–60+ dagen.");
     }
 
-    // Check last run
+    // ── Evolutie-metadata ─────────────────────────────────────────────────────
+    const evolveRuns = evolveRunRes.data ?? [];
+    const lastEvolveAt = evolveRuns[0]?.ran_at ?? null;
+    const oldestStartedAt = (oldestStateRes.data?.[0] as Record<string, unknown> | undefined)?.started_at as string | null ?? null;
+
+    // Volgende evolutie: 180 dagen na laatste cyclus (of na startdatum als nog geen cyclus)
+    let nextEvolveApprox: string | null = null;
+    const base = lastEvolveAt ?? oldestStartedAt;
+    if (base) {
+      const d = new Date(base);
+      d.setDate(d.getDate() + 180);
+      nextEvolveApprox = d.toISOString();
+    }
+
+    const protectedCount = results.filter(r => r.protected).length;
+    const maxGeneration  = Math.max(...results.map(r => r.generation ?? 1), 1);
+
     const lastRun = results.find((r) => r.last_run_at)?.last_run_at ?? null;
     const runCount = results.filter((r) => r.closed_count > 0).length;
 
@@ -200,6 +218,24 @@ Deno.serve(async (req) => {
       insights: insights.filter(Boolean),
       recommendations,
       meta: { total: results.length, last_run_at: lastRun, strategies_with_closed_positions: runCount },
+      evolution: {
+        cycles:            evolveRuns.length,
+        max_generation:    maxGeneration,
+        protected_count:   protectedCount,
+        last_at:           lastEvolveAt,
+        next_approx:       nextEvolveApprox,
+        retired:           (retiredRes.data ?? []).map(r => ({
+          id:          r.id,
+          slug:        r.slug,
+          name:        r.name,
+          grp:         r.grp,
+          generation:  r.generation ?? 1,
+          retired_at:  r.retired_at,
+          holdDays:    (r.config as Record<string, unknown>).holdDays,
+          sector:      (r.config as Record<string, unknown>).sector,
+        })),
+        run_log: evolveRuns.map(r => ({ at: r.ran_at, message: r.message })),
+      },
     }), { status: 200, headers: { ...cors(req), "content-type": "application/json" } });
   } catch (e) {
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }),

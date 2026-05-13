@@ -3,12 +3,14 @@ import {
   fetchXinixPortfolio,
   fetchSimResults,
   triggerJob,
+  triggerEvolve,
   getToken,
   type XinixPortfolio,
   type XinixOpenPosition,
   type XinixClosedPosition,
   type SimResults,
   type SimStrategy,
+  type SimEvolution,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
@@ -555,6 +557,27 @@ const GROUP_LABELS: Record<string, string> = {
   "J-Exit-combo": "Exit-combinatie", "K-Profiel": "Agressief profiel",
   "L-Profiel": "Conservatief profiel", "M-Combo": "Cross-combo",
 };
+function groupLabel(grp: string): string {
+  if (GROUP_LABELS[grp]) return GROUP_LABELS[grp];
+  const genMatch = grp.match(/^N-Gen(\d+)$/);
+  if (genMatch) return `Evolutie Gen-${genMatch[1]}`;
+  return grp;
+}
+
+function GenBadge({ gen, protected: prot }: { gen: number; protected: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {gen > 1 && (
+        <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-fog-pink/20 text-fog-pink border border-fog-pink/30">
+          G{gen}
+        </span>
+      )}
+      {prot && (
+        <span title="Beschermd — overleeft elke evolutiecyclus" className="text-[11px]">🛡️</span>
+      )}
+    </span>
+  );
+}
 
 function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   const [grpFilter, setGrpFilter] = useState<string>("all");
@@ -565,7 +588,6 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
     let rows = grpFilter === "all" ? strategies : strategies.filter((s) => s.grp === grpFilter);
     if (sortBy === "winrate") rows = [...rows].sort((a, b) => b.win_rate - a.win_rate);
     else if (sortBy === "closed") rows = [...rows].sort((a, b) => b.closed_count - a.closed_count);
-    // "rank" is already sorted by total_return_pct
     return rows;
   }, [strategies, grpFilter, sortBy]);
 
@@ -583,7 +605,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                 : "border-ink-5 text-neutral-400 hover:text-neutral-200"
             }`}
           >
-            {g === "all" ? "Alle groepen" : GROUP_LABELS[g] ?? g}
+            {g === "all" ? "Alle groepen" : groupLabel(g)}
           </button>
         ))}
       </div>
@@ -600,7 +622,6 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
         ))}
       </div>
 
-      {/* Ranking table */}
       <div className="overflow-x-auto">
         <table className="w-full text-xs min-w-[720px]">
           <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/30">
@@ -618,21 +639,24 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
           </thead>
           <tbody>
             {filtered.map((s) => (
-              <tr key={s.id} className="border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors">
+              <tr key={s.id} className={`border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors ${s.protected ? "bg-fog-watch/[0.03]" : ""}`}>
                 <td className="p-2 tabular text-neutral-400">{s.rank}</td>
                 <td className="p-2 text-base leading-none">{s.medal ?? ""}</td>
                 <td className="p-2">
-                  <div className="font-medium text-neutral-100">{s.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-neutral-100">{s.name}</span>
+                    <GenBadge gen={s.generation ?? 1} protected={s.protected ?? false} />
+                  </div>
                   <div className="text-[10px] text-neutral-500 mt-0.5">
                     {s.config.holdDays}d
-                    {s.config.stop != null && ` · stop-${(s.config.stop * 100).toFixed(0)}%`}
+                    {s.config.stop != null && ` · stop-${(Math.abs(s.config.stop) * 100).toFixed(0)}%`}
                     {s.config.tp != null && ` · tp+${(s.config.tp * 100).toFixed(0)}%`}
                     {s.config.sector !== "all" && ` · ${s.config.sector}`}
                     {s.config.minGold > 0 && ` · ≥${s.config.minGold}🏆`}
                   </div>
                 </td>
                 <td className="p-2 hidden md:table-cell text-neutral-400 text-[11px]">
-                  {GROUP_LABELS[s.grp] ?? s.grp}
+                  {groupLabel(s.grp)}
                 </td>
                 <td className="p-2 text-right tabular font-bold">
                   <RetCell v={s.total_return_pct} />
@@ -732,11 +756,174 @@ function SimInsightsSection({ sim }: { sim: SimResults }) {
   );
 }
 
+function EvolutionPanel({ evo, isAdmin }: { evo: SimEvolution; isAdmin: boolean }) {
+  const [evolving, setEvolving] = useState(false);
+  const [evolveMsg, setEvolveMsg] = useState<string | null>(null);
+  const [confirmForce, setConfirmForce] = useState(false);
+
+  const nextDate = evo.next_approx ? new Date(evo.next_approx) : null;
+  const daysUntil = nextDate ? Math.ceil((nextDate.getTime() - Date.now()) / 86400000) : null;
+  const isPast = daysUntil != null && daysUntil <= 0;
+
+  async function runEvolve(force: boolean) {
+    setEvolving(true);
+    setEvolveMsg(null);
+    try {
+      const result = await triggerEvolve(force) as Record<string, unknown>;
+      if (result.skipped) {
+        setEvolveMsg(`Overgeslagen: ${result.reason as string}`);
+      } else {
+        const culled = (result.culled as unknown[])?.length ?? 0;
+        const spawned = (result.spawned as unknown[])?.length ?? 0;
+        setEvolveMsg(`Gen-${result.generation}: ${culled} gecullled, ${spawned} nakomelingen. Herlaad om de ranglijst te zien.`);
+      }
+    } catch (e) {
+      setEvolveMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEvolving(false);
+      setConfirmForce(false);
+    }
+  }
+
+  return (
+    <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.03]">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-1">
+            Evolutie-mechanisme
+          </div>
+          <div className="text-sm font-semibold text-neutral-100">
+            {evo.cycles === 0 ? "Generatie 1 — nog geen cyclus afgerond" : `Generatie ${evo.max_generation} — ${evo.cycles} ${evo.cycles === 1 ? "cyclus" : "cycli"} voltooid`}
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap text-[11px] text-right shrink-0">
+          <div className="text-center">
+            <div className="text-lg font-bold text-neutral-100">{evo.protected_count}</div>
+            <div className="text-neutral-500">🛡️ beschermd</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-bold text-neutral-100">{evo.retired.length}</div>
+            <div className="text-neutral-500">gecullled</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-xs text-neutral-400 leading-relaxed mb-3">
+        Na elke <strong className="text-neutral-200">180 dagen</strong> worden de onderste <strong className="text-neutral-200">10%</strong> van de niet-beschermde strategieën (≈8–9) gecullled en vervangen door nakomelingen van de top-15% met 1–3 mutaties.
+        {" "}De <strong className="text-neutral-200">{evo.protected_count} beschermde</strong> strategieën (holdDays ≥ 90 — de "lottery-ticker" categorie) overleven altijd.
+      </div>
+
+      {nextDate && (
+        <div className={`text-xs mb-3 ${isPast ? "text-fog-lime font-semibold" : "text-neutral-400"}`}>
+          {isPast
+            ? "Evolutie-cyclus is gereed voor uitvoering (180 dagen verstreken)"
+            : `Volgende cyclus verwacht over ~${daysUntil} dagen (${nextDate.toLocaleDateString("nl-NL", { day: "2-digit", month: "long", year: "numeric" })})`}
+        </div>
+      )}
+
+      {evo.last_at && (
+        <div className="text-[11px] text-neutral-500 mb-3">
+          Laatste evolutie: {new Date(evo.last_at).toLocaleDateString("nl-NL", { day: "2-digit", month: "2-digit", year: "numeric" })}
+        </div>
+      )}
+
+      {evolveMsg && (
+        <div className={`text-xs mb-3 p-2 rounded border ${evolveMsg.includes("Overgeslagen") || evolveMsg.includes("nakomelingen") ? "border-ink-5 text-neutral-300" : "border-fog-loss/30 text-fog-loss"}`}>
+          {evolveMsg}
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={evolving}
+            onClick={() => runEvolve(false)}
+          >
+            {evolving ? "…" : isPast ? "▶ Voer cyclus uit" : "▶ Probeer cyclus"}
+          </Button>
+          {!confirmForce ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={evolving}
+              onClick={() => setConfirmForce(true)}
+            >
+              Forceer nu
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={evolving}
+              onClick={() => runEvolve(true)}
+              className="border-fog-loss/50 text-fog-loss"
+            >
+              Bevestig forceer (onomkeerbaar)
+            </Button>
+          )}
+          {confirmForce && (
+            <button onClick={() => setConfirmForce(false)} className="text-[11px] text-neutral-500 hover:text-neutral-300">
+              Annuleer
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Evolutie-log */}
+      {evo.run_log.length > 0 && (
+        <details className="mt-3">
+          <summary className="text-[11px] text-neutral-500 cursor-pointer hover:text-neutral-300">
+            Evolutie-log ({evo.run_log.length} {evo.run_log.length === 1 ? "entry" : "entries"})
+          </summary>
+          <div className="mt-2 space-y-1">
+            {evo.run_log.map((e, i) => (
+              <div key={i} className="text-[10px] text-neutral-500">
+                <span className="text-neutral-400">{new Date(e.at).toLocaleDateString("nl-NL")}:</span> {e.message}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </Card>
+  );
+}
+
+function RetiredSection({ retired }: { retired: SimEvolution["retired"] }) {
+  if (retired.length === 0) return null;
+  return (
+    <Card className="p-0 overflow-hidden">
+      <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
+        Gepensioneerde strategieën ({retired.length})
+      </div>
+      <div className="divide-y divide-ink-5/40">
+        {retired.map((r) => (
+          <div key={r.id} className="p-2 flex items-center gap-3 text-xs">
+            <div className="w-5 text-center text-neutral-500">
+              <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-neutral-700 text-neutral-400">G{r.generation}</span>
+            </div>
+            <div className="flex-1">
+              <div className="text-neutral-300">{r.name}</div>
+              <div className="text-[10px] text-neutral-500">
+                {groupLabel(r.grp)} · {r.holdDays}d · {r.sector}
+              </div>
+            </div>
+            <div className="text-[11px] text-neutral-500">
+              {r.retired_at ? new Date(r.retired_at).toLocaleDateString("nl-NL") : "—"}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 export function SimulationView() {
   const [sim, setSim] = useState<SimResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"ranking" | "insights">("ranking");
+  const [activeTab, setActiveTab] = useState<"ranking" | "insights" | "evolutie">("ranking");
 
   useEffect(() => {
     fetchSimResults()
@@ -751,10 +938,10 @@ export function SimulationView() {
   if (error) return <div className="text-xs text-fog-loss py-4">Fout: {error}</div>;
   if (!sim) return null;
 
-  const { meta } = sim;
+  const { meta, evolution } = sim;
 
   return (
-    <section>
+    <section className="space-y-4">
       <SectionHeader
         title="100 Strategieën — simulatie-ranglijst"
         subtitle={
@@ -765,15 +952,15 @@ export function SimulationView() {
         aside={isAdmin ? (
           <Button size="sm" variant="secondary" onClick={() => {
             triggerJob("xinix-sim-background").then(() => window.location.reload()).catch(() => {});
-          }}>▶ Run nu</Button>
+          }}>▶ Sim run</Button>
         ) : undefined}
       />
 
       {/* KPI row */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card className="p-3 text-center">
           <div className="text-2xl font-bold tabular text-neutral-100">{meta.total}</div>
-          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Strategieën</div>
+          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Actieve strategieën</div>
         </Card>
         <Card className="p-3 text-center">
           <div className="text-2xl font-bold tabular text-fog-lime">
@@ -785,20 +972,26 @@ export function SimulationView() {
           <div className="text-2xl font-bold tabular text-neutral-100">{meta.strategies_with_closed_positions}</div>
           <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Met gesloten trades</div>
         </Card>
+        <Card className="p-3 text-center">
+          <div className="text-2xl font-bold tabular text-neutral-100">{evolution.max_generation}</div>
+          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Generatie</div>
+        </Card>
       </div>
 
       {/* Top 3 podium */}
       {sim.strategies.length >= 3 && (
-        <Card className="p-3 mb-4">
+        <Card className="p-3">
           <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">Podium</div>
           <div className="grid grid-cols-3 gap-3 text-center text-xs">
             {[sim.strategies[1], sim.strategies[0], sim.strategies[2]].map((s, podiumIdx) => {
               const emoji = podiumIdx === 0 ? "🥈" : podiumIdx === 1 ? "🏆" : "🥉";
-              const height = podiumIdx === 1 ? "text-lg" : "text-base";
               return (
                 <div key={s.id} className="space-y-1">
-                  <div className={height}>{emoji}</div>
+                  <div className={podiumIdx === 1 ? "text-lg" : "text-base"}>{emoji}</div>
                   <div className="font-semibold text-neutral-100 line-clamp-2 text-[11px]">{s.name}</div>
+                  <div className="flex items-center justify-center gap-1">
+                    <GenBadge gen={s.generation ?? 1} protected={s.protected ?? false} />
+                  </div>
                   <div className={`font-bold tabular ${s.total_return_pct >= 0 ? "text-fog-lime" : "text-fog-loss"}`}>
                     {fmtPct2(s.total_return_pct)}
                   </div>
@@ -810,8 +1003,8 @@ export function SimulationView() {
       )}
 
       {/* Tab switcher */}
-      <div className="flex gap-2 mb-4 border-b border-ink-5">
-        {(["ranking", "insights"] as const).map((t) => (
+      <div className="flex gap-0 border-b border-ink-5">
+        {(["ranking", "insights", "evolutie"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setActiveTab(t)}
@@ -821,15 +1014,18 @@ export function SimulationView() {
                 : "border-transparent text-neutral-400 hover:text-neutral-200"
             }`}
           >
-            {t === "ranking" ? "Ranglijst" : "Inzichten & aanbevelingen"}
+            {t === "ranking" ? "Ranglijst" : t === "insights" ? "Inzichten" : `Evolutie${evolution.cycles > 0 ? ` (${evolution.cycles})` : ""}`}
           </button>
         ))}
       </div>
 
-      {activeTab === "ranking" ? (
-        <SimRankingTable strategies={sim.strategies} />
-      ) : (
-        <SimInsightsSection sim={sim} />
+      {activeTab === "ranking" && <SimRankingTable strategies={sim.strategies} />}
+      {activeTab === "insights" && <SimInsightsSection sim={sim} />}
+      {activeTab === "evolutie" && (
+        <div className="space-y-4">
+          <EvolutionPanel evo={evolution} isAdmin={isAdmin} />
+          <RetiredSection retired={evolution.retired} />
+        </div>
       )}
     </section>
   );

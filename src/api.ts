@@ -383,6 +383,9 @@ export interface SimStrategy {
   name: string;
   grp: string;
   config: SimStrategyConfig;
+  generation: number;
+  protected: boolean;
+  parent_id: number | null;
   rank: number;
   medal: string | null;
   total_equity: number;
@@ -410,6 +413,27 @@ export interface SimInsight {
   entries: SimDimensionEntry[];
 }
 
+export interface SimRetired {
+  id: number;
+  slug: string;
+  name: string;
+  grp: string;
+  generation: number;
+  retired_at: string;
+  holdDays: number;
+  sector: string;
+}
+
+export interface SimEvolution {
+  cycles: number;
+  max_generation: number;
+  protected_count: number;
+  last_at: string | null;
+  next_approx: string | null;
+  retired: SimRetired[];
+  run_log: { at: string; message: string }[];
+}
+
 export interface SimResults {
   strategies: SimStrategy[];
   insights: SimInsight[];
@@ -419,10 +443,19 @@ export interface SimResults {
     last_run_at: string | null;
     strategies_with_closed_positions: number;
   };
+  evolution: SimEvolution;
 }
 
 export async function fetchSimResults(): Promise<SimResults> {
   const res = await fetch(apiUrl("/api/xinix-sim-results"));
   if (!res.ok) throw new Error(`xinix-sim-results ${res.status}`);
   return (await res.json()) as SimResults;
+}
+
+export async function triggerEvolve(force = false): Promise<unknown> {
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...authHeaders() };
+  if (force) headers["x-force-evolve"] = "1";
+  const res = await fetch(apiUrl("/api/xinix-evolve-background"), { method: "POST", headers, body: "{}" });
+  if (!res.ok) throw new Error(`evolve ${res.status}`);
+  return res.json();
 }
