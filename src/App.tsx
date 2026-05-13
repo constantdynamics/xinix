@@ -6,6 +6,7 @@ import { LimitsView } from "./views/Limits";
 import { BacktestView } from "./views/Backtest";
 import { ScoresView } from "./views/Scores";
 import { TrackRecordView } from "./views/TrackRecord";
+import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, getToken, setToken } from "./api";
 import type { Dashboard } from "./types";
@@ -18,6 +19,7 @@ type Tab =
   | "limits"
   | "backtest"
   | "track-record"
+  | "status"
   | "settings";
 
 interface TabDef {
@@ -33,6 +35,7 @@ const TABS: TabDef[] = [
   { key: "limits", label: "Limieten", tone: "lime" },
   { key: "backtest", label: "Backtest", tone: "watch" },
   { key: "track-record", label: "Track record", tone: "orange" },
+  { key: "status", label: "Status", tone: "cyan" },
   { key: "settings", label: "Instellingen", tone: "neutral" },
 ];
 
@@ -44,6 +47,7 @@ const HELP_PAGE: Record<Tab, string> = {
   limits: "limits",
   backtest: "backtest",
   "track-record": "trackrecord",
+  status: "status",
   settings: "settings",
 };
 
@@ -207,6 +211,7 @@ export function App() {
         {tab === "backtest" && <BacktestView />}
         {tab === "scores" && <ScoresView />}
         {tab === "track-record" && <TrackRecordView />}
+        {tab === "status" && <HealthView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>
 

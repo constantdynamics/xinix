@@ -173,3 +173,26 @@ export interface Settings {
   quiet_hours_end: number | null;
   alert_only_goud_events: boolean;
 }
+
+// Status van een doorlopende achtergrond-job (tabblad "Status").
+export interface HealthRun {
+  started_at: string;
+  finished_at: string | null;
+  ok: boolean | null;
+  message: string | null;
+}
+export interface HealthJob {
+  job: string;
+  last_started_at: string;
+  last_finished_at: string | null;
+  last_ok: boolean | null;
+  last_message: string | null;
+  last_metrics: Record<string, unknown> | null;
+  runs_24h: number;
+  ok_24h: number;
+  recent: HealthRun[]; // nieuw -> oud, max 15
+}
+export interface Health {
+  jobs: HealthJob[];
+  generated_at: string;
+}

@@ -1,4 +1,4 @@
-import type { Dashboard, Settings } from "./types";
+import type { Dashboard, Settings, Health } from "./types";
 
 const TOKEN_KEY = "biotech_admin_token";
 
@@ -197,4 +197,10 @@ export async function triggerJob(job: string): Promise<void> {
     }
   );
   if (!res.ok) throw new Error(`trigger ${res.status}: ${await res.text()}`);
+}
+
+export async function fetchHealth(): Promise<Health> {
+  const res = await fetch(apiUrl("/api/health"));
+  if (!res.ok) throw new Error(`health ${res.status}`);
+  return (await res.json()) as Health;
 }

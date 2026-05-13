@@ -312,6 +312,38 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
   },
 
+  status: {
+    intro:
+      "Een live-overzicht van alle doorlopende achtergrond-jobs (koersen ophalen, scores berekenen, nieuws scannen, de TradingView-screeners, notificaties versturen, …). Eén oogopslag of alles draait.",
+    blocks: [
+      {
+        id: "st-dots",
+        title: "De gekleurde bolletjes",
+        body:
+          "🟢 = laatste run gelukt én op tijd. 🟡 = liep langer geleden dan verwacht (mogelijk vastgelopen of overgeslagen). 🔴 = de laatste run gaf een fout. ⚪ = al lang niet meer gedraaid (of nog nooit gezien). De fout-jobs staan automatisch bovenaan.",
+        example:
+          "Zie je `scan-bottoms` op 🔴 of ⚪ staan met een foutmelding over de TradingView-API? Stuur me die regel (of een screenshot), dan repareer ik 'm.",
+      },
+      {
+        id: "st-fields",
+        title: "Wat je per job ziet",
+        body:
+          "De vriendelijke naam + het technische job-id, een korte uitleg wat 'ie doet, hoe lang geleden 'ie voor het laatst startte, het verwachte interval (~elke 10 min / ~1×/dag / …), hoeveel runs er de laatste 24u waren en hoeveel daarvan gelukt zijn, en de laatste foutmelding/statusregel.",
+      },
+      {
+        id: "st-strip",
+        title: "De balkjes-rij (run-historie)",
+        body:
+          "De laatste ~15 runs als kleine vierkantjes, links = oudst. Groen = gelukt, rood = fout. Zo zie je in één oogopslag of iets structureel hapert of maar één keer een hik had. Houd je muis erboven voor tijd + boodschap van die run.",
+      },
+      {
+        id: "st-falsealarm",
+        title: "Bekend 'vals alarm'",
+        body:
+          "`dispatch-alerts` kan op 🔴 staan met een Resend-403-foutmelding — dat is alleen de e-mail die niet verstuurd kan worden (Resend test-mode); de ntfy-pushmeldingen werken wél. En `poll-metals` draait alleen op beursdagen, dus in het weekend kan 'ie even op 🟡 staan — dat is normaal.",
+      },
+    ],
+  },
   settings: {
     intro: "Hier stel je in waar en wanneer je notificaties krijgt, en welke aandelen wél een melding waard zijn.",
     blocks: [
