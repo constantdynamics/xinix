@@ -266,3 +266,99 @@ export async function fetchScanResults(): Promise<ScanResults> {
   if (!res.ok) throw new Error(`scan-results ${res.status}`);
   return (await res.json()) as ScanResults;
 }
+
+// ── Xinix paper portfolio ──
+export interface XinixOpenPosition {
+  id: number;
+  ticker: string;
+  company: string | null;
+  exchange: string | null;
+  sector: string | null;
+  qty: number;
+  avg_price: number;
+  current_price: number | null;
+  cost_basis: number;
+  market_value: number | null;
+  unrealized_usd: number | null;
+  unrealized_pct: number | null;
+  entry_date: string;
+  scheduled_exit_date: string;
+  days_remaining: number;
+  stop_loss_price: number | null;
+  entry_reason: string;
+  entry_signal_types: string[];
+  entry_score: number | null;
+}
+
+export interface XinixClosedPosition {
+  id: number;
+  ticker: string;
+  company: string | null;
+  qty: number;
+  avg_price: number;
+  closed_price: number;
+  return_usd: number;
+  return_pct: number;
+  entry_date: string;
+  closed_at: string;
+  hold_days: number;
+  entry_reason: string;
+  closed_reason: string;
+  entry_signal_types: string[];
+  entry_sector: string | null;
+}
+
+export interface XinixSignalInsight {
+  signal_type: string;
+  closed_count: number;
+  wins: number;
+  win_rate: number;
+  avg_return_pct: number;
+  total_return_usd: number;
+}
+
+export interface XinixSectorInsight {
+  sector: string;
+  closed_count: number;
+  wins: number;
+  win_rate: number;
+  avg_return_pct: number;
+  total_return_usd: number;
+}
+
+export interface XinixEquityPoint {
+  date: string;
+  cash: number;
+  positions_value: number;
+  total_equity: number;
+  positions_count: number;
+}
+
+export interface XinixPortfolio {
+  state: {
+    cash: number;
+    initial_capital: number;
+    started_at: string;
+    last_run_at: string | null;
+    total_equity: number;
+    positions_value: number;
+    total_return_usd: number;
+    total_return_pct: number;
+    realized_usd: number;
+    unrealized_usd: number;
+    open_count: number;
+    closed_count: number;
+  };
+  open_positions: XinixOpenPosition[];
+  closed_positions: XinixClosedPosition[];
+  equity_history: XinixEquityPoint[];
+  signal_insights: XinixSignalInsight[];
+  sector_insights: XinixSectorInsight[];
+  recommendations: string[];
+}
+
+export async function fetchXinixPortfolio(): Promise<XinixPortfolio> {
+  const res = await fetch(apiUrl("/api/xinix-portfolio"));
+  if (!res.ok) throw new Error(`xinix-portfolio ${res.status}`);
+  return (await res.json()) as XinixPortfolio;
+}

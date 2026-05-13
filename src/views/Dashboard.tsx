@@ -895,6 +895,7 @@ const RUNLOG_LABEL: Record<string, string> = {
   "scan-losers-background": "Scan losers",
   "scan-bottoms-background": "Scan bottoms",
   "losers-digest-background": "Losers digest",
+  "xinix-trade": "Xinix trade",
 };
 
 function RunLog({ data, onNavigate }: { data: Dashboard; onNavigate?: (t: NavTarget) => void }) {
