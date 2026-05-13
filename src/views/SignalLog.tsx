@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchSignalLog } from "../api";
 import type { SignalEpisode } from "../api";
-import { Card, SectionHeader, Button } from "../components/ui";
+import { Card, SectionHeader, Button, Pill, Badge, EmptyState, Input } from "../components/ui";
 
 type SortKey = "start_date" | "end_date" | "return_pct" | "signal_days" | "ticker" | "peak_score";
 type SortDir = "asc" | "desc";
@@ -46,10 +46,6 @@ const ACTION_CLS: Record<string, string> = {
   STRONG_BUY: "bg-fog-lime/20 text-fog-lime font-bold",
   BUY: "bg-fog-pink/20 text-fog-pink font-semibold",
 };
-const SECTOR_CLS: Record<string, string> = {
-  biotech: "text-fog-watch",
-  mining: "text-fog-orange",
-};
 
 export function SignalLogView() {
   const [data, setData] = useState<{ episodes: SignalEpisode[]; as_of: string } | null>(null);
@@ -61,6 +57,7 @@ export function SignalLogView() {
   const [filterAction, setFilterAction] = useState<"all" | "STRONG_BUY" | "BUY">("all");
   const [filterStatus, setFilterStatus] = useState<"all" | "lopend" | "afgesloten">("all");
   const [filterSector, setFilterSector] = useState<"all" | "biotech" | "mining" | "other">("all");
+  const [search, setSearch] = useState("");
 
   // sort
   const [sortKey, setSortKey] = useState<SortKey>("start_date");
@@ -93,6 +90,10 @@ export function SignalLogView() {
     if (filterStatus === "lopend") list = list.filter((e) => e.is_active);
     if (filterStatus === "afgesloten") list = list.filter((e) => !e.is_active);
     if (filterSector !== "all") list = list.filter((e) => e.sector === filterSector);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter((e) => e.ticker.toLowerCase().includes(q));
+    }
 
     // Nullable kolommen: null altijd onderaan, ongeacht sort-richting.
     // Anders zou ascending sort alle "—" bovenaan zetten wat misleidend is
@@ -123,7 +124,7 @@ export function SignalLogView() {
       return 0;
     });
     return list;
-  }, [data, filterAction, filterStatus, filterSector, sortKey, sortDir]);
+  }, [data, filterAction, filterStatus, filterSector, search, sortKey, sortDir]);
 
   const summary = useMemo(() => {
     if (!rows.length) return null;
@@ -152,7 +153,17 @@ export function SignalLogView() {
     <div className="space-y-5">
       <SectionHeader
         eyebrow="Geloofwaardigheid"
-        title="Signaallog"
+        title={
+          <span className="flex items-center gap-2">
+            Signaallog
+            <span
+              className="text-[10px] text-neutral-500 font-normal cursor-help"
+              title="Een episode = aaneengesloten reeks dagen waarop het algoritme BUY of STRONG BUY gaf (gat >5 dagen = nieuw signaal). Return = (huidige koers − instapkoers bij eerste signaaldag) / instapkoers."
+            >
+              ⓘ
+            </span>
+          </span>
+        }
         subtitle={
           data
             ? `${data.episodes.length} episodes in de laatste ${days} dagen · bijgewerkt ${new Date(data.as_of).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}`
@@ -172,67 +183,45 @@ export function SignalLogView() {
       )}
 
       {/* Filter + periode bar */}
-      <Card className="p-3 flex flex-wrap gap-3 items-center">
-        <div className="flex gap-1">
-          {(["all", "STRONG_BUY", "BUY"] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setFilterAction(v)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
-                filterAction === v
-                  ? v === "STRONG_BUY" ? "bg-fog-lime/25 text-fog-lime" : v === "BUY" ? "bg-fog-pink/25 text-fog-pink" : "bg-ink-4 text-neutral-200"
-                  : "text-neutral-500 hover:text-neutral-300"
-              }`}
-            >
-              {v === "all" ? "Alle signalen" : v.replace("_", " ")}
-            </button>
-          ))}
+      <Card className="p-3 space-y-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-neutral-500 mr-1">Signaal</span>
+          <Pill tone="neutral" size="sm" active={filterAction === "all"} onClick={() => setFilterAction("all")}>Alle</Pill>
+          <Pill tone="lime" size="sm" active={filterAction === "STRONG_BUY"} onClick={() => setFilterAction("STRONG_BUY")}>Strong buy</Pill>
+          <Pill tone="pink" size="sm" active={filterAction === "BUY"} onClick={() => setFilterAction("BUY")}>Buy</Pill>
+
+          <span className="w-px h-4 bg-ink-5 hidden sm:block mx-1" />
+
+          <span className="text-[10px] uppercase tracking-wider text-neutral-500 mr-1">Status</span>
+          <Pill tone="neutral" size="sm" active={filterStatus === "all"} onClick={() => setFilterStatus("all")}>Alle</Pill>
+          <Pill tone="lime" size="sm" active={filterStatus === "lopend"} onClick={() => setFilterStatus("lopend")} title="Algoritme geeft nu nog steeds BUY/STRONG_BUY">Lopend</Pill>
+          <Pill tone="neutral" size="sm" active={filterStatus === "afgesloten"} onClick={() => setFilterStatus("afgesloten")} title="Het BUY-signaal is inmiddels verdwenen">Afgesloten</Pill>
+
+          <span className="w-px h-4 bg-ink-5 hidden sm:block mx-1" />
+
+          <span className="text-[10px] uppercase tracking-wider text-neutral-500 mr-1">Sector</span>
+          <Pill tone="neutral" size="sm" active={filterSector === "all"} onClick={() => setFilterSector("all")}>Alle</Pill>
+          <Pill tone="cyan" size="sm" active={filterSector === "biotech"} onClick={() => setFilterSector("biotech")}>Biotech</Pill>
+          <Pill tone="watch" size="sm" active={filterSector === "mining"} onClick={() => setFilterSector("mining")}>Mining</Pill>
+          <Pill tone="neutral" size="sm" active={filterSector === "other"} onClick={() => setFilterSector("other")}>Other</Pill>
         </div>
 
-        <div className="w-px h-4 bg-ink-5 hidden sm:block" />
-
-        <div className="flex gap-1">
-          {(["all", "lopend", "afgesloten"] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setFilterStatus(v)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
-                filterStatus === v ? "bg-ink-4 text-neutral-200" : "text-neutral-500 hover:text-neutral-300"
-              }`}
-              title={v === "lopend" ? "Algoritme geeft nu nog steeds BUY/STRONG_BUY" : v === "afgesloten" ? "Het BUY-signaal is inmiddels verdwenen" : ""}
-            >
-              {v === "all" ? "Alle" : v === "lopend" ? "Lopend" : "Afgesloten"}
-            </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-neutral-500 mr-1">Periode</span>
+          {[30, 60, 90, 180, 365].map((d) => (
+            <Pill key={d} tone="neutral" size="sm" active={days === d} onClick={() => setDays(d)}>
+              {d}d
+            </Pill>
           ))}
-        </div>
 
-        <div className="w-px h-4 bg-ink-5 hidden sm:block" />
+          <span className="w-px h-4 bg-ink-5 hidden sm:block mx-1" />
 
-        <div className="flex gap-1">
-          {(["all", "biotech", "mining", "other"] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setFilterSector(v)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
-                filterSector === v ? "bg-ink-4 text-neutral-200" : "text-neutral-500 hover:text-neutral-300"
-              }`}
-            >
-              {v === "all" ? "Alle sectoren" : v}
-            </button>
-          ))}
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <label className="text-[11px] text-neutral-500">Periode</label>
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="bg-ink-3 border border-ink-5 rounded-lg px-2 py-1 text-xs text-neutral-200"
-          >
-            {[30, 60, 90, 180, 365].map((d) => (
-              <option key={d} value={d}>{d} dgn</option>
-            ))}
-          </select>
+          <Input
+            placeholder="Zoek ticker…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-7 text-xs w-40"
+          />
         </div>
       </Card>
 
@@ -294,10 +283,15 @@ export function SignalLogView() {
                   className={`border-t border-ink-5 hover:bg-ink-3/40 transition-colors ${ep.is_active ? "bg-fog-lime/5" : ""}`}
                 >
                   <td className="p-2.5">
-                    <span className="font-mono font-bold text-neutral-100">{ep.ticker}</span>
-                    <span className={`ml-1.5 text-[10px] ${SECTOR_CLS[ep.sector] ?? "text-neutral-500"}`}>
-                      {ep.sector}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-neutral-100">{ep.ticker}</span>
+                      <Badge
+                        tone={ep.sector === "biotech" ? "cyan" : ep.sector === "mining" ? "watch" : "neutral"}
+                        className="text-[9px] px-1 py-px"
+                      >
+                        {ep.sector === "biotech" ? "BIO" : ep.sector === "mining" ? "MIN" : "OTH"}
+                      </Badge>
+                    </div>
                   </td>
                   <td className="p-2.5">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] ${ACTION_CLS[ep.peak_action] ?? ""}`}>
@@ -322,22 +316,21 @@ export function SignalLogView() {
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && !loading && (
-                <tr>
-                  <td colSpan={9} className="p-8 text-center text-neutral-500">
-                    Geen episodes gevonden. Zodra compute-scores BUY/STRONG_BUY-scores aanmaakt, verschijnen ze hier.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
       </Card>
 
-      <p className="text-[11px] text-neutral-600">
-        Een episode = aaneengesloten reeks dagen waarop het algoritme BUY of STRONG BUY gaf (gat &gt; 5 dagen = nieuw signaal).
-        Return = (huidige koers − instapkoers bij eerste signaaldag) / instapkoers. Nog geen koersdata = —.
-      </p>
+      {rows.length === 0 && !loading && (
+        <EmptyState
+          title="Geen episodes gevonden"
+          description={
+            data && data.episodes.length === 0
+              ? "Zodra compute-scores BUY/STRONG_BUY-scores aanmaakt, verschijnen ze hier. Check de Status-tab om te zien of de job loopt."
+              : "Geen match voor de huidige filters. Pas de filters of het zoekveld aan."
+          }
+        />
+      )}
     </div>
   );
 }

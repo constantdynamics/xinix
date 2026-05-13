@@ -20,6 +20,7 @@ import {
   Input,
   Select,
   SectionHeader,
+  InlineConfirm,
 } from "../components/ui";
 
 const EXCHANGE_SUFFIXES = [
@@ -254,6 +255,7 @@ export function TickersView({
   const [wlUnrecognized, setWlUnrecognized] = useState<Set<string> | null>(null);
   const [wlValidating, setWlValidating] = useState(false);
   const [wlBulkBusy, setWlBulkBusy] = useState(false);
+  const [showCleanup, setShowCleanup] = useState(false);
 
   // Watchlist paginatie + zoek — bij grote lijsten (>500) rendert React de
   // hele tabel pijnlijk traag. Page-slicing houdt het responsief.
@@ -520,8 +522,9 @@ export function TickersView({
     }
   }
 
-  async function remove(ticker: string) {
-    if (!confirm(`${ticker} verwijderen uit watchlist?`)) return;
+  // InlineConfirm regelt al de twee-staps bevestiging; deze helper doet
+  // alleen de API-call zonder browser-dialog.
+  async function removeNoConfirm(ticker: string) {
     try {
       await removeTicker(ticker);
       onRefresh();
@@ -814,11 +817,17 @@ export function TickersView({
                 Pas toe
               </Button>
               <span className="text-neutral-400">·</span>
-              <span className="text-neutral-400">Suffix</span>
+              <span
+                className="text-neutral-400 cursor-help"
+                title="Beurs-suffix voor Yahoo Finance (bv. AAPL = US, NFG.TO = TSX Toronto, FILO.V = TSX-V). Yahoo herkent tickers alleen mét de juiste suffix."
+              >
+                Beurs ⓘ
+              </span>
               <Select
                 value={bulkSuffix}
                 onChange={(e) => setBulkSuffix(e.target.value)}
                 className="h-7 text-xs"
+                title="Beurs-suffix voor Yahoo Finance"
               >
                 {EXCHANGE_SUFFIXES.map((s) => (
                   <option key={s.value} value={s.value}>
@@ -972,6 +981,14 @@ export function TickersView({
             </div>
           )}
 
+          {unknownCount > 0 && (
+            <div className="text-[11px] text-fog-warn bg-fog-warn/10 border border-fog-warn/30 rounded-md px-2.5 py-1.5">
+              ⚠ {unknownCount} ticker{unknownCount > 1 ? "s" : ""} niet herkend op Yahoo —
+              {" "}worden alsnog toegevoegd, maar koerspolling zal voor die rijen falen
+              {" "}tot je de juiste suffix toevoegt.
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             <Button
               variant="buy"
@@ -982,8 +999,6 @@ export function TickersView({
               title={
                 checkingCount > 0
                   ? "Wacht tot alle lookups klaar zijn"
-                  : unknownCount > 0
-                  ? `${unknownCount} ticker(s) niet herkend — worden alsnog toegevoegd`
                   : ""
               }
             >
@@ -1158,9 +1173,17 @@ export function TickersView({
           }
         />
 
-        {/* Cleanup toolbar */}
+        {/* Cleanup toolbar — verstopt achter toggle wanneer er geen actie nodig is */}
+        {(showCleanup || wlSelected.size > 0 || (wlUnrecognized && wlUnrecognized.size > 0) || wlDuplicates.size > 0) ? (
         <Card className="p-3 mb-3 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowCleanup((v) => !v)}
+              className="text-[10px] uppercase tracking-[0.15em] font-bold text-neutral-500 hover:text-fog-pink"
+              title="Verberg opruim-tools"
+            >
+              ✕ verberg
+            </button>
             <Button
               size="sm"
               variant="primary"
@@ -1254,6 +1277,16 @@ export function TickersView({
             </div>
           )}
         </Card>
+        ) : (
+          <div className="mb-3 flex justify-end">
+            <button
+              onClick={() => setShowCleanup(true)}
+              className="text-[11px] text-neutral-500 hover:text-fog-pink transition"
+            >
+              ⚙ Opruim-tools…
+            </button>
+          </div>
+        )}
 
         <Card className="overflow-hidden">
           <div className="overflow-auto">
@@ -1284,7 +1317,12 @@ export function TickersView({
                   <th className="text-left p-3 font-semibold">Bedrijf</th>
                   <th className="text-left p-3 font-semibold">Score</th>
                   <th className="text-left p-3 font-semibold">Type</th>
-                  <th className="text-left p-3 font-semibold">Detail</th>
+                  <th
+                    className="text-left p-3 font-semibold cursor-help"
+                    title="Biotech: fase / modaliteit / ziektegebied — Mining: commodity / jurisdictie / deposit-type"
+                  >
+                    Sector-info
+                  </th>
                   <th className="text-left p-3 font-semibold">Trigger</th>
                   <th className="p-3"></th>
                 </tr>
@@ -1361,22 +1399,20 @@ export function TickersView({
                       <td className="p-3 text-neutral-500 truncate max-w-xs">
                         {c.trigger_event ?? "—"}
                       </td>
-                      <td className="p-3 text-right space-x-1 whitespace-nowrap">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setEditing(c)}
-                        >
-                          details
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => remove(c.ticker)}
-                          className="hover:text-fog-loss"
-                        >
-                          ✕
-                        </Button>
+                      <td className="p-3 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setEditing(c)}
+                          >
+                            details
+                          </Button>
+                          <InlineConfirm
+                            onConfirm={() => removeNoConfirm(c.ticker)}
+                            title={`Verwijder ${c.ticker} uit watchlist`}
+                          />
+                        </div>
                       </td>
                     </tr>
                   );

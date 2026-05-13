@@ -6,6 +6,7 @@
 // dieper dan een handvol componenten dus splitsen geeft alleen maar
 // extra ruis.
 
+import { useEffect, useState } from "react";
 import type {
   ButtonHTMLAttributes,
   HTMLAttributes,
@@ -16,6 +17,103 @@ import type {
 
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
+}
+
+// ─── useTickingNow — Date.now() dat elke `interval`ms re-rendert ──────
+// Voor componenten die "X min geleden" tonen zonder dat ze data hoeven
+// te refetchen. Default 60s = goed voor minuut-resolutie.
+export function useTickingNow(interval = 60_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), interval);
+    return () => clearInterval(id);
+  }, [interval]);
+  return now;
+}
+
+// Gedeelde relatieve-tijd helper. Compact, NL.
+export function ago(iso: string | null | undefined, now: number = Date.now()): string {
+  if (!iso) return "—";
+  const ms = now - new Date(iso).getTime();
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "zojuist";
+  if (m < 60) return `${m} min geleden`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} uur geleden`;
+  const d = Math.floor(h / 24);
+  return `${d} dag${d > 1 ? "en" : ""} geleden`;
+}
+
+// ─── EmptyState — uniforme lege-staat ─────────────────────────────────
+export function EmptyState({
+  icon,
+  title,
+  description,
+  action,
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="p-8 text-center rounded-2xl bg-ink-2 border border-ink-6 ring-1 ring-inset ring-white/[0.03]">
+      {icon && <div className="text-3xl mb-2 opacity-50">{icon}</div>}
+      <div className="text-sm font-semibold text-neutral-300">{title}</div>
+      {description && (
+        <div className="text-xs text-neutral-500 mt-1.5 max-w-md mx-auto leading-relaxed">
+          {description}
+        </div>
+      )}
+      {action && <div className="mt-3">{action}</div>}
+    </div>
+  );
+}
+
+// ─── InlineConfirm — twee-staps verwijderknop zonder browser-dialog ──
+export function InlineConfirm({
+  onConfirm,
+  label = "✕",
+  confirmLabel = "Zeker?",
+  title,
+  className,
+}: {
+  onConfirm: () => void;
+  label?: ReactNode;
+  confirmLabel?: ReactNode;
+  title?: string;
+  className?: string;
+}) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const id = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(id);
+  }, [armed]);
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (armed) {
+          onConfirm();
+          setArmed(false);
+        } else {
+          setArmed(true);
+        }
+      }}
+      className={cx(
+        "inline-flex items-center justify-center rounded-md text-xs font-bold transition px-2 h-7",
+        armed
+          ? "bg-fog-loss text-white"
+          : "text-neutral-500 hover:text-fog-loss hover:bg-fog-loss/10",
+        className
+      )}
+    >
+      {armed ? confirmLabel : label}
+    </button>
+  );
 }
 
 // ─── Card ──────────────────────────────────────────────────────────────

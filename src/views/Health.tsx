@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchHealth } from "../api";
+import { fetchHealth, triggerJob } from "../api";
 import type { Health, HealthJob, HealthRun } from "../types";
-import { Card, Button, SectionHeader, Dot, Badge, Modal, Sparkline } from "../components/ui";
+import { Card, Button, SectionHeader, Dot, Badge, Modal, Sparkline, useTickingNow, ago, EmptyState } from "../components/ui";
 
 // Bekende doorlopende jobs: label, verwacht interval in minuten, korte uitleg.
 // Onbekende jobs (niet in deze map) worden generiek getoond.
@@ -25,23 +25,25 @@ const JOB_META: Record<string, { label: string; intervalMin: number; desc: strin
 };
 
 type Status = "ok" | "warn" | "bad" | "stale";
-const STATUS_DOT: Record<Status, "lime" | "watch" | "loss" | "neutral"> = {
-  ok: "lime", warn: "watch", bad: "loss", stale: "neutral",
+// Stil als warn-tone zodat het opvalt — was eerst neutral grijs wat te
+// passief voelde voor jobs die mogelijk vastlopen.
+const STATUS_DOT: Record<Status, "lime" | "watch" | "loss"> = {
+  ok: "lime", warn: "watch", bad: "loss", stale: "watch",
 };
 const STATUS_LABEL: Record<Status, string> = {
   ok: "Draait", warn: "Te laat", bad: "Fout", stale: "Stil",
 };
 
-function ago(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return "zojuist";
-  if (m < 60) return `${m} min geleden`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} uur geleden`;
-  const d = Math.floor(h / 24);
-  return `${d} dag${d > 1 ? "en" : ""} geleden`;
-}
+// Jobs die via /api/trigger handmatig kunnen worden gestart. De trigger
+// endpoint accepteert alleen `<job>-background` namen die in zijn
+// hard-coded toegestane lijst staan.
+const TRIGGERABLE = new Set([
+  "poll-prices", "poll-trials", "poll-edgar", "poll-fda",
+  "poll-biotech-news", "poll-metals", "poll-mining-news",
+  "compute-signals", "compute-scores", "dispatch-alerts",
+  "forward-returns",
+]);
+
 function fmtInterval(min: number): string {
   if (min <= 0) return "—";
   if (min < 60) return `~elke ${min} min`;
@@ -50,16 +52,13 @@ function fmtInterval(min: number): string {
   return `~1×/${Math.round(min / 1440)} dgn`;
 }
 
-function statusOf(j: HealthJob): Status {
+function statusOf(j: HealthJob, now: number): Status {
   const meta = JOB_META[j.job];
   const intervalMin = meta?.intervalMin ?? 0;
-  const ageMin = (Date.now() - new Date(j.last_started_at).getTime()) / 60000;
-  // "Stil" = veel later dan verwacht. Voor dagelijkse jobs is een buffer
-  // van enkele uren normaal; daarom min. 6 uur tolerantie naast intervalMin*3.
+  const ageMin = (now - new Date(j.last_started_at).getTime()) / 60000;
   const staleThreshold = Math.max(intervalMin * 3, intervalMin + 360);
   if (intervalMin > 0 && ageMin > staleThreshold) return "stale";
   if (j.last_ok === false) return "bad";
-  // "Te laat" = ~50% over de verwachte tijd.
   if (intervalMin > 0 && ageMin > intervalMin * 1.5) return "warn";
   return "ok";
 }
@@ -98,6 +97,23 @@ export function HealthView() {
   const [loading, setLoading] = useState(true);
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
+  const [busyJob, setBusyJob] = useState<string | null>(null);
+  const [triggerMsg, setTriggerMsg] = useState<string | null>(null);
+  const [showNeverSeen, setShowNeverSeen] = useState(false);
+  const now = useTickingNow(30_000);
+
+  async function trigger(job: string) {
+    setBusyJob(job);
+    setTriggerMsg(null);
+    try {
+      await triggerJob(`${job}-background`);
+      setTriggerMsg(`${job} getriggerd — de run verschijnt zo in de history`);
+    } catch (e) {
+      setTriggerMsg(`${job}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusyJob(null);
+    }
+  }
 
   async function load() {
     try {
@@ -116,18 +132,35 @@ export function HealthView() {
     return () => clearInterval(id);
   }, []);
 
-  const jobs = useMemo(() => {
+  // Splits "gewone" jobs (met run-history) van "nog nooit gezien" jobs;
+  // die laatste cluster vouwen we standaard dicht in een aparte sectie.
+  const { jobs, neverSeen } = useMemo(() => {
     const list = data?.jobs ?? [];
-    const seen = new Set(list.map((j) => j.job));
-    const missing: HealthJob[] = Object.keys(JOB_META)
-      .filter((j) => !seen.has(j))
-      .map((j) => ({ job: j, last_started_at: "", last_finished_at: null, last_ok: null, last_message: "nog niet gedraaid sinds deze status-pagina kijkt", last_metrics: null, runs_24h: 0, ok_24h: 0, recent: [] }));
-    const all = [...list, ...missing];
+    const seenMap = new Map(list.map((j) => [j.job, j]));
+    const seenJobs: Array<{ j: HealthJob; s: Status }> = [];
+    const neverJobs: HealthJob[] = [];
+    for (const j of list) {
+      seenJobs.push({ j, s: statusOf(j, now) });
+    }
+    for (const jobName of Object.keys(JOB_META)) {
+      if (!seenMap.has(jobName)) {
+        neverJobs.push({
+          job: jobName,
+          last_started_at: "",
+          last_finished_at: null,
+          last_ok: null,
+          last_message: null,
+          last_metrics: null,
+          runs_24h: 0,
+          ok_24h: 0,
+          recent: [],
+        });
+      }
+    }
     const order: Record<Status, number> = { bad: 0, stale: 1, warn: 2, ok: 3 };
-    return all
-      .map((j) => ({ j, s: j.last_started_at ? statusOf(j) : ("stale" as Status) }))
-      .sort((a, b) => order[a.s] - order[b.s] || a.j.job.localeCompare(b.j.job));
-  }, [data]);
+    seenJobs.sort((a, b) => order[a.s] - order[b.s] || a.j.job.localeCompare(b.j.job));
+    return { jobs: seenJobs, neverSeen: neverJobs };
+  }, [data, now]);
 
   const counts = useMemo(() => {
     const c = { ok: 0, warn: 0, bad: 0, stale: 0 };
@@ -149,7 +182,7 @@ export function HealthView() {
         title="Achtergrond-jobs"
         subtitle={
           data
-            ? `Alle pollers die je dashboard voeden. Groen = ok. Bijgewerkt ${ago(data.generated_at)}.`
+            ? `Alle pollers die je dashboard voeden. Groen = ok. Bijgewerkt ${ago(data.generated_at, now)}.`
             : loading ? "laden…" : "—"
         }
         aside={
@@ -170,6 +203,12 @@ export function HealthView() {
       {error && (
         <Card className="p-3 text-sm text-fog-loss border border-fog-loss/40 bg-fog-loss/10">
           Status ophalen mislukt: {error}
+        </Card>
+      )}
+
+      {triggerMsg && (
+        <Card className="p-3 text-xs text-neutral-200 border border-fog-pink/40 bg-fog-pink/10">
+          {triggerMsg}
         </Card>
       )}
 
@@ -203,17 +242,27 @@ export function HealthView() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="font-bold text-neutral-50">{meta?.label ?? j.job}</span>
-                    <Badge tone={s === "ok" ? "lime" : s === "warn" ? "watch" : s === "bad" ? "loss" : "neutral"}>
+                    <Badge tone={s === "ok" ? "lime" : s === "warn" ? "watch" : s === "bad" ? "loss" : "watch"}>
                       {STATUS_LABEL[s]}
                     </Badge>
-                    <span className="font-mono text-[10px] text-neutral-600 ml-auto">{j.job}</span>
+                    <span className="font-mono text-[10px] text-neutral-600">{j.job}</span>
+                    {TRIGGERABLE.has(j.job) && (
+                      <button
+                        onClick={() => trigger(j.job)}
+                        disabled={busyJob === j.job}
+                        className="ml-auto text-[10px] uppercase tracking-wider font-bold text-neutral-500 hover:text-fog-pink disabled:opacity-40 transition-colors px-2 py-0.5 rounded border border-ink-5 hover:border-fog-pink/40"
+                        title="Start deze job nu handmatig"
+                      >
+                        {busyJob === j.job ? "…" : "▶ nu"}
+                      </button>
+                    )}
                   </div>
                   {meta && <div className="text-[11px] text-neutral-400 mt-1">{meta.desc}</div>}
                   <div className="text-xs text-neutral-300 mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5">
                     {j.last_started_at ? (
                       <>
                         <span className="tabular text-neutral-400">
-                          laatst: {ago(j.last_started_at)}
+                          laatst: {ago(j.last_started_at, now)}
                           {j.last_finished_at == null && " (loopt nog)"}
                         </span>
                         {meta && <span className="text-neutral-600">·</span>}
@@ -221,9 +270,7 @@ export function HealthView() {
                         {j.runs_24h > 0 && (
                           <>
                             <span className="text-neutral-600">·</span>
-                            <span className={`tabular ${j.ok_24h < j.runs_24h ? "text-fog-watch" : "text-neutral-500"}`}>
-                              {j.ok_24h}/{j.runs_24h} ok laatste 24u
-                            </span>
+                            <RunsRatio ok={j.ok_24h} total={j.runs_24h} />
                           </>
                         )}
                       </>
@@ -273,12 +320,63 @@ export function HealthView() {
             </Card>
           );
         })}
-        {filtered.length === 0 && !loading && (
-          <Card className="p-6 text-center text-neutral-400 text-sm">
-            {onlyProblems ? "Geen problemen — alles draait goed." : "Nog geen run-data."}
-          </Card>
+        {filtered.length === 0 && !loading && jobs.length > 0 && (
+          <EmptyState
+            title="Geen problemen"
+            description="Alle zichtbare jobs draaien zoals verwacht."
+          />
+        )}
+        {jobs.length === 0 && !loading && (
+          <EmptyState
+            title="Nog geen run-data"
+            description="Zodra een achtergrond-job draait verschijnt zijn status hier."
+          />
         )}
       </div>
+
+      {neverSeen.length > 0 && !onlyProblems && (
+        <Card className="p-3">
+          <button
+            onClick={() => setShowNeverSeen((v) => !v)}
+            className="flex items-center gap-2 text-xs font-bold text-neutral-400 hover:text-neutral-100 transition-colors w-full"
+          >
+            <span>{showNeverSeen ? "▾" : "▸"}</span>
+            <span>
+              {neverSeen.length} job{neverSeen.length > 1 ? "s" : ""} nog nooit gezien
+            </span>
+            <span className="text-[10px] uppercase tracking-wider text-neutral-600 ml-auto">
+              klik om {showNeverSeen ? "te verbergen" : "te tonen"}
+            </span>
+          </button>
+          {showNeverSeen && (
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {neverSeen.map((j) => {
+                const meta = JOB_META[j.job];
+                return (
+                  <div key={j.job} className="rounded-lg border border-ink-5 bg-ink-1/40 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <Dot tone="neutral" />
+                      <span className="text-xs font-semibold text-neutral-300 truncate">
+                        {meta?.label ?? j.job}
+                      </span>
+                      {TRIGGERABLE.has(j.job) && (
+                        <button
+                          onClick={() => trigger(j.job)}
+                          disabled={busyJob === j.job}
+                          className="ml-auto text-[10px] uppercase tracking-wider font-bold text-fog-pink hover:underline disabled:opacity-40"
+                        >
+                          {busyJob === j.job ? "…" : "▶ start"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-neutral-500 mt-1 font-mono">{j.job}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      )}
 
       <Modal
         open={runDetail != null}
@@ -339,6 +437,26 @@ export function HealthView() {
         )}
       </Modal>
     </div>
+  );
+}
+
+// Mini-progressbar voor de 24u ok-ratio. Lime bij 100%, watch onder 80%,
+// loss onder 50%. Compacter dan losse tekst zoals "5/6 ok".
+function RunsRatio({ ok, total }: { ok: number; total: number }) {
+  if (total === 0) return null;
+  const pct = ok / total;
+  const tone = pct >= 0.99 ? "bg-fog-lime" : pct >= 0.8 ? "bg-fog-watch" : "bg-fog-loss";
+  const text = pct >= 0.99 ? "text-neutral-500" : pct >= 0.8 ? "text-fog-watch" : "text-fog-loss";
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 tabular"
+      title={`${ok} van ${total} runs succesvol in de laatste 24u`}
+    >
+      <span className="relative inline-block w-10 h-1.5 rounded-full bg-ink-1 overflow-hidden">
+        <span className={`absolute inset-y-0 left-0 ${tone}`} style={{ width: `${pct * 100}%` }} />
+      </span>
+      <span className={text}>{ok}/{total}</span>
+    </span>
   );
 }
 

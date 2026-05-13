@@ -54,8 +54,22 @@ const HELP_PAGE: Record<Tab, string> = {
   settings: "settings",
 };
 
+// Tab onthouden tussen sessies — bij refresh blijf je op dezelfde tab.
+const TAB_KEY = "xinix_active_tab_v1";
+function loadInitialTab(): Tab {
+  try {
+    const saved = sessionStorage.getItem(TAB_KEY);
+    if (saved && TABS.some((t) => t.key === saved)) return saved as Tab;
+  } catch { /* SSR/restricted */ }
+  return "dashboard";
+}
+
 export function App() {
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const [tab, setTabRaw] = useState<Tab>(loadInitialTab);
+  const setTab = (t: Tab) => {
+    setTabRaw(t);
+    try { sessionStorage.setItem(TAB_KEY, t); } catch { /* ignore */ }
+  };
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

@@ -253,7 +253,7 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
       <RecentSignals data={data} />
 
       {/* Run log */}
-      <RunLog data={data} />
+      <RunLog data={data} onNavigate={onNavigate} />
     </div>
   );
 }
@@ -411,18 +411,24 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
       )}
 
       {prefs.showTriggerEvent && c.trigger_event && (
-        <div className="text-[11px] text-neutral-400 italic line-clamp-2">
+        <div className="text-[10px] text-neutral-500 italic line-clamp-2 leading-snug" title={c.trigger_event}>
           {c.trigger_event}
         </div>
       )}
 
-      {/* Price + delta */}
+      {/* Price + delta — geen valutateken (multi-exchange) */}
       {prefs.showPriceDelta && px && (
         <div className="flex items-baseline gap-3">
           <div className="text-2xl font-bold tabular tracking-tight">
-            ${px.last_close?.toFixed(2)}
+            {px.last_close != null
+              ? px.last_close < 1
+                ? px.last_close.toFixed(4)
+                : px.last_close < 10
+                ? px.last_close.toFixed(3)
+                : px.last_close.toFixed(2)
+              : <span className="text-xs text-neutral-500 italic font-normal">geen koers</span>}
           </div>
-          <MiniDelta value={px.pct_change_1d ?? 0} />
+          {px.last_close != null && <MiniDelta value={px.pct_change_1d ?? 0} />}
         </div>
       )}
 
@@ -629,8 +635,8 @@ function Catalysts({ data }: { data: Dashboard }) {
                   <td className="p-3 text-neutral-400 truncate max-w-md">
                     {c.description}
                   </td>
-                  <td className="p-3 text-[11px] text-neutral-400">
-                    {c.source}
+                  <td className="p-3 text-[10px] text-neutral-500 uppercase tracking-wider">
+                    {(c.source ?? "").split(/[./]/)[0] || "—"}
                   </td>
                 </tr>
               );
@@ -749,24 +755,68 @@ function ScoreRing({ value }: { value: number }) {
   );
 }
 
-function RunLog({ data }: { data: Dashboard }) {
+// Korte job-label-lookup voor de mini RunLog op het dashboard. Spiegelt
+// JOB_META in Health.tsx maar met de `-background` suffix die in run_log
+// staat.
+const RUNLOG_LABEL: Record<string, string> = {
+  "poll-prices-background": "Koersen",
+  "poll-trials-background": "Trials",
+  "poll-edgar-background": "SEC 8-K",
+  "poll-fda-background": "FDA",
+  "poll-biotech-news-background": "Biotech-nieuws",
+  "poll-metals-background": "Metalen",
+  "poll-mining-news-background": "Mining-nieuws",
+  "poll-fundamentals-background": "Fundamentals",
+  "compute-signals-background": "Signalen",
+  "compute-scores-background": "Scores",
+  "compute-extremes-background": "Extremes",
+  "dispatch-alerts-background": "Alerts",
+  "forward-returns-background": "Forward returns",
+  "backtest-background": "Backtest",
+  "scan-losers-background": "Scan losers",
+  "scan-bottoms-background": "Scan bottoms",
+  "losers-digest-background": "Losers digest",
+};
+
+function RunLog({ data, onNavigate }: { data: Dashboard; onNavigate?: (t: NavTarget) => void }) {
   if (data.run_log.length === 0) return null;
+  // Compacter: laatste 5 unieke jobs, gegroepeerd op job-key
+  const seen = new Set<string>();
+  const recent = data.run_log.filter((r) => {
+    if (seen.has(r.job)) return false;
+    seen.add(r.job);
+    return true;
+  }).slice(0, 6);
   return (
     <section>
-      <SectionHeader eyebrow="Systeem" title="Job log" />
+      <SectionHeader
+        eyebrow="Systeem"
+        title="Laatste runs"
+        aside={
+          onNavigate && (
+            <button
+              onClick={() => onNavigate("status")}
+              className="text-xs text-fog-pink hover:underline"
+            >
+              Alle jobs in Status →
+            </button>
+          )
+        }
+      />
       <Card className="overflow-hidden">
-        {data.run_log.slice(0, 10).map((r, i) => (
+        {recent.map((r, i) => (
           <div
             key={i}
             className="flex items-center gap-3 px-3 py-2 border-t border-ink-5 first:border-t-0 text-xs"
           >
             <Dot
               tone={r.ok === true ? "lime" : r.ok === false ? "loss" : "neutral"}
+              pulse={r.ok === false}
             />
-            <span className="font-mono text-neutral-300 w-44 truncate">
-              {r.job}
+            <span className="font-semibold text-neutral-200 w-32 truncate" title={r.job}>
+              {RUNLOG_LABEL[r.job] ?? r.job}
             </span>
-            <span className="tabular text-neutral-400 w-32">
+            <span className="tabular text-neutral-500 w-24 text-[11px]">
               {new Date(r.started_at).toLocaleString("nl-NL", {
                 day: "2-digit",
                 month: "2-digit",
@@ -774,8 +824,8 @@ function RunLog({ data }: { data: Dashboard }) {
                 minute: "2-digit",
               })}
             </span>
-            <span className="text-neutral-400 truncate flex-1">
-              {r.message ?? (r.finished_at ? "ok" : "running…")}
+            <span className={`truncate flex-1 ${r.ok === false ? "text-fog-loss" : "text-neutral-500"}`}>
+              {r.message ?? (r.finished_at ? "ok" : "loopt…")}
             </span>
           </div>
         ))}
