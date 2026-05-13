@@ -564,6 +564,7 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
 function Catalysts({ data }: { data: Dashboard }) {
   const cats = data.upcoming_catalysts.slice(0, 15);
   if (cats.length === 0) return null;
+  const exchangeByTicker = new Map(data.cards.map((c) => [c.ticker, c.exchange ?? null]));
   return (
     <section>
       <SectionHeader
@@ -621,7 +622,7 @@ function Catalysts({ data }: { data: Dashboard }) {
                   </td>
                   <td className="p-3 font-bold">
                     <a
-                      href={googleFinanceUrl(c.ticker)}
+                      href={googleFinanceUrl(c.ticker, exchangeByTicker.get(c.ticker))}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-fog-pink hover:underline"
@@ -651,6 +652,7 @@ function Catalysts({ data }: { data: Dashboard }) {
 function RecentSignals({ data }: { data: Dashboard }) {
   const sigs = data.recent_signals.slice(0, 20);
   if (sigs.length === 0) return null;
+  const exchangeByTicker = new Map(data.cards.map((c) => [c.ticker, c.exchange ?? null]));
   return (
     <section>
       <SectionHeader
@@ -682,7 +684,7 @@ function RecentSignals({ data }: { data: Dashboard }) {
                 <Dot tone={tone} pulse={s.severity === "red"} />
               </div>
               <a
-                href={googleFinanceUrl(s.ticker)}
+                href={googleFinanceUrl(s.ticker, exchangeByTicker.get(s.ticker))}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-bold text-sm w-20 hover:text-fog-pink"

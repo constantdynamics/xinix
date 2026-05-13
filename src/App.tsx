@@ -258,7 +258,7 @@ export function App() {
           <LimitsView data={data} onRefresh={refresh} />
         )}
         {tab === "backtest" && <BacktestView />}
-        {tab === "scores" && <ScoresView />}
+        {tab === "scores" && <ScoresView exchangeByTicker={data ? new Map(data.cards.map((c) => [c.ticker, c.exchange ?? null])) : undefined} />}
         {tab === "track-record" && <TrackRecordView />}
         {tab === "signal-log" && <SignalLogView />}
         {tab === "status" && <HealthView />}

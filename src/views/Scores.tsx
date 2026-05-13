@@ -100,7 +100,7 @@ async function fetchScores(mode: string): Promise<Payload> {
   return (await res.json()) as Payload;
 }
 
-export function ScoresView() {
+export function ScoresView({ exchangeByTicker }: { exchangeByTicker?: Map<string, string | null> }) {
   const [data, setData] = useState<Payload | null>(null);
   const [mode, setMode] = useState<"trader" | "investor">("trader");
   const [busy, setBusy] = useState(false);
@@ -290,6 +290,7 @@ export function ScoresView() {
           <ScoreCard
             key={r.ticker}
             row={r}
+            exchange={exchangeByTicker?.get(r.ticker) ?? null}
             expanded={expanded === r.ticker}
             onToggle={() =>
               setExpanded(expanded === r.ticker ? null : r.ticker)
@@ -303,10 +304,12 @@ export function ScoresView() {
 
 function ScoreCard({
   row,
+  exchange,
   expanded,
   onToggle,
 }: {
   row: ScoreRow;
+  exchange: string | null;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -327,7 +330,7 @@ function ScoreCard({
       >
         <Badge tone={ACTION_TONE[row.action]}>{row.action}</Badge>
         <a
-          href={googleFinanceUrl(row.ticker)}
+          href={googleFinanceUrl(row.ticker, exchange)}
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
