@@ -38,15 +38,16 @@ interface JobHealth {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   const sb = getServiceClient();
-  // Laatste ~1500 runs over 21 dagen — ruim genoeg om elke job zijn laatste
-  // run + history te geven, ook de dagelijkse die zelden draaien.
-  const since = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
+  // Ruim genoeg om elke job zijn laatste run + history te geven, ook de
+  // dagelijkse/wekelijkse die zelden draaien (poll-metals slaat het weekend
+  // over -> kan ~3 dagen geleden zijn). ~3000 runs ≈ de laatste ~7 dagen.
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const { data } = await sb
     .from("signal_runs")
     .select("job, started_at, finished_at, ok, message, metrics")
     .gte("started_at", since)
     .order("started_at", { ascending: false })
-    .limit(1500);
+    .limit(3000);
   const rows = (data ?? []) as RunRow[];
   const dayAgoMs = Date.now() - 24 * 60 * 60 * 1000;
 
