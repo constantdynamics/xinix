@@ -6,6 +6,7 @@ import { LimitsView } from "./views/Limits";
 import { BacktestView } from "./views/Backtest";
 import { ScoresView } from "./views/Scores";
 import { TrackRecordView } from "./views/TrackRecord";
+import { SignalLogView } from "./views/SignalLog";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, getToken, setToken } from "./api";
@@ -19,6 +20,7 @@ type Tab =
   | "limits"
   | "backtest"
   | "track-record"
+  | "signal-log"
   | "status"
   | "settings";
 
@@ -35,6 +37,7 @@ const TABS: TabDef[] = [
   { key: "limits", label: "Limieten", tone: "lime" },
   { key: "backtest", label: "Backtest", tone: "watch" },
   { key: "track-record", label: "Track record", tone: "orange" },
+  { key: "signal-log", label: "Signaallog", tone: "lime" },
   { key: "status", label: "Status", tone: "cyan" },
   { key: "settings", label: "Instellingen", tone: "neutral" },
 ];
@@ -47,6 +50,7 @@ const HELP_PAGE: Record<Tab, string> = {
   limits: "limits",
   backtest: "backtest",
   "track-record": "trackrecord",
+  "signal-log": "signaallog",
   status: "status",
   settings: "settings",
 };
@@ -211,6 +215,7 @@ export function App() {
         {tab === "backtest" && <BacktestView />}
         {tab === "scores" && <ScoresView />}
         {tab === "track-record" && <TrackRecordView />}
+        {tab === "signal-log" && <SignalLogView />}
         {tab === "status" && <HealthView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>

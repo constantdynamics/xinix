@@ -204,3 +204,29 @@ export async function fetchHealth(): Promise<Health> {
   if (!res.ok) throw new Error(`health ${res.status}`);
   return (await res.json()) as Health;
 }
+
+export interface SignalEpisode {
+  ticker: string;
+  sector: string;
+  peak_action: "STRONG_BUY" | "BUY";
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+  signal_days: number;
+  peak_score: number;
+  entry_price: number | null;
+  current_price: number | null;
+  return_pct: number | null;
+}
+
+export interface SignalLog {
+  episodes: SignalEpisode[];
+  as_of: string;
+  days_back: number;
+}
+
+export async function fetchSignalLog(days = 180): Promise<SignalLog> {
+  const res = await fetch(apiUrl(`/api/signal-log?days=${days}`));
+  if (!res.ok) throw new Error(`signal-log ${res.status}`);
+  return (await res.json()) as SignalLog;
+}
