@@ -11,7 +11,7 @@ import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, getToken, setToken } from "./api";
 import type { Dashboard } from "./types";
-import { Button, Pill, Input } from "./components/ui";
+import { Button, NavTab, Input, Skeleton, Dot } from "./components/ui";
 
 type Tab =
   | "dashboard"
@@ -27,19 +27,18 @@ type Tab =
 interface TabDef {
   key: Tab;
   label: string;
-  tone: "pink" | "lime" | "orange" | "cyan" | "neutral" | "watch" | "loss";
 }
 
 const TABS: TabDef[] = [
-  { key: "dashboard", label: "Dashboard", tone: "pink" },
-  { key: "scores", label: "Scores", tone: "lime" },
-  { key: "tickers", label: "Watchlist", tone: "cyan" },
-  { key: "limits", label: "Limieten", tone: "lime" },
-  { key: "backtest", label: "Backtest", tone: "watch" },
-  { key: "track-record", label: "Track record", tone: "orange" },
-  { key: "signal-log", label: "Signaallog", tone: "lime" },
-  { key: "status", label: "Status", tone: "cyan" },
-  { key: "settings", label: "Instellingen", tone: "neutral" },
+  { key: "dashboard", label: "Dashboard" },
+  { key: "scores", label: "Scores" },
+  { key: "tickers", label: "Watchlist" },
+  { key: "limits", label: "Limieten" },
+  { key: "backtest", label: "Backtest" },
+  { key: "track-record", label: "Track record" },
+  { key: "signal-log", label: "Signaallog" },
+  { key: "status", label: "Status" },
+  { key: "settings", label: "Instellingen" },
 ];
 
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
@@ -62,6 +61,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [tokenInput, setTokenInput] = useState(getToken() ?? "");
   const [showTokenBar, setShowTokenBar] = useState(false);
+  const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
 
   async function refresh() {
     try {
@@ -69,6 +69,7 @@ export function App() {
       const d = await fetchDashboard();
       setData(d);
       setError(null);
+      setLastFetchAt(Date.now());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -82,7 +83,7 @@ export function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Counts per tab — kleine cijfers naast pill-label
+  // Counts per tab — kleine cijfers naast tab-label
   const counts = useMemo<Partial<Record<Tab, number>>>(() => {
     if (!data) return {};
     return {
@@ -92,9 +93,32 @@ export function App() {
     };
   }, [data]);
 
+  // Urgentie-indicatoren — rode dot per tab waar iets vraagt om aandacht.
+  const urgent = useMemo<Partial<Record<Tab, boolean>>>(() => {
+    if (!data) return {};
+    const redCards = data.cards?.filter((c) => c.color === "red").length ?? 0;
+    const redSignals = data.recent_signals?.filter((s) => s.severity === "red").length ?? 0;
+    const failedJobs = new Set(
+      (data.run_log ?? []).filter((r) => r.ok === false).slice(0, 30).map((r) => r.job)
+    );
+    return {
+      dashboard: redCards > 0 || redSignals > 0,
+      status: failedJobs.size > 0,
+    };
+  }, [data]);
+
+  // Verse data: laat een groene dot pulseren ~3s nadat een refresh klaar is.
+  const [freshPulse, setFreshPulse] = useState(false);
+  useEffect(() => {
+    if (lastFetchAt == null) return;
+    setFreshPulse(true);
+    const id = setTimeout(() => setFreshPulse(false), 3000);
+    return () => clearTimeout(id);
+  }, [lastFetchAt]);
+
   return (
     <div className="min-h-screen bg-ink-1 text-neutral-100">
-      {/* Top bar — minimaal, dichter bij defog */}
+      {/* Top bar */}
       <header className="sticky top-0 z-30 border-b border-ink-5 bg-ink-1/95 backdrop-blur supports-[backdrop-filter]:bg-ink-1/70">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-4">
           <a
@@ -113,7 +137,11 @@ export function App() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             {data && (
-              <span className="hidden md:inline text-[11px] text-neutral-500 tabular">
+              <span
+                className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-neutral-500 tabular"
+                title="Tijd van laatste backend-snapshot"
+              >
+                <Dot tone={freshPulse ? "lime" : "neutral"} pulse={freshPulse} />
                 {new Date(data.generated_at).toLocaleString("nl-NL", {
                   hour: "2-digit",
                   minute: "2-digit",
@@ -152,18 +180,18 @@ export function App() {
           </div>
         </div>
 
-        {/* Pill nav — Defog-stijl filter-row */}
-        <div className="mx-auto max-w-7xl px-4 pb-3 flex gap-2 overflow-x-auto">
+        {/* Tab nav — onderlijn-stijl, horizontaal scrollbaar op mobiel */}
+        <div className="mx-auto max-w-7xl px-4 flex gap-0.5 overflow-x-auto scrollbar-thin">
           {TABS.map((t) => (
-            <Pill
+            <NavTab
               key={t.key}
-              tone={t.tone}
               active={tab === t.key}
               count={counts[t.key]}
+              urgent={urgent[t.key]}
               onClick={() => setTab(t.key)}
             >
               {t.label}
-            </Pill>
+            </NavTab>
           ))}
         </div>
 
@@ -202,8 +230,11 @@ export function App() {
             <span className="font-semibold">Fout:</span> {error}
           </div>
         )}
+        {/* Initial loading skeleton — alleen tonen als er nog geen data is */}
+        {loading && !data && !error && <DashboardSkeleton />}
+
         {tab === "dashboard" && data && (
-          <DashboardView data={data} onRefresh={refresh} />
+          <DashboardView data={data} onRefresh={refresh} onNavigate={setTab} />
         )}
         {tab === "settings" && <SettingsView data={data ?? undefined} />}
         {tab === "tickers" && data && (
@@ -228,6 +259,28 @@ export function App() {
           <span className="tabular">v2 · {new Date().getFullYear()}</span>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-24" rounded="xl" />
+        ))}
+      </div>
+      <div className="flex gap-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-8 w-20" rounded="full" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className="h-64" rounded="xl" />
+        ))}
+      </div>
     </div>
   );
 }

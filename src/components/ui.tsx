@@ -19,6 +19,8 @@ function cx(...parts: Array<string | false | null | undefined>): string {
 }
 
 // ─── Card ──────────────────────────────────────────────────────────────
+// Default border bump naar ink-6 + subtiele inner ring zodat kaarten op de
+// donkere achtergrond beter van elkaar te onderscheiden zijn.
 export function Card({
   className,
   hover,
@@ -30,14 +32,226 @@ export function Card({
     <div
       {...rest}
       className={cx(
-        "rounded-2xl bg-ink-2 border border-ink-5 shadow-sink",
-        hover && "transition hover:bg-ink-3 hover:border-ink-6",
+        "rounded-2xl bg-ink-2 border border-ink-6 ring-1 ring-inset ring-white/[0.03] shadow-sink",
+        hover && "transition hover:bg-ink-3 hover:border-fog-pink/30",
         glow === "pink" && "shadow-glow",
         glow === "lime" && "shadow-glow-lime",
         className
       )}
     >
       {children}
+    </div>
+  );
+}
+
+// ─── NavTab — tabbalk met fog-pink underline ──────────────────────────
+// Gebruikt voor de hoofdnavigatie. Onderscheidend van Pill (filter): hier
+// is alleen één tegelijk actief, en de actieve heeft een onderbalk i.p.v.
+// een fill. Optionele urgent-indicator (rode dot) en count-chip.
+export function NavTab({
+  active,
+  onClick,
+  children,
+  count,
+  urgent,
+  title,
+}: {
+  active?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+  count?: number;
+  urgent?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={cx(
+        "relative inline-flex items-center gap-1.5 px-3 sm:px-3.5 h-10 text-sm font-semibold whitespace-nowrap select-none transition-colors",
+        // Bottom-border alleen op active, anders transparent zodat de
+        // hoogte gelijk blijft (geen layout-jitter bij toggle).
+        active
+          ? "text-neutral-50 border-b-2 border-fog-pink"
+          : "text-neutral-400 hover:text-neutral-100 border-b-2 border-transparent"
+      )}
+    >
+      <span>{children}</span>
+      {count != null && count > 0 && (
+        <span
+          className={cx(
+            "tabular text-[10px] px-1.5 py-0.5 rounded-md",
+            active ? "bg-fog-pink/15 text-fog-pink" : "bg-ink-3 text-neutral-500"
+          )}
+        >
+          {count > 999 ? "999+" : count}
+        </span>
+      )}
+      {urgent && (
+        <span
+          className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-fog-loss animate-pulse-soft"
+          title="Iets vraagt aandacht"
+        />
+      )}
+    </button>
+  );
+}
+
+// ─── Skeleton — grijze placeholder voor initial loading ───────────────
+export function Skeleton({
+  className,
+  rounded = "md",
+}: {
+  className?: string;
+  rounded?: "sm" | "md" | "lg" | "xl" | "full";
+}) {
+  const r = {
+    sm: "rounded-sm",
+    md: "rounded-md",
+    lg: "rounded-lg",
+    xl: "rounded-2xl",
+    full: "rounded-full",
+  }[rounded];
+  return (
+    <div
+      className={cx(
+        "bg-ink-3/60 animate-pulse-soft",
+        r,
+        className
+      )}
+    />
+  );
+}
+
+// ─── Sparkline — kleine SVG-trend voor recente runs ───────────────────
+// values 0..1 (bv. ok-rate per dag). Toont een lijn + subtiele fill.
+// Geen assen, geen labels: het gaat om de vorm op de eerste indruk.
+export function Sparkline({
+  values,
+  width = 60,
+  height = 16,
+  tone = "lime",
+  className,
+}: {
+  values: number[];
+  width?: number;
+  height?: number;
+  tone?: "lime" | "loss" | "watch" | "pink";
+  className?: string;
+}) {
+  if (values.length < 2) return null;
+  const colorMap = {
+    lime: "#a7ff1f",
+    loss: "#ff1a1a",
+    watch: "#ffd400",
+    pink: "#ff1f8f",
+  };
+  const stroke = colorMap[tone];
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const step = width / (values.length - 1);
+  const pts = values.map((v, i) => {
+    const x = i * step;
+    const y = height - ((v - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const linePath = `M ${pts.join(" L ")}`;
+  const fillPath = `M 0,${height} L ${pts.join(" L ")} L ${width},${height} Z`;
+  return (
+    <svg
+      width={width}
+      height={height}
+      className={cx("overflow-visible block", className)}
+      role="img"
+      aria-label="Trend"
+    >
+      <path d={fillPath} fill={stroke} fillOpacity={0.12} />
+      <path d={linePath} fill="none" stroke={stroke} strokeWidth={1.25} strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ─── MedalPills — compacte goud/zilver/brons indicatoren ──────────────
+// Vervangt de losse emoji-rij; schaalt beter op kleine kaarten en is
+// consistent met de andere badge-stijl.
+export function MedalPills({
+  gold,
+  silver,
+  bronze,
+  size = "sm",
+}: {
+  gold?: number | null;
+  silver?: number | null;
+  bronze?: number | null;
+  size?: "xs" | "sm";
+}) {
+  const items: Array<{ count: number; label: string; cls: string }> = [];
+  if (gold && gold > 0)
+    items.push({ count: gold, label: "G", cls: "bg-fog-watch/15 text-fog-watch border-fog-watch/40" });
+  if (silver && silver > 0)
+    items.push({ count: silver, label: "S", cls: "bg-neutral-400/15 text-neutral-300 border-neutral-400/40" });
+  if (bronze && bronze > 0)
+    items.push({ count: bronze, label: "B", cls: "bg-[#cd7f32]/15 text-[#cd7f32] border-[#cd7f32]/40" });
+  if (items.length === 0) return null;
+  const sizeCls = size === "xs" ? "h-4 px-1 text-[9px]" : "h-5 px-1.5 text-[10px]";
+  return (
+    <span className="inline-flex items-center gap-1" title="Medailleklassement (5y koers-runs)">
+      {items.map((it) => (
+        <span
+          key={it.label}
+          className={cx(
+            "inline-flex items-center gap-0.5 rounded-md border font-bold tabular",
+            sizeCls,
+            it.cls
+          )}
+        >
+          <span>{it.count}</span>
+          <span className="opacity-70">{it.label}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// ─── Modal — gedeelde popup-shell ─────────────────────────────────────
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  size = "md",
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: ReactNode;
+  children: ReactNode;
+  size?: "sm" | "md" | "lg";
+}) {
+  if (!open) return null;
+  const sizeCls = { sm: "max-w-md", md: "max-w-2xl", lg: "max-w-4xl" }[size];
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-up"
+      onClick={onClose}
+    >
+      <div
+        className={cx("w-full bg-ink-2 border border-ink-6 ring-1 ring-inset ring-white/[0.04] rounded-2xl shadow-2xl", sizeCls)}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-ink-5">
+          <div className="font-bold text-neutral-100 truncate">{title}</div>
+          <button
+            onClick={onClose}
+            className="text-neutral-500 hover:text-neutral-100 text-lg leading-none px-2"
+            title="Sluit"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="p-4 max-h-[70vh] overflow-auto">{children}</div>
+      </div>
     </div>
   );
 }

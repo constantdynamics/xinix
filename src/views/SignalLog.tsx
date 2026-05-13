@@ -94,16 +94,32 @@ export function SignalLogView() {
     if (filterStatus === "afgesloten") list = list.filter((e) => !e.is_active);
     if (filterSector !== "all") list = list.filter((e) => e.sector === filterSector);
 
+    // Nullable kolommen: null altijd onderaan, ongeacht sort-richting.
+    // Anders zou ascending sort alle "—" bovenaan zetten wat misleidend is
+    // (suggereert dat die rijen "kleiner" zijn dan de echte waarden).
     list = [...list].sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      if (sortKey === "return_pct") {
+        const an = a.return_pct == null, bn = b.return_pct == null;
+        if (an && bn) return 0;
+        if (an) return 1;
+        if (bn) return -1;
+        return (a.return_pct! - b.return_pct!) * dir;
+      }
+      if (sortKey === "peak_score") {
+        const an = a.peak_score == null, bn = b.peak_score == null;
+        if (an && bn) return 0;
+        if (an) return 1;
+        if (bn) return -1;
+        return (a.peak_score! - b.peak_score!) * dir;
+      }
       let va: number | string, vb: number | string;
-      if (sortKey === "return_pct") { va = a.return_pct ?? -9999; vb = b.return_pct ?? -9999; }
-      else if (sortKey === "signal_days") { va = a.signal_days; vb = b.signal_days; }
-      else if (sortKey === "peak_score") { va = a.peak_score ?? 0; vb = b.peak_score ?? 0; }
+      if (sortKey === "signal_days") { va = a.signal_days; vb = b.signal_days; }
       else if (sortKey === "start_date") { va = a.start_date; vb = b.start_date; }
       else if (sortKey === "end_date") { va = a.end_date; vb = b.end_date; }
       else { va = a.ticker; vb = b.ticker; }
-      if (va < vb) return sortDir === "asc" ? -1 : 1;
-      if (va > vb) return sortDir === "asc" ? 1 : -1;
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
       return 0;
     });
     return list;

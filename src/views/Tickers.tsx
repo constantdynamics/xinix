@@ -255,6 +255,34 @@ export function TickersView({
   const [wlValidating, setWlValidating] = useState(false);
   const [wlBulkBusy, setWlBulkBusy] = useState(false);
 
+  // Watchlist paginatie + zoek — bij grote lijsten (>500) rendert React de
+  // hele tabel pijnlijk traag. Page-slicing houdt het responsief.
+  const [wlQuery, setWlQuery] = useState("");
+  const [wlPage, setWlPage] = useState(0);
+  const PAGE_SIZE = 100;
+
+  const wlFiltered = useMemo(() => {
+    const q = wlQuery.trim().toLowerCase();
+    if (!q) return data.cards;
+    return data.cards.filter(
+      (c) =>
+        c.ticker.toLowerCase().includes(q) ||
+        c.company.toLowerCase().includes(q)
+    );
+  }, [data.cards, wlQuery]);
+
+  // Reset naar pagina 0 als de filter de huidige pagina overbodig maakt.
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(wlFiltered.length / PAGE_SIZE) - 1);
+    if (wlPage > maxPage) setWlPage(0);
+  }, [wlFiltered.length, wlPage]);
+
+  const wlPageRows = useMemo(
+    () => wlFiltered.slice(wlPage * PAGE_SIZE, (wlPage + 1) * PAGE_SIZE),
+    [wlFiltered, wlPage]
+  );
+  const wlTotalPages = Math.max(1, Math.ceil(wlFiltered.length / PAGE_SIZE));
+
   useEffect(() => {
     // "biotech" is een placeholder fallback; inferSector() na de lookup
     // bepaalt de echte sector.
@@ -1119,7 +1147,15 @@ export function TickersView({
         <SectionHeader
           eyebrow="Bewaakt"
           title="Huidige watchlist"
-          subtitle={`${data.cards.length} tickers`}
+          subtitle={`${data.cards.length} tickers${wlQuery ? ` · ${wlFiltered.length} match` : ""}`}
+          aside={
+            <Input
+              placeholder="Zoek ticker of bedrijf…"
+              value={wlQuery}
+              onChange={(e) => setWlQuery(e.target.value)}
+              className="w-48 sm:w-64 h-8 text-xs"
+            />
+          }
         />
 
         {/* Cleanup toolbar */}
@@ -1228,19 +1264,19 @@ export function TickersView({
                     <input
                       type="checkbox"
                       checked={
-                        data.cards.length > 0 &&
-                        data.cards.every((c) => wlSelected.has(c.ticker))
+                        wlFiltered.length > 0 &&
+                        wlFiltered.every((c) => wlSelected.has(c.ticker))
                       }
                       onChange={() => {
-                        if (data.cards.every((c) => wlSelected.has(c.ticker))) {
+                        if (wlFiltered.every((c) => wlSelected.has(c.ticker))) {
                           setWlSelected(new Set());
                         } else {
                           setWlSelected(
-                            new Set(data.cards.map((c) => c.ticker))
+                            new Set(wlFiltered.map((c) => c.ticker))
                           );
                         }
                       }}
-                      title="Selecteer alles"
+                      title={wlQuery ? `Selecteer ${wlFiltered.length} resultaten` : "Selecteer alles"}
                     />
                   </th>
                   <th className="text-left p-3 font-semibold">Sector</th>
@@ -1254,7 +1290,7 @@ export function TickersView({
                 </tr>
               </thead>
               <tbody>
-                {data.cards.map((c) => {
+                {wlPageRows.map((c) => {
                   const isSelected = wlSelected.has(c.ticker);
                   const isUnrecognized = wlUnrecognized?.has(c.ticker) ?? false;
                   const isDuplicate = wlDuplicates.has(c.ticker);
@@ -1345,9 +1381,63 @@ export function TickersView({
                     </tr>
                   );
                 })}
+                {wlPageRows.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="p-8 text-center text-neutral-500 text-sm">
+                      {wlQuery ? `Geen tickers gevonden voor "${wlQuery}".` : "Watchlist is leeg."}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
+          {wlTotalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-ink-5 bg-ink-1/40 text-xs">
+              <span className="text-neutral-500 tabular">
+                {wlPage * PAGE_SIZE + 1}–{Math.min((wlPage + 1) * PAGE_SIZE, wlFiltered.length)}{" "}
+                van {wlFiltered.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setWlPage(0)}
+                  disabled={wlPage === 0}
+                  title="Eerste pagina"
+                >
+                  «
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setWlPage((p) => Math.max(0, p - 1))}
+                  disabled={wlPage === 0}
+                >
+                  ‹
+                </Button>
+                <span className="px-2 tabular text-neutral-300">
+                  {wlPage + 1} / {wlTotalPages}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setWlPage((p) => Math.min(wlTotalPages - 1, p + 1))}
+                  disabled={wlPage >= wlTotalPages - 1}
+                >
+                  ›
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setWlPage(wlTotalPages - 1)}
+                  disabled={wlPage >= wlTotalPages - 1}
+                  title="Laatste pagina"
+                >
+                  »
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       </section>
     </div>

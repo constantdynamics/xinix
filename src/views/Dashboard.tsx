@@ -15,6 +15,7 @@ import {
   DotBar,
   MiniDelta,
   Thermometer,
+  MedalPills,
 } from "../components/ui";
 
 type ToneByColor = "lime" | "watch" | "orange" | "loss";
@@ -27,8 +28,14 @@ const COLOR_TONE: Record<CardData["color"], ToneByColor> = {
 const COLOR_LABEL: Record<CardData["color"], string> = {
   red: "Hot",
   orange: "Warm",
-  yellow: "Pre",
+  yellow: "Watchlist",
   white: "Rust",
+};
+const COLOR_TIP: Record<CardData["color"], string> = {
+  red: "Hot — meerdere harde signalen of catalyst dichtbij",
+  orange: "Warm — één of meer actieve signalen",
+  yellow: "Watchlist — pre-signaal: zacht-positief setup, geen trigger",
+  white: "Rust — geen actieve signalen of catalysts",
 };
 // Heatmap: tile bg subtiel gekleurd op basis van c.color zodat de
 // "heetheid" direct visueel afleesbaar is zonder badge. Border krijgt
@@ -56,7 +63,18 @@ const JOBS = [
 
 type ColorFilter = "all" | "red" | "orange" | "yellow" | "white";
 
-export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void }) {
+type NavTarget =
+  | "dashboard"
+  | "scores"
+  | "tickers"
+  | "limits"
+  | "backtest"
+  | "track-record"
+  | "signal-log"
+  | "status"
+  | "settings";
+
+export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh: () => void; onNavigate?: (t: NavTarget) => void }) {
   const [filter, setFilter] = useState<ColorFilter>("all");
   const [tilePrefs, setTilePrefs] = useState<TilePrefs>(loadTilePrefs);
   // Re-load prefs wanneer de gebruiker de Settings tab heeft opengehad
@@ -108,8 +126,39 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
     (s) => s.severity === "red"
   ).length;
 
+  // Compacte status-strip: groepeer recente run_log op job, vlag jobs met
+  // een falende laatste run. Bron is hetzelfde dashboard-payload — geen
+  // extra API-call nodig.
+  const failedJobs = useMemo(() => {
+    const seen = new Map<string, { ok: boolean | null; msg: string | null }>();
+    for (const r of data.run_log ?? []) {
+      if (seen.has(r.job)) continue;
+      seen.set(r.job, { ok: r.ok, msg: r.message });
+    }
+    const failing: string[] = [];
+    for (const [job, st] of seen) if (st.ok === false) failing.push(job);
+    return failing;
+  }, [data.run_log]);
+
   return (
     <div className="space-y-8">
+      {failedJobs.length > 0 && (
+        <button
+          onClick={() => onNavigate?.("status")}
+          className="w-full text-left rounded-xl border border-fog-loss/40 bg-fog-loss/10 hover:bg-fog-loss/15 transition px-4 py-2.5 flex items-center gap-3"
+        >
+          <Dot tone="loss" pulse />
+          <span className="text-sm font-semibold text-fog-loss">
+            {failedJobs.length} job{failedJobs.length > 1 ? "s" : ""} hebben fouten
+          </span>
+          <span className="hidden sm:inline text-xs text-neutral-400 truncate">
+            {failedJobs.slice(0, 4).join(" · ")}
+            {failedJobs.length > 4 && ` +${failedJobs.length - 4}`}
+          </span>
+          <span className="ml-auto text-xs text-fog-loss font-bold">Bekijk Status →</span>
+        </button>
+      )}
+
       {/* KPI rij */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat
@@ -149,6 +198,7 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
           active={filter === "all"}
           count={data.cards.length}
           onClick={() => setFilter("all")}
+          title="Toon alle tickers"
         >
           Alles
         </Pill>
@@ -157,6 +207,7 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
           active={filter === "red"}
           count={counts.red}
           onClick={() => setFilter("red")}
+          title={COLOR_TIP.red}
         >
           Hot
         </Pill>
@@ -165,6 +216,7 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
           active={filter === "orange"}
           count={counts.orange}
           onClick={() => setFilter("orange")}
+          title={COLOR_TIP.orange}
         >
           Warm
         </Pill>
@@ -173,14 +225,16 @@ export function DashboardView({ data }: { data: Dashboard; onRefresh: () => void
           active={filter === "yellow"}
           count={counts.yellow}
           onClick={() => setFilter("yellow")}
+          title={COLOR_TIP.yellow}
         >
-          Pre
+          Watchlist
         </Pill>
         <Pill
           tone="lime"
           active={filter === "white"}
           count={counts.white}
           onClick={() => setFilter("white")}
+          title={COLOR_TIP.white}
         >
           Rust
         </Pill>
@@ -266,7 +320,7 @@ function CardGrid({ cards, prefs }: { cards: CardData[]; prefs: TilePrefs }) {
     );
   }
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 items-start">
       {cards.map((c) => (
         <CardTile key={c.ticker} card={c} prefs={prefs} />
       ))}
@@ -315,7 +369,11 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
                 {SECTOR_LABEL[c.sector]}
               </Badge>
             )}
-            {prefs.showPhase && <Badge tone={tone}>{COLOR_LABEL[c.color]}</Badge>}
+            {prefs.showPhase && (
+              <span title={COLOR_TIP[c.color]}>
+                <Badge tone={tone}>{COLOR_LABEL[c.color]}</Badge>
+              </span>
+            )}
             {prefs.showActiveSignalCount && c.active_signals > 0 && (
               <span
                 className="inline-flex items-center gap-1 rounded-full bg-fog-pink/15 border border-fog-pink/30 px-2 py-0.5 text-[10px] font-bold text-fog-pink tabular"
@@ -331,31 +389,21 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
               </span>
             )}
           </div>
-          <div className="text-xs text-neutral-400 truncate mt-0.5">
+          <div className="text-xs text-neutral-400 truncate mt-0.5" title={c.company}>
             {c.company}
           </div>
-          {prefs.showMedals &&
-            (c.medal_gold ?? 0) + (c.medal_silver ?? 0) + (c.medal_bronze ?? 0) > 0 && (
-              <div
-                className="text-lg tabular mt-1 whitespace-nowrap leading-none"
-                title="Medailleklassement (5y koers-runs)"
-              >
-                {(c.medal_gold ?? 0) > 0 && <span className="text-fog-watch">🥇{c.medal_gold} </span>}
-                {(c.medal_silver ?? 0) > 0 && <span className="text-neutral-300">🥈{c.medal_silver} </span>}
-                {(c.medal_bronze ?? 0) > 0 && <span className="text-[#cd7f32]">🥉{c.medal_bronze}</span>}
-              </div>
-            )}
+          {prefs.showMedals && (
+            <div className="mt-1.5">
+              <MedalPills
+                gold={c.medal_gold}
+                silver={c.medal_silver}
+                bronze={c.medal_bronze}
+                size="sm"
+              />
+            </div>
+          )}
         </div>
-        {prefs.showScore && c.goud_score != null && (
-          <div className="text-right shrink-0">
-            <div className="text-[10px] uppercase tracking-wider text-neutral-400">
-              Score
-            </div>
-            <div className="text-lg font-bold tabular text-neutral-100">
-              {c.goud_score}
-            </div>
-          </div>
-        )}
+        {prefs.showScore && c.goud_score != null && <ScoreRing value={c.goud_score} />}
       </div>
 
       {prefs.showDetailMeta && detailMeta && (
@@ -382,6 +430,9 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
           gradient lime->yellow->orange->red. */}
       {showAnyRange && (
         <div className="rounded-lg border border-ink-5 bg-ink-2/40 p-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-neutral-500 mb-1.5 text-center">
+            Positie t.o.v. range
+          </div>
           <div className="flex items-start justify-around gap-2">
             {prefs.showRange90d && has90d && (
               <Thermometer
@@ -430,8 +481,29 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
               Catalyst
             </span>
             {c.days_to_next_catalyst != null && (
-              <span className="ml-auto text-xs tabular text-neutral-400">
-                {c.days_to_next_catalyst}d
+              <span
+                className={`ml-auto text-xs tabular font-bold ${
+                  c.days_to_next_catalyst < 0
+                    ? "text-neutral-500"
+                    : c.days_to_next_catalyst < 7
+                    ? "text-fog-loss"
+                    : c.days_to_next_catalyst < 14
+                    ? "text-fog-warn"
+                    : "text-neutral-300"
+                }`}
+                title={
+                  c.days_to_next_catalyst < 0
+                    ? "Catalyst-datum is verstreken"
+                    : c.days_to_next_catalyst < 7
+                    ? "<7 dagen — zeer dichtbij"
+                    : c.days_to_next_catalyst < 14
+                    ? "<14 dagen — let op"
+                    : "ruim de tijd"
+                }
+              >
+                {c.days_to_next_catalyst < 0
+                  ? `${-c.days_to_next_catalyst}d terug`
+                  : `${c.days_to_next_catalyst}d`}
               </span>
             )}
           </div>
@@ -495,9 +567,9 @@ function Catalysts({ data }: { data: Dashboard }) {
       />
       <Card className="overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/40">
+          <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/40 sticky top-0">
             <tr>
-              <th className="text-left p-3 font-semibold">Datum</th>
+              <th className="text-left p-3 font-semibold">Wanneer</th>
               <th className="text-left p-3 font-semibold">Ticker</th>
               <th className="text-left p-3 font-semibold">Type</th>
               <th className="text-left p-3 font-semibold">Omschrijving</th>
@@ -512,19 +584,33 @@ function Catalysts({ data }: { data: Dashboard }) {
                       86400000
                   )
                 : null;
+              const urgencyCls =
+                days == null
+                  ? "text-neutral-300"
+                  : days < 0
+                  ? "text-neutral-500"
+                  : days < 7
+                  ? "text-fog-loss"
+                  : days < 14
+                  ? "text-fog-warn"
+                  : "text-neutral-100";
               return (
                 <tr
                   key={c.id}
                   className="border-t border-ink-5 hover:bg-ink-3/40"
                 >
                   <td className="p-3 whitespace-nowrap">
-                    <div className="tabular text-neutral-200">
-                      {c.expected_date}
-                    </div>
-                    {days != null && (
-                      <div className="text-[10px] tabular text-neutral-500">
-                        {days >= 0 ? `over ${days}d` : `${-days}d geleden`}
-                      </div>
+                    {days != null ? (
+                      <>
+                        <div className={`tabular font-bold ${urgencyCls}`}>
+                          {days < 0 ? `${-days}d terug` : days === 0 ? "vandaag" : `over ${days}d`}
+                        </div>
+                        <div className="text-[10px] tabular text-neutral-500">
+                          {c.expected_date}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-neutral-500 italic text-xs">datum onbekend</div>
                     )}
                   </td>
                   <td className="p-3 font-bold">
@@ -574,11 +660,17 @@ function RecentSignals({ data }: { data: Dashboard }) {
               : s.severity === "orange"
               ? "orange"
               : "watch";
+          const borderCls =
+            s.severity === "red"
+              ? "border-l-4 border-l-fog-loss"
+              : s.severity === "orange"
+              ? "border-l-4 border-l-fog-warn"
+              : "border-l-4 border-l-fog-watch";
           return (
             <Card
               key={s.id}
               hover
-              className="p-3 flex items-start gap-3"
+              className={`p-3 pl-3 flex items-start gap-3 ${borderCls}`}
             >
               <div className="flex flex-col items-center gap-1 pt-0.5">
                 <Dot tone={tone} pulse={s.severity === "red"} />
@@ -617,6 +709,43 @@ function RecentSignals({ data }: { data: Dashboard }) {
         })}
       </div>
     </section>
+  );
+}
+
+// Score-ring: cirkelvormige progress 0..100, kleur volgt waarde
+// (rood/oranje/geel/lime). Maakt de score in één blik leesbaar zonder
+// het getal te lezen.
+function ScoreRing({ value }: { value: number }) {
+  const v = Math.max(0, Math.min(100, value));
+  const r = 18;
+  const c = 2 * Math.PI * r;
+  const dash = (v / 100) * c;
+  const color =
+    v >= 80 ? "#a7ff1f" : v >= 60 ? "#ffd400" : v >= 40 ? "#ff8c00" : "#ff5a3a";
+  return (
+    <div
+      className="shrink-0 relative flex items-center justify-center"
+      style={{ width: 44, height: 44 }}
+      title={`Score ${v}/100`}
+    >
+      <svg width={44} height={44} className="-rotate-90">
+        <circle cx={22} cy={22} r={r} stroke="#262626" strokeWidth={3} fill="none" />
+        <circle
+          cx={22}
+          cy={22}
+          r={r}
+          stroke={color}
+          strokeWidth={3}
+          fill="none"
+          strokeDasharray={`${dash} ${c}`}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+        <span className="text-[14px] font-bold tabular text-neutral-50">{value}</span>
+        <span className="text-[7px] uppercase tracking-wider text-neutral-500 mt-0.5">score</span>
+      </div>
+    </div>
   );
 }
 

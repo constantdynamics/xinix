@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchHealth } from "../api";
-import type { Health, HealthJob } from "../types";
-import { Card, Button, SectionHeader, Dot, Badge } from "../components/ui";
+import type { Health, HealthJob, HealthRun } from "../types";
+import { Card, Button, SectionHeader, Dot, Badge, Modal, Sparkline } from "../components/ui";
 
 // Bekende doorlopende jobs: label, verwacht interval in minuten, korte uitleg.
 // Onbekende jobs (niet in deze map) worden generiek getoond.
@@ -86,11 +86,18 @@ function humanizeMessage(job: string, msg: string | null): string | null {
   return msg;
 }
 
+interface RunDetail {
+  job: string;
+  jobLabel: string;
+  run: HealthRun;
+}
+
 export function HealthView() {
   const [data, setData] = useState<Health | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [onlyProblems, setOnlyProblems] = useState(false);
+  const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
 
   async function load() {
     try {
@@ -233,17 +240,29 @@ export function HealthView() {
                   )}
                   {j.recent.length > 0 && (
                     <div className="mt-2.5">
-                      <div className="text-[10px] uppercase tracking-wider text-neutral-600 mb-1">
-                        laatste {j.recent.length} runs (links = oudst)
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-[10px] uppercase tracking-wider text-neutral-600">
+                          laatste {j.recent.length} runs (klik voor details)
+                        </div>
+                        {/* Sparkline ok-rate per run (1 = ok, 0 = fail) */}
+                        {j.recent.length >= 3 && (
+                          <Sparkline
+                            values={[...j.recent].reverse().map((r) => (r.ok === true ? 1 : r.ok === false ? 0 : 0.5))}
+                            tone={j.recent.some((r) => r.ok === false) ? "loss" : "lime"}
+                            width={80}
+                            height={14}
+                          />
+                        )}
                       </div>
                       <div className="flex gap-0.5 flex-wrap">
                         {[...j.recent].reverse().map((r, i) => (
-                          <span
+                          <button
                             key={i}
-                            className={`inline-block w-3 h-4 rounded-[2px] ${
-                              r.ok === true ? "bg-fog-lime/70" : r.ok === false ? "bg-fog-loss/80" : "bg-neutral-600"
+                            onClick={() => setRunDetail({ job: j.job, jobLabel: meta?.label ?? j.job, run: r })}
+                            className={`inline-block w-3 h-4 rounded-[2px] hover:ring-1 hover:ring-fog-pink transition ${
+                              r.ok === true ? "bg-fog-lime/70 hover:bg-fog-lime" : r.ok === false ? "bg-fog-loss/80 hover:bg-fog-loss" : "bg-neutral-600 hover:bg-neutral-500"
                             }`}
-                            title={`${new Date(r.started_at).toLocaleString("nl-NL")}\n${r.ok === true ? "ok" : r.ok === false ? "FOUT" : "onbekend"}${r.message ? `\n${r.message}` : ""}`}
+                            title={`${new Date(r.started_at).toLocaleString("nl-NL")} — klik voor details`}
                           />
                         ))}
                       </div>
@@ -260,6 +279,65 @@ export function HealthView() {
           </Card>
         )}
       </div>
+
+      <Modal
+        open={runDetail != null}
+        onClose={() => setRunDetail(null)}
+        title={
+          runDetail ? (
+            <div className="flex items-center gap-2">
+              <Dot tone={runDetail.run.ok === true ? "lime" : runDetail.run.ok === false ? "loss" : "neutral"} />
+              <span>{runDetail.jobLabel}</span>
+              <span className="font-mono text-[10px] text-neutral-500">{runDetail.job}</span>
+            </div>
+          ) : null
+        }
+      >
+        {runDetail && (
+          <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500">Gestart</div>
+                <div className="tabular text-neutral-200 mt-0.5">
+                  {new Date(runDetail.run.started_at).toLocaleString("nl-NL")}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500">Geëindigd</div>
+                <div className="tabular text-neutral-200 mt-0.5">
+                  {runDetail.run.finished_at
+                    ? new Date(runDetail.run.finished_at).toLocaleString("nl-NL")
+                    : <span className="text-neutral-500 italic">loopt nog</span>}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500">Resultaat</div>
+                <div className="mt-0.5">
+                  {runDetail.run.ok === true && <Badge tone="lime">OK</Badge>}
+                  {runDetail.run.ok === false && <Badge tone="loss">FOUT</Badge>}
+                  {runDetail.run.ok == null && <Badge tone="neutral">onbekend</Badge>}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500">Duur</div>
+                <div className="tabular text-neutral-200 mt-0.5">
+                  {runDetail.run.finished_at
+                    ? `${Math.round((new Date(runDetail.run.finished_at).getTime() - new Date(runDetail.run.started_at).getTime()) / 1000)}s`
+                    : "—"}
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">Volledige bericht</div>
+              <pre className={`text-[11px] font-mono whitespace-pre-wrap break-words rounded-md p-3 ${
+                runDetail.run.ok === false ? "bg-fog-loss/10 text-fog-loss" : "bg-ink-1 text-neutral-300"
+              }`}>
+                {runDetail.run.message ?? "(geen bericht)"}
+              </pre>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
