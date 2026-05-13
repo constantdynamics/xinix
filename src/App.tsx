@@ -7,6 +7,7 @@ import { BacktestView } from "./views/Backtest";
 import { ScoresView } from "./views/Scores";
 import { TrackRecordView } from "./views/TrackRecord";
 import { SignalLogView } from "./views/SignalLog";
+import { ScansView } from "./views/Scans";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, getToken, setToken } from "./api";
@@ -21,6 +22,7 @@ type Tab =
   | "backtest"
   | "track-record"
   | "signal-log"
+  | "scans"
   | "status"
   | "settings";
 
@@ -37,6 +39,7 @@ const TABS: TabDef[] = [
   { key: "backtest", label: "Backtest" },
   { key: "track-record", label: "Track record" },
   { key: "signal-log", label: "Signaallog" },
+  { key: "scans", label: "Scans" },
   { key: "status", label: "Status" },
   { key: "settings", label: "Instellingen" },
 ];
@@ -50,6 +53,7 @@ const HELP_PAGE: Record<Tab, string> = {
   backtest: "backtest",
   "track-record": "trackrecord",
   "signal-log": "signaallog",
+  scans: "scans",
   status: "status",
   settings: "settings",
 };
@@ -261,6 +265,7 @@ export function App() {
         {tab === "scores" && <ScoresView exchangeByTicker={data ? new Map(data.cards.map((c) => [c.ticker, c.exchange ?? null])) : undefined} />}
         {tab === "track-record" && <TrackRecordView />}
         {tab === "signal-log" && <SignalLogView />}
+        {tab === "scans" && <ScansView />}
         {tab === "status" && <HealthView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>

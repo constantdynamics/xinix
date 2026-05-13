@@ -230,3 +230,37 @@ export async function fetchSignalLog(days = 180): Promise<SignalLog> {
   if (!res.ok) throw new Error(`signal-log ${res.status}`);
   return (await res.json()) as SignalLog;
 }
+
+export interface ScanTicker {
+  ticker: string;
+  company: string | null;
+  sector: string | null;
+  medal_gold: number | null;
+  medal_silver: number | null;
+  medal_bronze: number | null;
+  notes: string | null;
+  created_at: string;
+  exchange: string | null;
+  active: boolean | null;
+  source: "losers" | "bottoms" | "unknown";
+}
+
+export interface ScanRun {
+  job: string;
+  started_at: string;
+  finished_at: string | null;
+  ok: boolean | null;
+  message: string | null;
+  metrics: Record<string, unknown> | null;
+}
+
+export interface ScanResults {
+  tickers: ScanTicker[];
+  runs: { "scan-losers": ScanRun[]; "scan-bottoms": ScanRun[] };
+}
+
+export async function fetchScanResults(): Promise<ScanResults> {
+  const res = await fetch(apiUrl("/api/scan-results"));
+  if (!res.ok) throw new Error(`scan-results ${res.status}`);
+  return (await res.json()) as ScanResults;
+}
