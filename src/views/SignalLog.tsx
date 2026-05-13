@@ -9,17 +9,37 @@ type SortDir = "asc" | "desc";
 function fmt(iso: string): string {
   return new Date(iso).toLocaleDateString("nl-NL", { day: "2-digit", month: "2-digit", year: "2-digit" });
 }
-function retCls(v: number | null): string {
-  if (v == null) return "text-neutral-500";
-  return v >= 0 ? "text-fog-lime font-semibold" : "text-fog-loss font-semibold";
-}
-function retStr(v: number | null): string {
-  if (v == null) return "—";
-  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
-}
 function price(v: number | null): string {
   if (v == null) return "—";
   return v < 1 ? v.toFixed(4) : v < 10 ? v.toFixed(3) : v.toFixed(2);
+}
+
+// Visuele return-cel: kleine balk + %. Balk schaalt log: tot ±50% lineair,
+// daarboven afnemend zodat extreme winsten niet alles overschaduwen.
+function ReturnCell({ value }: { value: number | null }) {
+  if (value == null) return <span className="text-neutral-500 text-right block tabular">—</span>;
+  const pos = value >= 0;
+  const cls = pos ? "text-fog-lime" : "text-fog-loss";
+  const bg = pos ? "bg-fog-lime/60" : "bg-fog-loss/60";
+  // 50% → 50% breedte, 100% → ~67%, 200% → ~80%
+  const mag = Math.min(95, Math.abs(value) / (Math.abs(value) + 50) * 100);
+  return (
+    <div className="flex items-center justify-end gap-2 min-w-[110px]">
+      <div className="relative h-1.5 w-14 bg-ink-1/60 rounded-full overflow-hidden flex">
+        {/* Midden = 0%, links = negatief, rechts = positief */}
+        <div className="flex-1 flex justify-end">
+          {!pos && <span className={`${bg} h-full rounded-l-full`} style={{ width: `${mag}%` }} />}
+        </div>
+        <div className="w-px h-full bg-neutral-700" />
+        <div className="flex-1">
+          {pos && <span className={`${bg} h-full block rounded-r-full`} style={{ width: `${mag}%` }} />}
+        </div>
+      </div>
+      <span className={`tabular text-xs font-bold ${cls} w-12 text-right`}>
+        {pos ? "+" : ""}{value.toFixed(1)}%
+      </span>
+    </div>
+  );
 }
 
 const ACTION_CLS: Record<string, string> = {
@@ -39,7 +59,7 @@ export function SignalLogView() {
 
   // filters
   const [filterAction, setFilterAction] = useState<"all" | "STRONG_BUY" | "BUY">("all");
-  const [filterStatus, setFilterStatus] = useState<"all" | "actief" | "gestopt">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "lopend" | "afgesloten">("all");
   const [filterSector, setFilterSector] = useState<"all" | "biotech" | "mining" | "other">("all");
 
   // sort
@@ -70,8 +90,8 @@ export function SignalLogView() {
     if (!data) return [];
     let list = data.episodes;
     if (filterAction !== "all") list = list.filter((e) => e.peak_action === filterAction);
-    if (filterStatus === "actief") list = list.filter((e) => e.is_active);
-    if (filterStatus === "gestopt") list = list.filter((e) => !e.is_active);
+    if (filterStatus === "lopend") list = list.filter((e) => e.is_active);
+    if (filterStatus === "afgesloten") list = list.filter((e) => !e.is_active);
     if (filterSector !== "all") list = list.filter((e) => e.sector === filterSector);
 
     list = [...list].sort((a, b) => {
@@ -156,15 +176,16 @@ export function SignalLogView() {
         <div className="w-px h-4 bg-ink-5 hidden sm:block" />
 
         <div className="flex gap-1">
-          {(["all", "actief", "gestopt"] as const).map((v) => (
+          {(["all", "lopend", "afgesloten"] as const).map((v) => (
             <button
               key={v}
               onClick={() => setFilterStatus(v)}
               className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
                 filterStatus === v ? "bg-ink-4 text-neutral-200" : "text-neutral-500 hover:text-neutral-300"
               }`}
+              title={v === "lopend" ? "Algoritme geeft nu nog steeds BUY/STRONG_BUY" : v === "afgesloten" ? "Het BUY-signaal is inmiddels verdwenen" : ""}
             >
-              {v === "all" ? "Alles" : v.charAt(0).toUpperCase() + v.slice(1)}
+              {v === "all" ? "Alle" : v === "lopend" ? "Lopend" : "Afgesloten"}
             </button>
           ))}
         </div>
@@ -204,7 +225,7 @@ export function SignalLogView() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { label: "Episodes", value: summary.total.toString(), hint: "gefilterd" },
-            { label: "Actief", value: summary.active.toString(), hint: "nog lopend" },
+            { label: "Lopend", value: summary.active.toString(), hint: "signaal nog actief" },
             {
               label: "Gem. return",
               value: summary.mean != null ? `${summary.mean >= 0 ? "+" : ""}${summary.mean.toFixed(1)}%` : "—",
@@ -230,9 +251,9 @@ export function SignalLogView() {
 
       {/* Tabel */}
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[70vh]">
           <table className="w-full text-xs">
-            <thead className="bg-ink-3/50 text-[10px] uppercase tracking-wider text-neutral-500">
+            <thead className="bg-ink-3/80 backdrop-blur text-[10px] uppercase tracking-wider text-neutral-500 sticky top-0 z-10">
               <tr>
                 <th
                   className="p-2.5 text-left cursor-pointer select-none hover:text-neutral-200"
@@ -277,11 +298,11 @@ export function SignalLogView() {
                   </td>
                   <td className="p-2.5 text-right tabular text-neutral-400">{price(ep.entry_price)}</td>
                   <td className="p-2.5 text-right tabular text-neutral-300">{price(ep.current_price)}</td>
-                  <td className={`p-2.5 text-right tabular ${retCls(ep.return_pct)}`}>
-                    {retStr(ep.return_pct)}
+                  <td className="p-2.5">
+                    <ReturnCell value={ep.return_pct} />
                   </td>
-                  <td className="p-2.5 text-right tabular text-neutral-500">
-                    {ep.peak_score != null ? ep.peak_score.toFixed(3) : "—"}
+                  <td className="p-2.5 text-right tabular text-neutral-400">
+                    {ep.peak_score != null ? ep.peak_score.toFixed(2) : "—"}
                   </td>
                 </tr>
               ))}
