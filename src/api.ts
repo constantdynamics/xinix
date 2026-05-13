@@ -242,6 +242,8 @@ export interface ScanTicker {
   created_at: string;
   exchange: string | null;
   active: boolean | null;
+  buy_limit: number | null;
+  last_close: number | null;
   source: "losers" | "bottoms" | "unknown";
 }
 

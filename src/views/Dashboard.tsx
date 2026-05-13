@@ -554,7 +554,10 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
 }
 
 // RangeBar — horizontale balk waar de huidige koers zit tussen low en
-// high. Compactere variant van Thermometer, één regel per periode.
+// high. Kleur volgt de positie BINNEN de range (cheap → expensive),
+// niet "% boven low". Dat laatste kan voor 1Y en 5Y exact gelijk zijn
+// (zelfde low) terwijl de balk-positie wezenlijk verschilt — de kleur
+// moet die positie weerspiegelen.
 function RangeBar({
   label,
   low,
@@ -567,22 +570,28 @@ function RangeBar({
   current: number;
 }) {
   const range = high - low;
-  const pct = range > 0 ? Math.min(1, Math.max(0, (current - low) / range)) : 0;
+  // Niet clampen voor de kleur: koers BOVEN high (>1.0) is "duurder dan
+  // 1Y-top" en moet dus rood/oranje krijgen; clamp wel voor de balk-vulling.
+  const rawPct = range > 0 ? (current - low) / range : 0;
+  const pct = Math.min(1, Math.max(0, rawPct));
   const pctAboveLow = low > 0 ? ((current - low) / low) * 100 : 0;
+  // Kleur op basis van positie t.o.v. high (rawPct), niet boven-low:
+  // <30% = koopzone (lime), 30-70% = middenmoot (info), 70-95% = duur
+  // (warn), >=95% = at/over high (loss/pink).
   const tone =
-    pctAboveLow < 30
+    rawPct < 0.30
       ? "bg-fog-lime"
-      : pctAboveLow < 100
+      : rawPct < 0.70
       ? "bg-fog-info"
-      : pctAboveLow < 200
+      : rawPct < 0.95
       ? "bg-fog-warn"
       : "bg-fog-pink";
   const textTone =
-    pctAboveLow < 30
+    rawPct < 0.30
       ? "text-fog-lime"
-      : pctAboveLow < 100
+      : rawPct < 0.70
       ? "text-fog-info"
-      : pctAboveLow < 200
+      : rawPct < 0.95
       ? "text-fog-warn"
       : "text-fog-pink";
   function fmt(v: number) {

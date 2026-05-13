@@ -127,10 +127,22 @@ Deno.serve(runBackground("compute-extremes", async () => {
       const { error: e1 } = await sb.from("signal_price_summary").upsert({
         ticker, low_1y: oneY.low, high_1y: oneY.high, low_5y: fiveY.low, high_5y: fiveY.high, last_extremes_at: now.toISOString(),
       }, { onConflict: "ticker" });
-      const { error: e2 } = await sb.from("signal_tickers").update({
+      // Slimme buy_limit-default: 10% boven 5y-low. Alleen vullen als
+      // de gebruiker er nog geen heeft ingesteld (handmatige waarden
+      // overschrijven we niet).
+      const smartLimit = fiveY.low != null && fiveY.low > 0
+        ? Number((fiveY.low * 1.10).toFixed(fiveY.low < 1 ? 4 : fiveY.low < 10 ? 3 : 2))
+        : null;
+      const tickerUpdate: Record<string, unknown> = {
         medal_gold: medals.gold, medal_silver: medals.silver, medal_bronze: medals.bronze, medals_computed_at: now.toISOString(),
-      }).eq("ticker", ticker);
-      if (e1 || e2) { failed++; errors.push(`${ticker}: ${(e1?.message ?? e2?.message) ?? "?"}`); }
+      };
+      const { error: e2 } = await sb.from("signal_tickers").update(tickerUpdate).eq("ticker", ticker);
+      let e3: { message?: string } | null = null;
+      if (smartLimit != null) {
+        const { error } = await sb.from("signal_tickers").update({ buy_limit: smartLimit }).eq("ticker", ticker).is("buy_limit", null);
+        if (error) e3 = error;
+      }
+      if (e1 || e2 || e3) { failed++; errors.push(`${ticker}: ${(e1?.message ?? e2?.message ?? e3?.message) ?? "?"}`); }
       else updated++;
     } catch (e) {
       failed++;

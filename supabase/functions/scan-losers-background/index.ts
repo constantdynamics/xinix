@@ -77,7 +77,7 @@ function inferSector(name: string | null | undefined): "biotech" | "mining" | "o
   return "other";
 }
 
-interface LoserRow { yahoo: string; name: string; changePct: number | null; close: number | null; }
+interface LoserRow { yahoo: string; name: string; changePct: number | null; close: number | null; exch: string }
 async function fetchMarketLosers(market: string): Promise<LoserRow[]> {
   const body = {
     filter: [
@@ -116,7 +116,7 @@ async function fetchMarketLosers(market: string): Promise<LoserRow[]> {
     const changePct = typeof d[2] === "number" ? (d[2] as number) : null;
     const close = typeof d[3] === "number" ? (d[3] as number) : null;
     if (changePct != null && changePct >= 0) continue; // alleen dalers
-    out.push({ yahoo, name, changePct, close });
+    out.push({ yahoo, name, changePct, close, exch });
   }
   return out;
 }
@@ -220,7 +220,7 @@ Deno.serve(runBackground("scan-losers", async () => {
   const candidates = uniqueLosers.filter((l) => !existing.has(l.yahoo)).slice(0, MAX_CANDIDATES);
 
   // 3) Per kandidaat: 5y koers ophalen, medailles tellen.
-  const gems: Array<{ yahoo: string; name: string; sector: string; gold: number; silver: number; bronze: number; changePct: number | null }> = [];
+  const gems: Array<{ yahoo: string; name: string; sector: string; gold: number; silver: number; bronze: number; changePct: number | null; exch: string; low5y: number | null }> = [];
   let checked = 0;
   const yahooErrors: string[] = [];
   for (const c of candidates) {
@@ -234,7 +234,8 @@ Deno.serve(runBackground("scan-losers", async () => {
               || medals.gold >= MIN_GOLD_ALT
               || medals.silver >= MIN_SILVER_ALT;
       if (ok) {
-        gems.push({ yahoo: c.yahoo, name: c.name, sector: inferSector(c.name), ...medals, changePct: c.changePct });
+        const low5y = bars.length ? Math.min(...bars.map((b) => b.close)) : null;
+        gems.push({ yahoo: c.yahoo, name: c.name, sector: inferSector(c.name), ...medals, changePct: c.changePct, exch: c.exch, low5y });
       }
     } catch (e) {
       if (yahooErrors.length < 5) yahooErrors.push(`${c.yahoo}: ${e instanceof Error ? e.message : String(e)}`);
@@ -246,11 +247,23 @@ Deno.serve(runBackground("scan-losers", async () => {
   let added = 0;
   if (gems.length) {
     const nowIso = new Date().toISOString();
-    const rows = gems.map((g) => ({
-      ticker: g.yahoo, company: g.name, sector: g.sector, active: true,
-      medal_gold: g.gold, medal_silver: g.silver, medal_bronze: g.bronze, medals_computed_at: nowIso,
-      notes: `Auto-toegevoegd: biggest-loser-van-de-dag met ${g.gold}× goud + ${g.silver}× zilver (5y koers-runs)${g.changePct != null ? ` — dag ${g.changePct.toFixed(1)}%` : ""}.`,
-    }));
+    const rows = gems.map((g) => {
+      // Slimme initiële buy_limit: 10% boven 5y-low (zelfde formule als
+      // backfill voor handmatige tickers). Voor US-tickers slaan we de TV
+      // exchange-prefix op zodat Google-Finance links direct werken;
+      // suffix-tickers regelt googleFinanceUrl zelf via SUFFIX_TO_EXCHANGE.
+      const smartLimit = g.low5y != null && g.low5y > 0
+        ? Number((g.low5y * 1.10).toFixed(g.low5y < 1 ? 4 : g.low5y < 10 ? 3 : 2))
+        : null;
+      const exchange = g.yahoo.includes(".") ? null : g.exch;
+      return {
+        ticker: g.yahoo, company: g.name, sector: g.sector, active: true,
+        medal_gold: g.gold, medal_silver: g.silver, medal_bronze: g.bronze, medals_computed_at: nowIso,
+        exchange,
+        buy_limit: smartLimit,
+        notes: `Auto-toegevoegd: biggest-loser-van-de-dag met ${g.gold}× goud + ${g.silver}× zilver (5y koers-runs)${g.changePct != null ? ` — dag ${g.changePct.toFixed(1)}%` : ""}.`,
+      };
+    });
     const { error } = await sb.from("signal_tickers").upsert(rows, { onConflict: "ticker", ignoreDuplicates: false });
     if (!error) added = rows.length;
 

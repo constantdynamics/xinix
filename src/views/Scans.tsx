@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetchScanResults, type ScanTicker, type ScanRun } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
@@ -8,9 +8,13 @@ import {
   Pill,
   SectionHeader,
   Dot,
+  Input,
+  Select,
 } from "../components/ui";
 
 type SourceFilter = "all" | "losers" | "bottoms";
+type SectorFilter = "all" | "biotech" | "mining" | "other";
+type SortBy = "date_desc" | "date_asc" | "medals" | "gold" | "ticker";
 
 const SOURCE_LABEL: Record<"losers" | "bottoms" | "unknown", string> = {
   losers: "Grootste dalers",
@@ -22,6 +26,12 @@ const SOURCE_TONE: Record<"losers" | "bottoms" | "unknown", "loss" | "watch" | "
   bottoms: "watch",
   unknown: "neutral",
 };
+
+function fmtPrice(v: number): string {
+  if (v < 1) return v.toFixed(4);
+  if (v < 10) return v.toFixed(3);
+  return v.toFixed(2);
+}
 
 function medalStr(t: ScanTicker): string {
   const parts: string[] = [];
@@ -113,11 +123,35 @@ function RunMini({ runs, job }: { runs: ScanRun[]; job: string }) {
   );
 }
 
+function totalMedals(t: ScanTicker): number {
+  return (t.medal_gold ?? 0) + (t.medal_silver ?? 0) + (t.medal_bronze ?? 0);
+}
+
+function olympicCmp(a: ScanTicker, b: ScanTicker): number {
+  const ag = a.medal_gold ?? 0, bg = b.medal_gold ?? 0;
+  if (bg !== ag) return bg - ag;
+  const as = a.medal_silver ?? 0, bs = b.medal_silver ?? 0;
+  if (bs !== as) return bs - as;
+  const ab = a.medal_bronze ?? 0, bb = b.medal_bronze ?? 0;
+  return bb - ab;
+}
+
+const SORT_LABELS: Record<SortBy, string> = {
+  date_desc: "Datum (nieuw → oud)",
+  date_asc: "Datum (oud → nieuw)",
+  medals: "Medailleklassement (Olympisch)",
+  gold: "Aantal gouden medailles",
+  ticker: "Ticker A–Z",
+};
+
 export function ScansView() {
   const [data, setData] = useState<{ tickers: ScanTicker[]; runs: { "scan-losers": ScanRun[]; "scan-bottoms": ScanRun[] } } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [source, setSource] = useState<SourceFilter>("all");
+  const [sector, setSector] = useState<SectorFilter>("all");
+  const [sortBy, setSortBy] = useState<SortBy>("date_desc");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     fetchScanResults()
@@ -126,10 +160,40 @@ export function ScansView() {
   }, []);
 
   const tickers = data?.tickers ?? [];
-  const visible = source === "all" ? tickers : tickers.filter((t) => t.source === source);
-
   const countLosers = tickers.filter((t) => t.source === "losers").length;
   const countBottoms = tickers.filter((t) => t.source === "bottoms").length;
+
+  const visible = useMemo(() => {
+    let r = tickers;
+    if (source !== "all") r = r.filter((t) => t.source === source);
+    if (sector !== "all") r = r.filter((t) => (t.sector ?? "other") === sector);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      r = r.filter((t) =>
+        t.ticker.toLowerCase().includes(q) ||
+        (t.company ?? "").toLowerCase().includes(q)
+      );
+    }
+    const sorted = [...r];
+    switch (sortBy) {
+      case "date_desc":
+        sorted.sort((a, b) => b.created_at.localeCompare(a.created_at));
+        break;
+      case "date_asc":
+        sorted.sort((a, b) => a.created_at.localeCompare(b.created_at));
+        break;
+      case "medals":
+        sorted.sort((a, b) => olympicCmp(a, b) || totalMedals(b) - totalMedals(a));
+        break;
+      case "gold":
+        sorted.sort((a, b) => (b.medal_gold ?? 0) - (a.medal_gold ?? 0) || olympicCmp(a, b));
+        break;
+      case "ticker":
+        sorted.sort((a, b) => a.ticker.localeCompare(b.ticker));
+        break;
+    }
+    return sorted;
+  }, [tickers, source, sector, sortBy, search]);
 
   return (
     <div className="space-y-8">
@@ -154,18 +218,60 @@ export function ScansView() {
           subtitle="Aandelen die door de dagelijkse scans zijn gevonden en aan de watchlist zijn toegevoegd"
         />
 
-        {/* Filter */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          <Pill tone="neutral" active={source === "all"} count={tickers.length} onClick={() => setSource("all")}>
-            Alles
-          </Pill>
-          <Pill tone="loss" active={source === "losers"} count={countLosers} onClick={() => setSource("losers")}>
-            Grootste dalers
-          </Pill>
-          <Pill tone="watch" active={source === "bottoms"} count={countBottoms} onClick={() => setSource("bottoms")}>
-            5y-bodem
-          </Pill>
-        </div>
+        {/* Filter + sort */}
+        <Card className="p-3 mb-4 space-y-3">
+          {/* Bron-filter */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold w-12">Bron</span>
+            <Pill tone="neutral" active={source === "all"} count={tickers.length} onClick={() => setSource("all")} size="sm">
+              Alles
+            </Pill>
+            <Pill tone="loss" active={source === "losers"} count={countLosers} onClick={() => setSource("losers")} size="sm">
+              Grootste dalers
+            </Pill>
+            <Pill tone="watch" active={source === "bottoms"} count={countBottoms} onClick={() => setSource("bottoms")} size="sm">
+              5y-bodem
+            </Pill>
+          </div>
+
+          {/* Sector-filter */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold w-12">Sector</span>
+            {(["all", "biotech", "mining", "other"] as SectorFilter[]).map((s) => (
+              <Pill
+                key={s}
+                tone={s === "biotech" ? "cyan" : s === "mining" ? "watch" : "neutral"}
+                active={sector === s}
+                onClick={() => setSector(s)}
+                size="sm"
+              >
+                {s === "all" ? "Alle" : s === "biotech" ? "Biotech" : s === "mining" ? "Mining" : "Overig"}
+              </Pill>
+            ))}
+          </div>
+
+          {/* Zoek + sorteer */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold w-12">Zoek</span>
+            <Input
+              placeholder="Ticker of bedrijf…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 min-w-[180px]"
+            />
+            <Select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)}>
+              {(Object.entries(SORT_LABELS) as Array<[SortBy, string]>).map(([k, v]) => (
+                <option key={k} value={k}>Sorteer: {v}</option>
+              ))}
+            </Select>
+          </div>
+
+          {/* Result count */}
+          <div className="text-[11px] text-neutral-500 tabular">
+            {visible.length} {visible.length === 1 ? "resultaat" : "resultaten"}
+            {visible.length !== tickers.length && ` (uit ${tickers.length} totaal)`}
+          </div>
+        </Card>
 
         {loading && (
           <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>
@@ -193,6 +299,8 @@ export function ScansView() {
                   <th className="text-left p-3 font-semibold">Sector</th>
                   <th className="text-left p-3 font-semibold">Bron</th>
                   <th className="text-left p-3 font-semibold">Medailles</th>
+                  <th className="text-right p-3 font-semibold">Koers</th>
+                  <th className="text-right p-3 font-semibold">Slim limit</th>
                   <th className="text-left p-3 font-semibold">Toegevoegd</th>
                   <th className="text-left p-3 font-semibold">Reden</th>
                 </tr>
@@ -229,6 +337,18 @@ export function ScansView() {
                     </td>
                     <td className="p-3 whitespace-nowrap text-base leading-none">
                       {medalStr(t)}
+                    </td>
+                    <td className="p-3 text-right tabular text-[12px] text-neutral-300 whitespace-nowrap">
+                      {t.last_close != null ? fmtPrice(t.last_close) : "—"}
+                    </td>
+                    <td className="p-3 text-right tabular text-[12px] whitespace-nowrap">
+                      {t.buy_limit != null ? (
+                        <span className={t.last_close != null && t.last_close <= t.buy_limit ? "text-fog-lime font-bold" : "text-neutral-300"}>
+                          {fmtPrice(t.buy_limit)}
+                        </span>
+                      ) : (
+                        <span className="text-neutral-500">—</span>
+                      )}
                     </td>
                     <td className="p-3 whitespace-nowrap text-[11px] tabular text-neutral-400">
                       {new Date(t.created_at).toLocaleString("nl-NL", {

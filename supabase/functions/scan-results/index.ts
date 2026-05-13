@@ -33,11 +33,11 @@ Deno.serve(async (req) => {
   try {
     const sb = getServiceClient();
 
-    const [tickersResult, runsResult] = await Promise.all([
+    const [tickersResult, runsResult, summariesResult] = await Promise.all([
       // Alle auto-toegevoegde tickers, nieuwste eerst
       sb
         .from("signal_tickers")
-        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, notes, created_at, exchange, active")
+        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, notes, created_at, exchange, active, buy_limit")
         .ilike("notes", "Auto-toegevoegd%")
         .order("created_at", { ascending: false })
         .limit(500),
@@ -48,6 +48,10 @@ Deno.serve(async (req) => {
         .in("job", ["scan-losers", "scan-bottoms"])
         .order("started_at", { ascending: false })
         .limit(60),
+      // Laatste-koers lookup (subset gegevens uit price summary)
+      sb
+        .from("signal_price_summary")
+        .select("ticker, last_close"),
     ]);
 
     const tickers = (tickersResult.data ?? []) as Array<{
@@ -61,11 +65,18 @@ Deno.serve(async (req) => {
       created_at: string;
       exchange: string | null;
       active: boolean | null;
+      buy_limit: number | null;
     }>;
 
-    // Bron afleiden uit de notes-tekst
+    const closeByTicker = new Map<string, number | null>();
+    for (const r of (summariesResult.data ?? []) as Array<{ ticker: string; last_close: number | null }>) {
+      closeByTicker.set(r.ticker, r.last_close);
+    }
+
+    // Bron afleiden uit de notes-tekst + last_close erbij plakken
     const enriched = tickers.map((t) => ({
       ...t,
+      last_close: closeByTicker.get(t.ticker) ?? null,
       source: t.notes?.includes("biggest-loser") ? "losers"
             : t.notes?.includes("5y-bodem") || t.notes?.includes("5y-low") ? "bottoms"
             : "unknown",
