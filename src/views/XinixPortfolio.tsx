@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchXinixPortfolio,
+  fetchSimResults,
   triggerJob,
   getToken,
   type XinixPortfolio,
   type XinixOpenPosition,
   type XinixClosedPosition,
+  type SimResults,
+  type SimStrategy,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
@@ -66,6 +69,7 @@ function fmtDate(s: string): string {
 }
 
 export function XinixPortfolioView() {
+  const [mainTab, setMainTab] = useState<"portfolio" | "sim">("portfolio");
   const [data, setData] = useState<XinixPortfolio | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +114,27 @@ export function XinixPortfolioView() {
   const returnTone = state.total_return_pct >= 0 ? "lime" : "loss";
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      {/* Tab-switcher: Portfolio vs Simulatie */}
+      <div className="flex gap-0 border-b border-ink-5">
+        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 100 Strategieën"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setMainTab(key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              mainTab === key
+                ? "border-fog-pink text-fog-pink"
+                : "border-transparent text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mainTab === "sim" && <SimulationView />}
+      {mainTab === "portfolio" && <div className="space-y-8">
+
       {/* Intro */}
       <Card className="p-4 border-fog-pink/30 bg-fog-pink/[0.04]">
         <div className="flex items-start gap-3">
@@ -207,6 +231,7 @@ export function XinixPortfolioView() {
 
       {/* Gesloten trades */}
       <ClosedPositionsSection positions={closed_positions} />
+    </div>}
     </div>
   );
 }
@@ -503,6 +528,309 @@ function InsightsSection({
           </Card>
         )}
       </div>
+    </section>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 100-STRATEGIE SIMULATIE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function fmtPct2(v: number) {
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+function fmtUsd2(v: number) {
+  return `${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(0)}`;
+}
+
+function RetCell({ v }: { v: number }) {
+  const cls = v > 0 ? "text-fog-lime" : v < 0 ? "text-fog-loss" : "text-neutral-400";
+  return <span className={cls}>{fmtPct2(v)}</span>;
+}
+
+const GROUP_LABELS: Record<string, string> = {
+  "A-Score": "Score-drempel", "B-Hold": "Tijdvenster", "C-Stop": "Stop-loss",
+  "D-TP": "Take-profit", "E-Sector": "Sector", "F-Concentratie": "Concentratie",
+  "G-Signaal": "Signaal-type", "H-Medaille": "Medaille-filter", "I-Limiet": "Limiet-buffer",
+  "J-Exit-combo": "Exit-combinatie", "K-Profiel": "Agressief profiel",
+  "L-Profiel": "Conservatief profiel", "M-Combo": "Cross-combo",
+};
+
+function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
+  const [grpFilter, setGrpFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<"rank" | "winrate" | "closed">("rank");
+
+  const groups = useMemo(() => ["all", ...new Set(strategies.map((s) => s.grp))], [strategies]);
+  const filtered = useMemo(() => {
+    let rows = grpFilter === "all" ? strategies : strategies.filter((s) => s.grp === grpFilter);
+    if (sortBy === "winrate") rows = [...rows].sort((a, b) => b.win_rate - a.win_rate);
+    else if (sortBy === "closed") rows = [...rows].sort((a, b) => b.closed_count - a.closed_count);
+    // "rank" is already sorted by total_return_pct
+    return rows;
+  }, [strategies, grpFilter, sortBy]);
+
+  return (
+    <div>
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {groups.map((g) => (
+          <button
+            key={g}
+            onClick={() => setGrpFilter(g)}
+            className={`px-2 py-0.5 rounded-full text-[11px] font-medium border transition-colors ${
+              grpFilter === g
+                ? "bg-fog-lime/20 border-fog-lime text-fog-lime"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            {g === "all" ? "Alle groepen" : GROUP_LABELS[g] ?? g}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-2 mb-3 text-[11px]">
+        <span className="text-neutral-500">Sorteer:</span>
+        {(["rank", "winrate", "closed"] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setSortBy(k)}
+            className={`underline-offset-2 ${sortBy === k ? "text-fog-lime underline" : "text-neutral-400 hover:text-neutral-200"}`}
+          >
+            {k === "rank" ? "Rendement" : k === "winrate" ? "Hit-rate" : "Trades"}
+          </button>
+        ))}
+      </div>
+
+      {/* Ranking table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs min-w-[720px]">
+          <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/30">
+            <tr>
+              <th className="text-left p-2 font-semibold w-8">#</th>
+              <th className="text-left p-2 font-semibold w-6"></th>
+              <th className="text-left p-2 font-semibold">Strategie</th>
+              <th className="text-left p-2 font-semibold hidden md:table-cell">Groep</th>
+              <th className="text-right p-2 font-semibold">Rendement</th>
+              <th className="text-right p-2 font-semibold">Equity</th>
+              <th className="text-right p-2 font-semibold hidden sm:table-cell">Hit-rate</th>
+              <th className="text-right p-2 font-semibold hidden sm:table-cell">Trades</th>
+              <th className="text-right p-2 font-semibold hidden lg:table-cell">Open</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((s) => (
+              <tr key={s.id} className="border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors">
+                <td className="p-2 tabular text-neutral-400">{s.rank}</td>
+                <td className="p-2 text-base leading-none">{s.medal ?? ""}</td>
+                <td className="p-2">
+                  <div className="font-medium text-neutral-100">{s.name}</div>
+                  <div className="text-[10px] text-neutral-500 mt-0.5">
+                    {s.config.holdDays}d
+                    {s.config.stop != null && ` · stop-${(s.config.stop * 100).toFixed(0)}%`}
+                    {s.config.tp != null && ` · tp+${(s.config.tp * 100).toFixed(0)}%`}
+                    {s.config.sector !== "all" && ` · ${s.config.sector}`}
+                    {s.config.minGold > 0 && ` · ≥${s.config.minGold}🏆`}
+                  </div>
+                </td>
+                <td className="p-2 hidden md:table-cell text-neutral-400 text-[11px]">
+                  {GROUP_LABELS[s.grp] ?? s.grp}
+                </td>
+                <td className="p-2 text-right tabular font-bold">
+                  <RetCell v={s.total_return_pct} />
+                </td>
+                <td className="p-2 text-right tabular text-neutral-300">
+                  ${s.total_equity.toFixed(0)}
+                </td>
+                <td className="p-2 text-right tabular hidden sm:table-cell">
+                  {s.closed_count > 0 ? (
+                    <span className={s.win_rate >= 0.5 ? "text-fog-lime" : "text-fog-loss"}>
+                      {(s.win_rate * 100).toFixed(0)}%
+                    </span>
+                  ) : (
+                    <span className="text-neutral-500">—</span>
+                  )}
+                </td>
+                <td className="p-2 text-right tabular hidden sm:table-cell text-neutral-400">
+                  {s.closed_count}
+                </td>
+                <td className="p-2 text-right tabular hidden lg:table-cell text-neutral-400">
+                  {s.open_count}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SimInsightsSection({ sim }: { sim: SimResults }) {
+  const { insights, recommendations, meta } = sim;
+  return (
+    <div className="space-y-4">
+      {/* Recommendations */}
+      <Card className="p-4 space-y-3">
+        <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+          Aanbevelingen voor het dashboard
+        </div>
+        {meta.strategies_with_closed_positions === 0 ? (
+          <p className="text-xs text-neutral-400 italic">
+            ⏳ Nog geen gesloten trades — inzichten verschijnen nadat de eerste posities sluiten (na 20–180 dagen, afhankelijk van strategie).
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {recommendations.map((r, i) => (
+              <li key={i} className="text-xs text-neutral-200 leading-relaxed">{r}</li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      {/* Per-dimension insights */}
+      {insights.length > 0 && (
+        <Card className="p-0 overflow-hidden">
+          <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
+            Resultaten per configuratie-dimensie
+          </div>
+          <div className="divide-y divide-ink-5/40">
+            {insights.map((ins) => (
+              <div key={ins.dimension} className="p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-neutral-200">{ins.dimension}</span>
+                  <span className="text-[11px] text-neutral-400">
+                    beste: <span className="text-fog-lime font-mono">{ins.best}</span>
+                    {" vs slechtste: "}
+                    <span className="text-fog-loss font-mono">{ins.worst}</span>
+                    {" ("}
+                    <span className="text-fog-lime">+{ins.diff.toFixed(1)}%</span>
+                    {" verschil)"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {ins.entries.map((e) => (
+                    <span
+                      key={e.value}
+                      title={`${e.value}: gem. ${fmtPct2(e.avgRet)} (n=${e.count})`}
+                      className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
+                        e.value === ins.best
+                          ? "border-fog-lime/50 bg-fog-lime/10 text-fog-lime"
+                          : e.value === ins.worst
+                          ? "border-fog-loss/50 bg-fog-loss/10 text-fog-loss"
+                          : "border-ink-5 text-neutral-400"
+                      }`}
+                    >
+                      {e.value} {fmtPct2(e.avgRet)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+export function SimulationView() {
+  const [sim, setSim] = useState<SimResults | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"ranking" | "insights">("ranking");
+
+  useEffect(() => {
+    fetchSimResults()
+      .then(setSim)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const isAdmin = Boolean(getToken());
+
+  if (loading) return <div className="text-xs text-neutral-400 py-4">Laden…</div>;
+  if (error) return <div className="text-xs text-fog-loss py-4">Fout: {error}</div>;
+  if (!sim) return null;
+
+  const { meta } = sim;
+
+  return (
+    <section>
+      <SectionHeader
+        title="100 Strategieën — simulatie-ranglijst"
+        subtitle={
+          meta.last_run_at
+            ? `Laatste run: ${new Date(meta.last_run_at).toLocaleString("nl-NL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+            : "Nog niet gerund"
+        }
+        aside={isAdmin ? (
+          <Button size="sm" variant="secondary" onClick={() => {
+            triggerJob("xinix-sim-background").then(() => window.location.reload()).catch(() => {});
+          }}>▶ Run nu</Button>
+        ) : undefined}
+      />
+
+      {/* KPI row */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <Card className="p-3 text-center">
+          <div className="text-2xl font-bold tabular text-neutral-100">{meta.total}</div>
+          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Strategieën</div>
+        </Card>
+        <Card className="p-3 text-center">
+          <div className="text-2xl font-bold tabular text-fog-lime">
+            {sim.strategies.filter((s) => s.total_return_pct > 0).length}
+          </div>
+          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Positief rendement</div>
+        </Card>
+        <Card className="p-3 text-center">
+          <div className="text-2xl font-bold tabular text-neutral-100">{meta.strategies_with_closed_positions}</div>
+          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Met gesloten trades</div>
+        </Card>
+      </div>
+
+      {/* Top 3 podium */}
+      {sim.strategies.length >= 3 && (
+        <Card className="p-3 mb-4">
+          <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">Podium</div>
+          <div className="grid grid-cols-3 gap-3 text-center text-xs">
+            {[sim.strategies[1], sim.strategies[0], sim.strategies[2]].map((s, podiumIdx) => {
+              const emoji = podiumIdx === 0 ? "🥈" : podiumIdx === 1 ? "🏆" : "🥉";
+              const height = podiumIdx === 1 ? "text-lg" : "text-base";
+              return (
+                <div key={s.id} className="space-y-1">
+                  <div className={height}>{emoji}</div>
+                  <div className="font-semibold text-neutral-100 line-clamp-2 text-[11px]">{s.name}</div>
+                  <div className={`font-bold tabular ${s.total_return_pct >= 0 ? "text-fog-lime" : "text-fog-loss"}`}>
+                    {fmtPct2(s.total_return_pct)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Tab switcher */}
+      <div className="flex gap-2 mb-4 border-b border-ink-5">
+        {(["ranking", "insights"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setActiveTab(t)}
+            className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === t
+                ? "border-fog-lime text-fog-lime"
+                : "border-transparent text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            {t === "ranking" ? "Ranglijst" : "Inzichten & aanbevelingen"}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "ranking" ? (
+        <SimRankingTable strategies={sim.strategies} />
+      ) : (
+        <SimInsightsSection sim={sim} />
+      )}
     </section>
   );
 }

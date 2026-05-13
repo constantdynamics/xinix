@@ -362,3 +362,67 @@ export async function fetchXinixPortfolio(): Promise<XinixPortfolio> {
   if (!res.ok) throw new Error(`xinix-portfolio ${res.status}`);
   return (await res.json()) as XinixPortfolio;
 }
+
+// ── Xinix 100-strategie simulatie ──
+export interface SimStrategyConfig {
+  minScore: number;
+  redReq: boolean;
+  sector: "all" | "biotech" | "mining";
+  maxPos: number;
+  posSize: number;
+  holdDays: number;
+  stop: number | null;
+  tp: number | null;
+  limitBuf: number | null;
+  minGold: number;
+}
+
+export interface SimStrategy {
+  id: number;
+  slug: string;
+  name: string;
+  grp: string;
+  config: SimStrategyConfig;
+  rank: number;
+  medal: string | null;
+  total_equity: number;
+  total_return_pct: number;
+  total_return_usd: number;
+  realized_usd: number;
+  open_count: number;
+  closed_count: number;
+  win_rate: number;
+  avg_return_pct: number;
+  last_run_at: string | null;
+}
+
+export interface SimDimensionEntry {
+  value: string;
+  count: number;
+  avgRet: number;
+}
+
+export interface SimInsight {
+  dimension: string;
+  best: string;
+  worst: string;
+  diff: number;
+  entries: SimDimensionEntry[];
+}
+
+export interface SimResults {
+  strategies: SimStrategy[];
+  insights: SimInsight[];
+  recommendations: string[];
+  meta: {
+    total: number;
+    last_run_at: string | null;
+    strategies_with_closed_positions: number;
+  };
+}
+
+export async function fetchSimResults(): Promise<SimResults> {
+  const res = await fetch(apiUrl("/api/xinix-sim-results"));
+  if (!res.ok) throw new Error(`xinix-sim-results ${res.status}`);
+  return (await res.json()) as SimResults;
+}
