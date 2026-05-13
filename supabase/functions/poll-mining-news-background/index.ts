@@ -1,286 +1,199 @@
-import { getServiceClient } from "../_shared/supabase.ts";
-import { insertSignal } from "../_shared/signals.ts";
-import { runBackground } from "../_shared/runner.ts";
+// poll-mining-news-background — scant Yahoo-nieuws voor mining-tickers op
+// PEA/PFS/DFS/permit/bonanza-patronen en schrijft signal_events +
+// signal_catalysts (status: "pending" zodat de scorer ze oppikt).
+//
+// 60 tickers per run, round-robin op mining_news_polled_at NULLS FIRST.
+// Fixes t.o.v. origineel:
+//   - status "occurred" -> "pending"  (was de reden van 0 mining-catalysts)
+//   - round-robin batch ipv alle 820 tickers ineens (was de timeoutreden)
 
-interface YahooNewsItem {
-  uuid?: string;
-  title?: string;
-  link?: string;
-  publisher?: string;
-  providerPublishTime?: number;
-  summary?: string;
-  type?: string;
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+function getServiceClient() {
+  const u = Deno.env.get("SUPABASE_URL");
+  const k = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!u || !k) throw new Error("env");
+  return createClient(u, k, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+type Json = Record<string, unknown>;
+interface RunResult { ok: boolean; message?: string; metrics?: Json; }
+async function logRun(job: string, fn: () => Promise<RunResult>): Promise<RunResult> {
+  const sb = getServiceClient();
+  const { data: row } = await sb.from("signal_runs").insert({ job }).select("id").single();
+  const id = row?.id as number | undefined;
+  try {
+    const r = await fn();
+    if (id) await sb.from("signal_runs").update({ finished_at: new Date().toISOString(), ok: r.ok, message: r.message ?? null, metrics: r.metrics ?? null }).eq("id", id);
+    return r;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (id) await sb.from("signal_runs").update({ finished_at: new Date().toISOString(), ok: false, message: msg }).eq("id", id);
+    throw e;
+  }
+}
+function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r) return false; return (req.headers.get("authorization") ?? "") === `Bearer ${r}`; }
+function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
+function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
+function runBackground(job: string, fn: () => Promise<RunResult>) {
+  return async (req: Request) => {
+    if (req.method === "OPTIONS") return new Response(null, { status: 204 });
+    if (!checkAdminOrCron(req)) return new Response("Unauthorized", { status: 401 });
+    try {
+      const r = await logRun(job, fn);
+      return new Response(JSON.stringify({ ok: r.ok, ...r }), { status: r.ok ? 200 : 500, headers: { "content-type": "application/json" } });
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, message: e instanceof Error ? e.message : String(e) }), { status: 500, headers: { "content-type": "application/json" } });
+    }
+  };
 }
 
-async function searchNews(query: string): Promise<YahooNewsItem[]> {
-  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(
-    query
-  )}&quotesCount=0&newsCount=20&lang=en-US`;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (compatible; SignalMiningBot/1.0; +https://github.com)",
-    },
-  });
-  if (!res.ok) throw new Error(`Yahoo news ${query} HTTP ${res.status}`);
-  const json = (await res.json()) as { news?: YahooNewsItem[] };
+// ───────────── config ─────────────
+const BATCH = 60;
+const BUDGET_MS = 120_000;
+const SLEEP_MS = 250;
+const UA = "Mozilla/5.0 (compatible; SignalMiningBot/1.0; +https://github.com)";
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// ───────────── Yahoo news ─────────────
+interface NewsItem { uuid?: string; title?: string; link?: string; publisher?: string; providerPublishTime?: number; summary?: string; }
+
+async function searchNews(query: string): Promise<NewsItem[]> {
+  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=0&newsCount=20&lang=en-US`;
+  const res = await fetch(url, { headers: { "User-Agent": UA } });
+  if (!res.ok) throw new Error(`Yahoo news HTTP ${res.status}`);
+  const json = (await res.json()) as { news?: NewsItem[] };
   return json.news ?? [];
 }
 
-interface MiningPattern {
-  type: string;
-  severity: "yellow" | "orange" | "red";
-  re: RegExp;
-  label: string;
-  catalyst?: string;
+// ───────────── signal_events dedup insert ─────────────
+type SB = ReturnType<typeof getServiceClient>;
+async function insertSignal(sb: SB, opts: { ticker: string; signal_type: string; severity: string; title: string; detail?: string; payload?: Json; expires_at?: string; dedup_key: string; }): Promise<boolean> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: ex } = await sb.from("signal_events").select("id")
+    .eq("ticker", opts.ticker).eq("signal_type", opts.signal_type)
+    .gte("detected_at", since)
+    .contains("payload", { dedup_key: opts.dedup_key })
+    .limit(1);
+  if (ex && ex.length > 0) return false;
+  await sb.from("signal_events").insert({
+    ticker: opts.ticker, signal_type: opts.signal_type, severity: opts.severity,
+    title: opts.title, detail: opts.detail ?? null,
+    payload: { ...(opts.payload ?? {}), dedup_key: opts.dedup_key },
+    expires_at: opts.expires_at ?? null,
+  });
+  return true;
 }
 
-const BONANZA: MiningPattern[] = [
-  {
-    type: "bonanza_au",
-    severity: "orange",
-    re: /(\d{1,4}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:au|gold)/i,
-    label: "high-grade Au intercept",
-  },
-  {
-    type: "bonanza_ag",
-    severity: "orange",
-    re: /(\d{2,5}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:ag|silver)/i,
-    label: "high-grade Ag intercept",
-  },
-  {
-    type: "bonanza_cu",
-    severity: "orange",
-    re: /(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:cu|copper)/i,
-    label: "high-grade Cu intercept",
-  },
-];
+// ───────────── patterns ─────────────
+interface Pat { type: string; severity: "yellow" | "orange" | "red"; re: RegExp; label: string; catalyst?: string; }
 
-function bonanzaTier(
-  type: string,
-  value: number
-): "none" | "orange" | "red" {
-  if (type === "bonanza_au") {
-    if (value >= 100) return "red";
-    if (value >= 30) return "orange";
-    return "none";
-  }
-  if (type === "bonanza_ag") {
-    if (value >= 3000) return "red";
-    if (value >= 1000) return "orange";
-    return "none";
-  }
-  if (type === "bonanza_cu") {
-    if (value >= 8) return "red";
-    if (value >= 5) return "orange";
-    return "none";
-  }
+const BONANZA: Pat[] = [
+  { type: "bonanza_au", severity: "orange", re: /(\d{1,4}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:au|gold)/i, label: "high-grade Au intercept" },
+  { type: "bonanza_ag", severity: "orange", re: /(\d{2,5}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:ag|silver)/i, label: "high-grade Ag intercept" },
+  { type: "bonanza_cu", severity: "orange", re: /(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:cu|copper)/i, label: "high-grade Cu intercept" },
+];
+function bonanzaTier(type: string, value: number): "none" | "orange" | "red" {
+  if (type === "bonanza_au") return value >= 100 ? "red" : value >= 30 ? "orange" : "none";
+  if (type === "bonanza_ag") return value >= 3000 ? "red" : value >= 1000 ? "orange" : "none";
+  if (type === "bonanza_cu") return value >= 8 ? "red" : value >= 5 ? "orange" : "none";
   return "none";
 }
 
-const NEWS_PATTERNS: MiningPattern[] = [
-  {
-    type: "resource_update",
-    severity: "orange",
-    re: /(?:initial\s+)?(?:mineral\s+)?resource\s+estimate|maiden\s+resource|updated?\s+resource/i,
-    label: "Resource estimate update",
-    catalyst: "resource_update",
-  },
-  {
-    type: "pea",
-    severity: "orange",
-    re: /preliminary\s+economic\s+assessment|\bpea\b/i,
-    label: "PEA published",
-    catalyst: "PEA",
-  },
-  {
-    type: "pfs",
-    severity: "orange",
-    re: /pre[\s-]?feasibility\s+study|\bpfs\b/i,
-    label: "PFS published",
-    catalyst: "PFS",
-  },
-  {
-    type: "dfs",
-    severity: "orange",
-    re: /(?:definitive|bankable)\s+feasibility|\bdfs\b/i,
-    label: "DFS published",
-    catalyst: "DFS",
-  },
-  {
-    type: "permit",
-    severity: "red",
-    re: /(?:mining|construction|environmental)\s+permit\s+(?:granted|approved|received)|\beia\s+approved/i,
-    label: "Permit granted",
-    catalyst: "permit",
-  },
-  {
-    type: "jv_strategic",
-    severity: "yellow",
-    // \b na "in" zodat "earnings" / "earning" niet matcht (was de oorzaak
-    // van duizenden valse jv_strategic events).
-    re: /(?:strategic\s+)?(?:joint\s+venture|earn[-\s]?in\b|cornerstone\s+investment)/i,
-    label: "JV / strategic investment",
-  },
-  {
-    type: "first_pour",
-    severity: "orange",
-    re: /first\s+gold\s+pour|commercial\s+production\s+(?:declared|achieved|announced)/i,
-    label: "First pour / commercial production",
-  },
-  {
-    type: "takeover_bid",
-    severity: "red",
-    re: /(?:takeover|acquisition|all[-\s]?cash)\s+(?:offer|bid|proposal)|(?:definitive|binding)\s+agreement\s+to\s+(?:acquire|be\s+acquired)|to\s+be\s+acquired\s+(?:for|by)/i,
-    label: "Takeover bid",
-  },
-  {
-    type: "discovery_announcement",
-    severity: "red",
-    re: /(?:announces?|reports?)\s+(?:major\s+|significant\s+|new\s+)?(?:high[-\s]?grade\s+)?(?:gold\s+|silver\s+|copper\s+)?discovery|new\s+(?:high[-\s]?grade\s+)?zone\s+discovered/i,
-    label: "Discovery announcement",
-  },
-  {
-    type: "financing",
-    severity: "yellow",
-    re: /(?:bought\s+deal|private\s+placement|prospectus\s+offering)\s+(?:financing|of)/i,
-    label: "Equity financing",
-  },
-  {
-    type: "step_out_drill",
-    severity: "orange",
-    re: /step[-\s]?out\s+drill|extends?\s+mineralization|expands?\s+(?:high[-\s]?grade\s+)?zone/i,
-    label: "Step-out drill / zone extension",
-  },
+const NEWS_PATTERNS: Pat[] = [
+  { type: "resource_update", severity: "orange", re: /(?:initial\s+)?(?:mineral\s+)?resource\s+estimate|maiden\s+resource|updated?\s+resource/i, label: "Resource estimate update", catalyst: "resource_update" },
+  { type: "pea", severity: "orange", re: /preliminary\s+economic\s+assessment|\bpea\b/i, label: "PEA published", catalyst: "PEA" },
+  { type: "pfs", severity: "orange", re: /pre[\s-]?feasibility\s+study|\bpfs\b/i, label: "PFS published", catalyst: "PFS" },
+  { type: "dfs", severity: "orange", re: /(?:definitive|bankable)\s+feasibility|\bdfs\b/i, label: "DFS published", catalyst: "DFS" },
+  { type: "permit", severity: "red", re: /(?:mining|construction|environmental)\s+permit\s+(?:granted|approved|received)|\beia\s+approved/i, label: "Permit granted", catalyst: "permit" },
+  { type: "jv_strategic", severity: "yellow", re: /(?:strategic\s+)?(?:joint\s+venture|earn[-\s]?in\b|cornerstone\s+investment)/i, label: "JV / strategic investment" },
+  { type: "first_pour", severity: "orange", re: /first\s+gold\s+pour|commercial\s+production\s+(?:declared|achieved|announced)/i, label: "First pour / commercial production" },
+  { type: "takeover_bid", severity: "red", re: /(?:takeover|acquisition|all[-\s]?cash)\s+(?:offer|bid|proposal)|(?:definitive|binding)\s+agreement\s+to\s+(?:acquire|be\s+acquired)|to\s+be\s+acquired\s+(?:for|by)/i, label: "Takeover bid" },
+  { type: "discovery_announcement", severity: "red", re: /(?:announces?|reports?)\s+(?:major\s+|significant\s+|new\s+)?(?:high[-\s]?grade\s+)?(?:gold\s+|silver\s+|copper\s+)?discovery|new\s+(?:high[-\s]?grade\s+)?zone\s+discovered/i, label: "Discovery announcement" },
+  { type: "financing", severity: "yellow", re: /(?:bought\s+deal|private\s+placement|prospectus\s+offering)\s+(?:financing|of)/i, label: "Equity financing" },
+  { type: "step_out_drill", severity: "orange", re: /step[-\s]?out\s+drill|extends?\s+mineralization|expands?\s+(?:high[-\s]?grade\s+)?zone/i, label: "Step-out drill / zone extension" },
 ];
 
-Deno.serve(
-  runBackground("poll-mining-news", async () => {
-    const supabase = getServiceClient();
-    const { data: tickers } = await supabase
-      .from("signal_tickers")
-      .select("ticker, company, commodity")
-      .eq("active", true)
-      .eq("sector", "mining");
-    if (!tickers || tickers.length === 0)
-      return { ok: true, message: "no mining tickers" };
+// ───────────── main ─────────────
+Deno.serve(runBackground("poll-mining-news", async () => {
+  const sb = getServiceClient();
+  const startMs = Date.now();
 
-    let signalsInserted = 0;
-    let catalystsAdded = 0;
-    let scanned = 0;
-    const errors: string[] = [];
-    const cutoff = Math.floor((Date.now() - 14 * 24 * 60 * 60 * 1000) / 1000);
-    const expires14 = new Date(
-      Date.now() + 14 * 24 * 60 * 60 * 1000
-    ).toISOString();
+  const { data: tickers } = await sb
+    .from("signal_tickers")
+    .select("ticker, company, commodity")
+    .eq("active", true)
+    .eq("sector", "mining")
+    .order("mining_news_polled_at", { ascending: true, nullsFirst: true })
+    .limit(BATCH);
 
-    for (const t of tickers) {
-      try {
-        let news = await searchNews(t.ticker);
-        if (news.length === 0 && t.company)
-          news = await searchNews(t.company);
-        for (const item of news) {
-          if (!item.title) continue;
-          if (item.providerPublishTime && item.providerPublishTime < cutoff)
-            continue;
-          scanned++;
+  if (!tickers?.length) return { ok: true, message: "geen mining-tickers", metrics: { tickers: 0 } };
 
-          const haystack = `${item.title} ${item.summary ?? ""}`;
-          const link = item.link ?? "";
-          const uniq = item.uuid ?? `${t.ticker}:${item.title.slice(0, 80)}`;
+  const cutoff = Math.floor((Date.now() - 14 * 24 * 60 * 60 * 1000) / 1000);
+  const expires14 = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+  let signalsInserted = 0, catalystsAdded = 0, scanned = 0;
+  const errors: string[] = [];
 
-          for (const p of BONANZA) {
-            const m = haystack.match(p.re);
-            if (!m) continue;
-            const value = Number((m[1] ?? "").replace(",", "."));
-            if (!Number.isFinite(value)) continue;
-            const tier = bonanzaTier(p.type, value);
-            if (tier === "none") continue;
-            const id = await insertSignal(supabase, {
-              ticker: t.ticker,
-              signal_type: p.type,
-              severity: tier,
-              title: `${t.ticker}: ${p.label} (${value} ${
-                p.type === "bonanza_cu" ? "%" : "g/t"
-              })`,
-              detail: `${item.title}${link ? `\n${link}` : ""}`,
-              payload: {
-                value,
-                tier,
-                title: item.title,
-                publisher: item.publisher,
-                link,
-              },
-              expires_at: expires14,
-              dedup_key: `${p.type}:${uniq}`,
-            });
-            if (id) signalsInserted++;
-          }
+  for (const t of tickers) {
+    if (Date.now() - startMs > BUDGET_MS) break;
+    const nowIso = new Date().toISOString();
+    try {
+      let news = await searchNews(t.ticker);
+      if (news.length === 0 && t.company) news = await searchNews(t.company);
 
-          for (const p of NEWS_PATTERNS) {
-            if (!p.re.test(haystack)) continue;
-            const id = await insertSignal(supabase, {
-              ticker: t.ticker,
-              signal_type: p.type,
-              severity: p.severity,
-              title: `${t.ticker}: ${p.label}`,
-              detail: `${item.title}${link ? `\n${link}` : ""}`,
-              payload: {
-                title: item.title,
-                publisher: item.publisher,
-                link,
-              },
-              expires_at: expires14,
-              dedup_key: `${p.type}:${uniq}`,
-            });
-            if (id) signalsInserted++;
+      for (const item of news) {
+        if (!item.title) continue;
+        if (item.providerPublishTime && item.providerPublishTime < cutoff) continue;
+        scanned++;
+        const haystack = `${item.title} ${item.summary ?? ""}`;
+        const link = item.link ?? "";
+        const uniq = item.uuid ?? `${t.ticker}:${item.title.slice(0, 80)}`;
 
-            if (p.catalyst) {
-              const { data: existing } = await supabase
-                .from("signal_catalysts")
-                .select("id")
-                .eq("ticker", t.ticker)
-                .eq("source", "yahoo-news")
-                .eq("source_id", uniq)
-                .maybeSingle();
-              if (!existing) {
-                await supabase.from("signal_catalysts").insert({
-                  ticker: t.ticker,
-                  sector: "mining",
-                  catalyst_type: p.catalyst,
-                  description: item.title,
-                  expected_date: new Date().toISOString().slice(0, 10),
-                  source: "yahoo-news",
-                  source_id: uniq,
-                  status: "occurred",
-                  occurred_at: new Date().toISOString(),
-                });
-                catalystsAdded++;
-              }
-            }
-            break;
-          }
+        for (const p of BONANZA) {
+          const m = haystack.match(p.re);
+          if (!m) continue;
+          const value = Number((m[1] ?? "").replace(",", "."));
+          if (!Number.isFinite(value)) continue;
+          const tier = bonanzaTier(p.type, value);
+          if (tier === "none") continue;
+          const ok = await insertSignal(sb, { ticker: t.ticker, signal_type: p.type, severity: tier, title: `${t.ticker}: ${p.label} (${value}${p.type === "bonanza_cu" ? "%" : " g/t"})`, detail: `${item.title}${link ? `\n${link}` : ""}`, expires_at: expires14, dedup_key: `${p.type}:${uniq}` });
+          if (ok) signalsInserted++;
         }
-        await new Promise((r) => setTimeout(r, 250));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`${t.ticker}: ${msg}`);
-      }
-    }
 
-    return {
-      ok: errors.length === 0,
-      message:
-        `${scanned} items scanned, ${signalsInserted} signals, ${catalystsAdded} catalysts` +
-        (errors.length
-          ? `; errors: ${errors.slice(0, 3).join("; ")}`
-          : ""),
-      metrics: {
-        scanned,
-        signals: signalsInserted,
-        catalysts: catalystsAdded,
-        errors: errors.length,
-      },
-    };
-  })
-);
+        for (const p of NEWS_PATTERNS) {
+          if (!p.re.test(haystack)) continue;
+          const ok = await insertSignal(sb, { ticker: t.ticker, signal_type: p.type, severity: p.severity, title: `${t.ticker}: ${p.label}`, detail: `${item.title}${link ? `\n${link}` : ""}`, expires_at: expires14, dedup_key: `${p.type}:${uniq}` });
+          if (ok) signalsInserted++;
+
+          if (p.catalyst) {
+            const { data: existing } = await sb.from("signal_catalysts").select("id")
+              .eq("ticker", t.ticker).eq("source", "yahoo-news").eq("source_id", uniq).maybeSingle();
+            if (!existing) {
+              await sb.from("signal_catalysts").insert({
+                ticker: t.ticker, sector: "mining",
+                catalyst_type: p.catalyst,
+                description: item.title,
+                expected_date: new Date().toISOString().slice(0, 10),
+                source: "yahoo-news", source_id: uniq,
+                status: "pending",
+              });
+              catalystsAdded++;
+            }
+          }
+          break;
+        }
+      }
+      await sb.from("signal_tickers").update({ mining_news_polled_at: nowIso }).eq("ticker", t.ticker);
+    } catch (e) {
+      const msg = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+      if (errors.length < 5) errors.push(`${t.ticker}: ${msg}`);
+      await sb.from("signal_tickers").update({ mining_news_polled_at: new Date().toISOString() }).eq("ticker", t.ticker);
+    }
+    await sleep(SLEEP_MS);
+  }
+
+  return {
+    ok: errors.length < tickers.length / 2,
+    message: `${tickers.length} tickers, ${scanned} items gescand, ${signalsInserted} signals, ${catalystsAdded} catalysts` + (errors.length ? `; ${errors.slice(0, 3).join("; ")}` : ""),
+    metrics: { tickers: tickers.length, scanned, signals: signalsInserted, catalysts: catalystsAdded, errors: errors.length },
+  };
+}));
