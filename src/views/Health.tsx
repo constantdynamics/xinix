@@ -16,6 +16,7 @@ const JOB_META: Record<string, { label: string; intervalMin: number; desc: strin
   "poll-trials": { label: "ClinicalTrials.gov", intervalMin: 1440, desc: "Trial-status en readout-data." },
   "poll-biotech-news": { label: "Biotech-nieuws", intervalMin: 120, desc: "Yahoo-nieuws gescand op biotech-catalysts." },
   "poll-mining-news": { label: "Mining-nieuws", intervalMin: 120, desc: "Yahoo-nieuws gescand op mining-events (bonanza grades, resource updates, …)." },
+  "poll-fundamentals": { label: "Fundamentals ophalen (Yahoo)", intervalMin: 360, desc: "Round-robin door de watchlist; vult market cap, shares, insider%, jurisdiction, cash runway." },
   "poll-metals": { label: "Grondstofprijzen", intervalMin: 4320, desc: "Goud/zilver/koper/lithium/… — alleen op beursdagen." },
   "forward-returns": { label: "Forward returns meten", intervalMin: 1440, desc: "Werkelijke 7/14/30/90d returns na signalen (voor Track record)." },
   "losers-digest": { label: "Wekelijkse/maandelijkse losers-digest", intervalMin: 1440, desc: "Samenvatting van de slechtst-presterende tickers in je watchlist." },
