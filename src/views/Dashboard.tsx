@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Dashboard, Card as CardData } from "../types";
+import type { Dashboard, Card as CardData, Signal } from "../types";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import { triggerJob } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
@@ -60,6 +60,40 @@ const JOBS = [
   ["compute-scores-background", "Scores"],
   ["dispatch-alerts-background", "Alerts"],
 ];
+
+// Dummy-proof verklaring per signal_type. Eerste regel = korte label,
+// tweede = uitleg ("wat betekent dit"). Onbekende types vallen terug op
+// het ruwe signal_type — handig om missende mappings te zien.
+const SIGNAL_FRIENDLY: Record<string, { label: string; desc: string }> = {
+  near_90d_low: { label: "Bij 90d-bodem", desc: "Koers test het laagste punt van de afgelopen 90 dagen — mogelijk koopmoment of nog verder dalend" },
+  big_drop: { label: "Forse daling", desc: "Koers zakt scherp op de dag — schrik-reactie of negatief nieuws" },
+  price_spike_up: { label: "Koerssprong omhoog", desc: "Sterke uitslag omhoog — momentum of positief nieuws" },
+  volume_spike: { label: "Volume-spike", desc: "Veel meer handel dan gemiddeld — iemand neemt actief positie in of uit" },
+  jv_strategic: { label: "JV / strategische deal", desc: "Joint venture of strategische samenwerking aangekondigd" },
+  "8k_material": { label: "SEC 8-K melding", desc: "Materiële gebeurtenis bij Amerikaanse beurzen gemeld (verplichte disclosure)" },
+  buy_limit_hit: { label: "Koop-limiet geraakt", desc: "Koers staat op of onder je opgegeven koop-limiet" },
+  buy_limit_warmup: { label: "Koop-limiet nadert", desc: "Koers nadert je koop-limiet (binnen 10%)" },
+  buy_limit_close: { label: "Net boven koop-limiet", desc: "Koers staat vlak boven je koop-limiet (binnen 25%)" },
+  pre_catalyst_7d: { label: "Catalyst over 7d", desc: "Verwachte gebeurtenis (data/uitslag/event) binnen een week" },
+  pre_catalyst_14d: { label: "Catalyst over 14d", desc: "Verwachte gebeurtenis binnen twee weken" },
+  pre_catalyst_30d: { label: "Catalyst over 30d", desc: "Verwachte gebeurtenis binnen een maand" },
+  pre_catalyst_60d: { label: "Catalyst over 60d", desc: "Verwachte gebeurtenis binnen twee maanden" },
+  financing: { label: "Financiering", desc: "Aandelenuitgifte of kapitaalverhoging aangekondigd — verwatert bestaande aandeelhouders" },
+  takeover_bid: { label: "Overname-bod", desc: "Bedrijf ontving een overname-bod" },
+  buyout_definitive: { label: "Overname definitief", desc: "Definitieve overname-overeenkomst gesloten" },
+  topline_positive: { label: "Positieve trial-data", desc: "Belangrijkste klinische uitkomst (topline) is positief" },
+  pfs: { label: "Mining: PFS", desc: "Preliminary Feasibility Study gepubliceerd — concreetheidsstap" },
+  resource_update: { label: "Resource-update", desc: "Geüpdatete schatting van mineraalreserves gepubliceerd" },
+  loser_gem: { label: "Daler + track record", desc: "Vandaag grote daler, maar heeft eerder al medaille-waardige koers-runs gemaakt" },
+  near5y_low_gem: { label: "5y-bodem + track record", desc: "Vlakbij 5-jaars dieptepunt + sterke koers-historie (medailles)" },
+  macro_tide: { label: "Macro-stroming", desc: "Macro-ontwikkeling die deze sector raakt" },
+  trial_status_change: { label: "Trial-status wijziging", desc: "Status van een klinische studie is veranderd (start/stop/recruitment)" },
+  fda_approval: { label: "FDA-goedkeuring", desc: "FDA heeft een product goedgekeurd" },
+};
+
+function signalMeta(type: string): { label: string; desc: string } {
+  return SIGNAL_FRIENDLY[type] ?? { label: type, desc: "" };
+}
 
 type ColorFilter = "all" | "red" | "orange" | "yellow" | "white";
 
@@ -416,10 +450,13 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
         </div>
       )}
 
-      {/* Price + delta — geen valutateken (multi-exchange) */}
+      {/* Price + delta — compact: koers minder prominent, want absoluut
+          getal zegt weinig zonder context. De positie t.o.v. range
+          eronder is informatiever. */}
       {prefs.showPriceDelta && px && (
-        <div className="flex items-baseline gap-3">
-          <div className="text-2xl font-bold tabular tracking-tight">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">Koers</span>
+          <span className="text-base font-bold tabular tracking-tight text-neutral-200">
             {px.last_close != null
               ? px.last_close < 1
                 ? px.last_close.toFixed(4)
@@ -427,52 +464,30 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
                 ? px.last_close.toFixed(3)
                 : px.last_close.toFixed(2)
               : <span className="text-xs text-neutral-500 italic font-normal">geen koers</span>}
-          </div>
+          </span>
           {px.last_close != null && <MiniDelta value={px.pct_change_1d ?? 0} />}
         </div>
       )}
 
-      {/* Thermometers — fill = pctAboveLow / 200 (cap op +200% above low),
-          gradient lime->yellow->orange->red. */}
+      {/* Positie t.o.v. range — compact: één regel per periode. Toont
+          waar de koers staat tussen low en high (cheap → expensive). */}
       {showAnyRange && (
-        <div className="rounded-lg border border-ink-5 bg-ink-2/40 p-2.5">
-          <div className="text-[9px] uppercase tracking-wider text-neutral-500 mb-1.5 text-center">
+        <div className="rounded-lg border border-ink-5 bg-ink-2/40 p-2 space-y-1.5">
+          <div className="text-[9px] uppercase tracking-wider text-neutral-500 leading-none">
             Positie t.o.v. range
           </div>
-          <div className="flex items-start justify-around gap-2">
-            {prefs.showRange90d && has90d && (
-              <Thermometer
-                label="90D"
-                low={px!.low_90d!}
-                high={px!.high_90d!}
-                current={px!.last_close!}
-              />
-            )}
-            {prefs.showRange1y && has1y && (
-              <Thermometer
-                label="1Y"
-                low={px!.low_1y!}
-                high={px!.high_1y!}
-                current={px!.last_close!}
-              />
-            )}
-            {prefs.showRange5y && has5y && (
-              <Thermometer
-                label="5Y"
-                low={px!.low_5y!}
-                high={px!.high_5y!}
-                current={px!.last_close!}
-              />
-            )}
-            {prefs.showRange1y && !has1y && !prefs.showRange90d && (
-              <div className="text-[10px] text-neutral-400 italic flex-1 self-center text-center">
-                1y range nog niet opgehaald (komt binnen 7 dagen automatisch)
-              </div>
-            )}
-          </div>
-          {prefs.showRange1y && !has1y && (prefs.showRange90d && has90d) && (
-            <div className="text-[10px] text-neutral-400 italic mt-2 text-center">
-              1y nog te ophalen — komt binnen 7 dagen
+          {prefs.showRange90d && has90d && (
+            <RangeBar label="90D" low={px!.low_90d!} high={px!.high_90d!} current={px!.last_close!} />
+          )}
+          {prefs.showRange1y && has1y && (
+            <RangeBar label="1Y" low={px!.low_1y!} high={px!.high_1y!} current={px!.last_close!} />
+          )}
+          {prefs.showRange5y && has5y && (
+            <RangeBar label="5Y" low={px!.low_5y!} high={px!.high_5y!} current={px!.last_close!} />
+          )}
+          {prefs.showRange1y && !has1y && (
+            <div className="text-[10px] text-neutral-400 italic">
+              1y range nog niet opgehaald (komt binnen 7 dagen automatisch)
             </div>
           )}
         </div>
@@ -524,40 +539,133 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
         </div>
       )}
 
-      {/* Top signal */}
-      {prefs.showTopSignal && c.top_signal && (
-        <div className="rounded-lg border border-ink-5 p-2.5">
-          <div className="flex items-center gap-2">
-            <Dot
-              tone={
-                c.top_signal.severity === "red"
-                  ? "loss"
-                  : c.top_signal.severity === "orange"
-                  ? "orange"
-                  : "watch"
-              }
-              pulse={c.top_signal.severity === "red"}
-            />
-            <span className="text-[10px] uppercase tracking-wider text-neutral-300 font-bold">
-              {c.top_signal.signal_type}
-            </span>
-            {c.active_signals > 1 && (
-              <span className="ml-auto text-[10px] text-neutral-400">
-                +{c.active_signals - 1}
-              </span>
-            )}
-          </div>
-          <div className="mt-1 text-xs font-medium text-neutral-200 line-clamp-1">
-            {c.top_signal.title}
-          </div>
-          {c.top_signal.detail && (
-            <div className="text-[11px] text-neutral-400 line-clamp-2">
-              {c.top_signal.detail}
-            </div>
-          )}
-        </div>
+      {/* Actieve signalen — bullet-lijst met dummy-proof uitleg per
+          signaal. Klikbare titel toont de ruwe `signal.title` als
+          contextregel; de hover-tooltip geeft de uitgebreide
+          omschrijving uit SIGNAL_FRIENDLY. */}
+      {prefs.showTopSignal && c.active_signals > 0 && (
+        <SignalsList
+          signals={c.signals ?? (c.top_signal ? [c.top_signal] : [])}
+          totalCount={c.active_signals}
+        />
       )}
     </Card>
+  );
+}
+
+// RangeBar — horizontale balk waar de huidige koers zit tussen low en
+// high. Compactere variant van Thermometer, één regel per periode.
+function RangeBar({
+  label,
+  low,
+  high,
+  current,
+}: {
+  label: string;
+  low: number;
+  high: number;
+  current: number;
+}) {
+  const range = high - low;
+  const pct = range > 0 ? Math.min(1, Math.max(0, (current - low) / range)) : 0;
+  const pctAboveLow = low > 0 ? ((current - low) / low) * 100 : 0;
+  const tone =
+    pctAboveLow < 30
+      ? "bg-fog-lime"
+      : pctAboveLow < 100
+      ? "bg-fog-info"
+      : pctAboveLow < 200
+      ? "bg-fog-warn"
+      : "bg-fog-pink";
+  const textTone =
+    pctAboveLow < 30
+      ? "text-fog-lime"
+      : pctAboveLow < 100
+      ? "text-fog-info"
+      : pctAboveLow < 200
+      ? "text-fog-warn"
+      : "text-fog-pink";
+  function fmt(v: number) {
+    if (v < 1) return v.toFixed(3);
+    if (v < 100) return v.toFixed(2);
+    return v.toFixed(0);
+  }
+  return (
+    <div
+      className="flex items-center gap-2 text-[10px] tabular leading-none"
+      title={`${label}: ${fmt(current)} — +${pctAboveLow.toFixed(0)}% boven low ${fmt(low)} · high ${fmt(high)}`}
+    >
+      <span className="w-7 text-[9px] uppercase tracking-wider font-bold text-neutral-400">
+        {label}
+      </span>
+      <span className="text-neutral-500 w-10 text-right">{fmt(low)}</span>
+      <div className="relative h-1.5 flex-1 rounded-full bg-ink-3 overflow-hidden">
+        <div
+          className={`absolute top-0 bottom-0 left-0 ${tone}`}
+          style={{ width: `${pct * 100}%` }}
+        />
+        <div
+          className="absolute top-[-2px] bottom-[-2px] w-0.5 bg-neutral-100"
+          style={{ left: `calc(${pct * 100}% - 1px)` }}
+        />
+      </div>
+      <span className="text-neutral-500 w-10">{fmt(high)}</span>
+      <span className={`w-12 text-right font-bold ${textTone}`}>
+        {pctAboveLow >= 0 ? "+" : ""}{pctAboveLow.toFixed(0)}%
+      </span>
+    </div>
+  );
+}
+
+// SignalsList — bullet-lijst van alle actieve signalen met dummy-proof
+// uitleg. Klikt door per signaal: severity-bolletje + korte label,
+// gevolgd door de specifieke context-regel uit de signal payload.
+function SignalsList({
+  signals,
+  totalCount,
+}: {
+  signals: Signal[];
+  totalCount: number;
+}) {
+  if (signals.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-ink-5 p-2.5 space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+          Actieve signalen
+        </span>
+        <span className="text-[10px] tabular text-neutral-500">({totalCount})</span>
+      </div>
+      <ul className="space-y-1.5">
+        {signals.map((s) => {
+          const meta = signalMeta(s.signal_type);
+          const tone =
+            s.severity === "red" ? "loss" : s.severity === "orange" ? "orange" : "watch";
+          return (
+            <li
+              key={s.id}
+              className="flex items-start gap-2 text-[11px] leading-snug"
+              title={meta.desc || s.title}
+            >
+              <span className="pt-[3px]">
+                <Dot tone={tone} pulse={s.severity === "red"} />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-neutral-100">{meta.label}</div>
+                <div className="text-neutral-400 line-clamp-2">
+                  {meta.desc || s.title}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+        {totalCount > signals.length && (
+          <li className="text-[10px] text-neutral-500 italic pl-4">
+            +{totalCount - signals.length} meer in Signaallog
+          </li>
+        )}
+      </ul>
+    </div>
   );
 }
 

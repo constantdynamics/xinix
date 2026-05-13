@@ -95,6 +95,7 @@ export interface Card {
   summary: PriceSummary | null;
   active_signals: number;
   top_signal: Signal | null;
+  signals?: Signal[];
   next_catalyst: Catalyst | null;
   days_to_next_catalyst: number | null;
   // v1.1 (briefing §6.1) — handmatig in te vullen via TickerDetailsModal
