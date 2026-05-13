@@ -131,7 +131,7 @@ async function run(): Promise<RunResult> {
     const timeTriggered = now >= new Date(p.scheduled_exit_date);
     if (!stopTriggered && !timeTriggered) continue;
 
-    const exitPrice = stopTriggered ? Math.max(price, Number(p.stop_loss_price)) : price;
+    const exitPrice = price; // altijd werkelijke marktprijs; stop-loss is de trigger, niet de fill
     const proceeds = Number(p.qty) * exitPrice;
     const cost = Number(p.qty) * Number(p.avg_price);
     const returnUsd = proceeds - cost;

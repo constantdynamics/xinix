@@ -35,7 +35,7 @@ function fmtPrice(v: number): string {
 
 function medalStr(t: ScanTicker): string {
   const parts: string[] = [];
-  if (t.medal_gold) parts.push(`🥇${t.medal_gold}`);
+  if (t.medal_gold) parts.push(`🏆${t.medal_gold}`);
   if (t.medal_silver) parts.push(`🥈${t.medal_silver}`);
   if (t.medal_bronze) parts.push(`🥉${t.medal_bronze}`);
   return parts.join(" ") || "—";

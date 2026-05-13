@@ -71,14 +71,13 @@ function MedalStrip({
   bronze: number;
   size?: "sm" | "xs";
 }) {
-  // Groter dan default — 🥇/🥈/🥉 verschillen vooral in kleur en zijn op
-  // 11-12px slecht te onderscheiden.
+  // Groter dan default — 🏆/🥈/🥉 verschillen op kleine schermen.
   const cls = size === "xs" ? "text-sm" : "text-lg";
   if (gold + silver + bronze === 0)
     return <span className="text-xs text-neutral-500">—</span>;
   return (
     <span className={`${cls} tabular whitespace-nowrap leading-none`}>
-      {gold > 0 && <span className="text-fog-watch">🥇{gold} </span>}
+      {gold > 0 && <span className="text-fog-watch">🏆{gold} </span>}
       {silver > 0 && <span className="text-neutral-300">🥈{silver} </span>}
       {bronze > 0 && <span className="text-[#cd7f32]">🥉{bronze}</span>}
     </span>
@@ -497,7 +496,7 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
             target="_blank"
             rel="noopener noreferrer"
             className={`block rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5 hover:scale-[1.02] transition cursor-pointer`}
-            title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🥇${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}`}
+            title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🏆${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}`}
           >
             <div className="flex items-center justify-between gap-1 mb-1">
               <span className="font-bold text-sm text-ink-0 truncate">
@@ -520,7 +519,7 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
             </div>
             {(r.gold + r.silver + r.bronze > 0) && (
               <div className="text-sm tabular mt-0.5 leading-none">
-                {r.gold > 0 && `🥇${r.gold} `}
+                {r.gold > 0 && `🏆${r.gold} `}
                 {r.silver > 0 && `🥈${r.silver} `}
                 {r.bronze > 0 && `🥉${r.bronze}`}
               </div>

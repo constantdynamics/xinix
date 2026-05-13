@@ -20,7 +20,7 @@ export interface TilePrefs {
   showGoudType: boolean;
   showTriggerEvent: boolean;
   showActiveSignalCount: boolean;
-  showMedals: boolean; // 🥇🥈🥉 medailleklassement (5y koers-runs)
+  showMedals: boolean; // 🏆🥈🥉 medailleklassement (5y koers-runs)
 }
 
 export const DEFAULT_TILE_PREFS: TilePrefs = {
@@ -54,7 +54,7 @@ export const TILE_PREF_LABELS: Record<keyof TilePrefs, string> = {
   showGoudType: "Goud-type label",
   showTriggerEvent: "Trigger event tekst",
   showActiveSignalCount: "Aantal actieve signalen",
-  showMedals: "Medailles (🥇🥈🥉, 5y koers-runs)",
+  showMedals: "Medailles (🏆🥈🥉, 5y koers-runs)",
 };
 
 export function loadTilePrefs(): TilePrefs {

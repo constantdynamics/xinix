@@ -293,8 +293,8 @@ function OpenPositionsSection({ positions }: { positions: XinixOpenPosition[] })
                     <td className="p-3 text-[11px] text-neutral-400 max-w-xs">
                       <div className="line-clamp-1" title={p.entry_reason}>{p.entry_reason}</div>
                       <div className="flex flex-wrap gap-1 mt-1">
-                        {p.entry_signal_types.slice(0, 3).map((s) => (
-                          <Badge key={s} tone="neutral">{signalLabel(s)}</Badge>
+                        {p.entry_signal_types.slice(0, 3).map((s, i) => (
+                          <Badge key={`${s}-${i}`} tone="neutral">{signalLabel(s)}</Badge>
                         ))}
                         {p.entry_signal_types.length > 3 && (
                           <span className="text-[10px] text-neutral-500">+{p.entry_signal_types.length - 3}</span>
@@ -371,8 +371,8 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
                       <td className="p-3 text-[11px] text-neutral-400 max-w-xs">
                         <div className="line-clamp-1" title={p.entry_reason}>{p.entry_reason}</div>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {p.entry_signal_types.slice(0, 3).map((s) => (
-                            <Badge key={s} tone="neutral">{signalLabel(s)}</Badge>
+                          {p.entry_signal_types.slice(0, 3).map((s, i) => (
+                            <Badge key={`${s}-${i}`} tone="neutral">{signalLabel(s)}</Badge>
                           ))}
                         </div>
                       </td>

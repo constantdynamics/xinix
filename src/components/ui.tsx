@@ -272,8 +272,8 @@ export function Sparkline({
 }
 
 // ─── MedalPills — goud/zilver/brons indicatoren (emoji-strip) ─────────
-// Zelfde stijl als de Limits-pagina: 🥇3 🥈1 🥉5 — emoji + count,
-// zonder pill-omkadering. Op 11-12px zijn 🥇/🥈/🥉 slecht te
+// Zelfde stijl als de Limits-pagina: 🏆3 🥈1 🥉5 — emoji + count,
+// zonder pill-omkadering. Op 11-12px zijn 🥈/🥉 slecht te
 // onderscheiden, dus standaard text-lg.
 export function MedalPills({
   gold,
@@ -296,7 +296,7 @@ export function MedalPills({
       className={cx(cls, "tabular whitespace-nowrap leading-none")}
       title="Medailleklassement (5y koers-runs)"
     >
-      {g > 0 && <span className="text-fog-watch">🥇{g} </span>}
+      {g > 0 && <span className="text-fog-watch">🏆{g} </span>}
       {s > 0 && <span className="text-neutral-300">🥈{s} </span>}
       {b > 0 && <span className="text-[#cd7f32]">🥉{b}</span>}
     </span>
@@ -634,7 +634,7 @@ export function RangeBar({
       : pos < 0.8
       ? "text-fog-warn"
       : "text-fog-loss";
-  const pctAboveLow = ((current - low) / low) * 100;
+  const pctAboveLow = low > 0 ? ((current - low) / low) * 100 : 0;
   function fmt(v: number) {
     if (v < 1) return `$${v.toFixed(3)}`;
     if (v < 100) return `$${v.toFixed(2)}`;

@@ -58,10 +58,10 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         id: "dash-medals",
-        title: "Medailles — 🥇 🥈 🥉",
+        title: "Medailles — 🏆 🥈 🥉",
         body:
-          "Uit de koersgeschiedenis van de afgelopen 5 jaar: hoe vaak dit aandeel een flinke koers-run heeft gemaakt (een zigzag-run omhoog). 🥇 = de grootste klasse runs, 🥈 / 🥉 = kleinere. Geeft een gevoel of het aandeel 'beweeglijk' is.",
-        example: "🥇1 🥉2 = één keer flink ge-x'ed in 5 jaar, plus twee kleinere runs.",
+          "Uit de koersgeschiedenis van de afgelopen 5 jaar: hoe vaak dit aandeel een flinke koers-run heeft gemaakt (een zigzag-run omhoog). 🏆 = de grootste klasse runs, 🥈 / 🥉 = kleinere. Geeft een gevoel of het aandeel 'beweeglijk' is.",
+        example: "🏆1 🥉2 = één keer flink ge-x'ed in 5 jaar, plus twee kleinere runs.",
       },
       {
         id: "dash-price",
@@ -226,7 +226,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         id: "lim-medals",
         title: "Medailleklassement (sorteer-optie 'Olympisch')",
         body:
-          "Sorteert net als de Olympische medaillespiegel: eerst meeste 🥇, bij gelijk meeste 🥈, dan 🥉. De medailles komen uit de 5-jaars koersgeschiedenis — hoe vaak het aandeel een flinke koers-run maakte (🥇 = grootste klasse). Handig om te zien welke aandelen op je radar historisch het beweeglijkst waren.",
+          "Sorteert net als de Olympische medaillespiegel: eerst meeste 🏆, bij gelijk meeste 🥈, dan 🥉. De medailles komen uit de 5-jaars koersgeschiedenis — hoe vaak het aandeel een flinke koers-run maakte (🏆 = grootste klasse). Handig om te zien welke aandelen op je radar historisch het beweeglijkst waren.",
       },
       {
         id: "lim-div",
