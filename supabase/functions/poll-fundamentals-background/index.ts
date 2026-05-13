@@ -54,7 +54,7 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
 }
 
 // ───────────── config ─────────────
-const BATCH = 80;
+const BATCH = 100;
 const BUDGET_MS = 130_000;
 const SLEEP_MS = 250;
 const UA = "Mozilla/5.0 (compatible; XinixFundamentalsBot/1.0)";
