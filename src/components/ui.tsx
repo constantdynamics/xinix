@@ -271,9 +271,10 @@ export function Sparkline({
   );
 }
 
-// ─── MedalPills — compacte goud/zilver/brons indicatoren ──────────────
-// Vervangt de losse emoji-rij; schaalt beter op kleine kaarten en is
-// consistent met de andere badge-stijl.
+// ─── MedalPills — goud/zilver/brons indicatoren (emoji-strip) ─────────
+// Zelfde stijl als de Limits-pagina: 🥇3 🥈1 🥉5 — emoji + count,
+// zonder pill-omkadering. Op 11-12px zijn 🥇/🥈/🥉 slecht te
+// onderscheiden, dus standaard text-lg.
 export function MedalPills({
   gold,
   silver,
@@ -285,30 +286,19 @@ export function MedalPills({
   bronze?: number | null;
   size?: "xs" | "sm";
 }) {
-  const items: Array<{ count: number; label: string; cls: string }> = [];
-  if (gold && gold > 0)
-    items.push({ count: gold, label: "G", cls: "bg-fog-watch/15 text-fog-watch border-fog-watch/40" });
-  if (silver && silver > 0)
-    items.push({ count: silver, label: "S", cls: "bg-neutral-400/15 text-neutral-300 border-neutral-400/40" });
-  if (bronze && bronze > 0)
-    items.push({ count: bronze, label: "B", cls: "bg-[#cd7f32]/15 text-[#cd7f32] border-[#cd7f32]/40" });
-  if (items.length === 0) return null;
-  const sizeCls = size === "xs" ? "h-4 px-1 text-[9px]" : "h-5 px-1.5 text-[10px]";
+  const g = gold ?? 0;
+  const s = silver ?? 0;
+  const b = bronze ?? 0;
+  if (g + s + b === 0) return null;
+  const cls = size === "xs" ? "text-sm" : "text-lg";
   return (
-    <span className="inline-flex items-center gap-1" title="Medailleklassement (5y koers-runs)">
-      {items.map((it) => (
-        <span
-          key={it.label}
-          className={cx(
-            "inline-flex items-center gap-0.5 rounded-md border font-bold tabular",
-            sizeCls,
-            it.cls
-          )}
-        >
-          <span>{it.count}</span>
-          <span className="opacity-70">{it.label}</span>
-        </span>
-      ))}
+    <span
+      className={cx(cls, "tabular whitespace-nowrap leading-none")}
+      title="Medailleklassement (5y koers-runs)"
+    >
+      {g > 0 && <span className="text-fog-watch">🥇{g} </span>}
+      {s > 0 && <span className="text-neutral-300">🥈{s} </span>}
+      {b > 0 && <span className="text-[#cd7f32]">🥉{b}</span>}
     </span>
   );
 }
