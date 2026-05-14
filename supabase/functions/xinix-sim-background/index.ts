@@ -369,8 +369,8 @@ async function run() {
   await sb.from("xinix_strategy_state").upsert(stateRows, { onConflict: "strategy_id", ignoreDuplicates: true });
 
   // 2. Gedeelde marktdata ophalen
-  const [statesRes, openRes, tickersRes, summaryRes, signalsRes] = await Promise.all([
-    sb.from("xinix_strategy_state").select("strategy_id, cash"),
+  const [statesRes, openRes, tickersRes, summaryRes, signalsRes, regimeRes] = await Promise.all([
+    sb.from("xinix_strategy_state").select("strategy_id, cash, max_equity, max_drawdown_pct"),
     sb.from("xinix_strategy_positions")
       .select("id, strategy_id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, take_profit_price, entry_signal_types, partial_exits")
       .is("closed_at", null),
@@ -379,10 +379,25 @@ async function run() {
     sb.from("signal_events").select("ticker, signal_type, severity")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
       .order("detected_at", { ascending: false }).limit(3000),
+    sb.from("market_regime").select("is_bull, updated_at").eq("id", 1).maybeSingle(),
   ]);
 
+  // Marktregime: alleen kopen in bull-markt (SPY > 200d MA). Bij ontbrekende of
+  // verouderde data (>3 dagen) geldt standaard bull zodat de sim niet vastloopt.
+  const regimeRow = regimeRes.data;
+  const regimeAgeD = regimeRow?.updated_at
+    ? (now.getTime() - new Date(regimeRow.updated_at).getTime()) / 86400000
+    : 999;
+  const isBullMarket = regimeAgeD < 3 ? (regimeRow?.is_bull ?? true) : true;
+
   const cashByStrategy = new Map<number, number>();
-  for (const r of (statesRes.data ?? [])) cashByStrategy.set(r.strategy_id as number, Number(r.cash));
+  const maxEquityByStrategy = new Map<number, number>();
+  const maxDrawdownByStrategy = new Map<number, number>();
+  for (const r of (statesRes.data ?? [])) {
+    cashByStrategy.set(r.strategy_id as number, Number(r.cash));
+    if (r.max_equity != null) maxEquityByStrategy.set(r.strategy_id as number, Number(r.max_equity));
+    if (r.max_drawdown_pct != null) maxDrawdownByStrategy.set(r.strategy_id as number, Number(r.max_drawdown_pct));
+  }
 
   const openByStrategy = new Map<number, OpenPos[]>();
   for (const p of (openRes.data ?? []) as OpenPos[]) {
@@ -589,7 +604,7 @@ async function run() {
 
     // ── Buy-kandidaten zoeken & kopen ──────────────────────────────────────────
     const slotsAvailable = Math.max(0, cfg.maxPos - stillOpenTickers.size);
-    if (slotsAvailable > 0 && cash - cfg.posSize >= 200) {
+    if (slotsAvailable > 0 && cash - cfg.posSize >= 200 && isBullMarket) {
       const candidates: Array<{
         ticker: string; price: number; score: number; rankScore: number;
         sector: string | null; signals: SigRow[]; reason: string;
@@ -661,7 +676,14 @@ async function run() {
       posVal += Number(b.qty as number) * Number(b.avg_price as number);
     }
     const totalEquity = cash + posVal;
-    stateUpdates.push({ strategy_id: sid, cash, last_run_at: now.toISOString() });
+
+    // Drawdown-tracking: houdt het hoogste punt bij en berekent de max. terugval
+    const prevMaxEquity  = maxEquityByStrategy.get(sid) ?? totalEquity;
+    const newMaxEquity   = Math.max(totalEquity, prevMaxEquity);
+    const ddFromPeak     = newMaxEquity > 0 ? ((newMaxEquity - totalEquity) / newMaxEquity) * 100 : 0;
+    const newMaxDrawdown = Math.max(ddFromPeak, maxDrawdownByStrategy.get(sid) ?? 0);
+
+    stateUpdates.push({ strategy_id: sid, cash, last_run_at: now.toISOString(), max_equity: +newMaxEquity.toFixed(4), max_drawdown_pct: +newMaxDrawdown.toFixed(4) });
     equityRows.push({ strategy_id: sid, date: today, cash, positions_value: posVal, total_equity: totalEquity, positions_count: stillOpenTickers.size, computed_at: now.toISOString() });
   }
 

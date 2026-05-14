@@ -105,7 +105,7 @@ async function run(): Promise<RunResult> {
   const SIGNAL_DECAY_MIN_DAYS = Number(_cfg.signal_decay_min_days ?? 20);
 
   // 1b) State + open posities + marktdata ophalen.
-  const [stateRes, posRes, summaryRes, tickersRes, signalsRes] = await Promise.all([
+  const [stateRes, posRes, summaryRes, tickersRes, signalsRes, regimeRes, stratPosRes] = await Promise.all([
     sb.from("xinix_paper_state").select("*").eq("id", 1).single(),
     sb.from("xinix_paper_positions")
       .select("id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, entry_signal_types, entry_sector, partial_exits")
@@ -115,10 +115,27 @@ async function run(): Promise<RunResult> {
     sb.from("signal_events").select("ticker, signal_type, severity, detected_at")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
       .order("detected_at", { ascending: false }).limit(2000),
+    sb.from("market_regime").select("is_bull, updated_at").eq("id", 1).maybeSingle(),
+    // Hoeveel strategieën houden momenteel elk ticker? → consensus-signaal
+    sb.from("xinix_strategy_positions").select("ticker").is("closed_at", null),
   ]);
 
   if (stateRes.error || !stateRes.data) throw new Error(`state: ${stateRes.error?.message ?? "no state"}`);
   let cash = Number(stateRes.data.cash);
+
+  // Marktregime: kopen alleen in bull-markt. Verouderde data (>3d) → standaard bull.
+  const regimeRow  = regimeRes.data;
+  const regimeAgeD = regimeRow?.updated_at
+    ? (now.getTime() - new Date(regimeRow.updated_at).getTime()) / 86400000
+    : 999;
+  const isBullMarket = regimeAgeD < 3 ? (regimeRow?.is_bull ?? true) : true;
+
+  // Consensus: tel hoeveel strategieën elk ticker momenteel houden.
+  const consensusByTicker = new Map<string, number>();
+  for (const p of (stratPosRes.data ?? [])) {
+    const t = p.ticker as string;
+    consensusByTicker.set(t, (consensusByTicker.get(t) ?? 0) + 1);
+  }
   const positions = (posRes.data ?? []) as Position[];
   const priceByTicker = new Map<string, number>();
   for (const p of (summaryRes.data ?? [])) {
@@ -278,7 +295,10 @@ async function run(): Promise<RunResult> {
     const positiveSignals = sigs.filter((s) => POSITIVE_SIGNAL_TYPES.has(s.signal_type));
     const redCount = positiveSignals.filter((s) => s.severity === "red").length;
     const orangeCount = positiveSignals.filter((s) => s.severity === "orange").length;
-    const rankScore = score + redCount * 25 + orangeCount * 10;
+    // Consensus-bonus: elke extra strategie die dit ticker houdt geeft +2 (max +20).
+    // Tickers die door veel strategieën worden gehouden hebben hogere prioriteit.
+    const consensusBonus = Math.min((consensusByTicker.get(t.ticker) ?? 0) * 2, 20);
+    const rankScore = score + redCount * 25 + orangeCount * 10 + consensusBonus;
     const reasonParts: string[] = [];
     if (scoreOk) reasonParts.push(`score ${score}/100`);
     if (redCount > 0) reasonParts.push(`${redCount}× rood signaal`);
@@ -293,9 +313,10 @@ async function run(): Promise<RunResult> {
   candidates.sort((a, b) => b.rankScore - a.rankScore);
 
   // 5) BUY uitvoeren (transactiekosten inbegrepen).
+  // In een bear-markt (SPY ≤ 200d MA) kopen we niets — bestaande posities lopen door.
   let bought = 0;
   const buyReasons: string[] = [];
-  for (const c of candidates) {
+  for (const c of isBullMarket ? candidates : []) {
     if (bought >= slotsAvailable) break;
     if (c.price <= 0) continue;
     const qty = Math.floor((POSITION_SIZE_USD / c.price) * 1000) / 1000;
@@ -348,7 +369,8 @@ async function run(): Promise<RunResult> {
     total_equity: totalEquity, positions_count: openCount, computed_at: now.toISOString(),
   }, { onConflict: "date" });
 
-  const msg = `${closedCount} gesloten (${closedRealizedUsd >= 0 ? "+" : ""}$${closedRealizedUsd.toFixed(0)}), ${partialCount} deelwinst, ${bought} gekocht, ${openCount} open, equity $${totalEquity.toFixed(0)}, cash $${cash.toFixed(0)}`;
+  const regimeLabel = isBullMarket ? "bull" : "bear (geen aankopen)";
+  const msg = `${closedCount} gesloten (${closedRealizedUsd >= 0 ? "+" : ""}$${closedRealizedUsd.toFixed(0)}), ${partialCount} deelwinst, ${bought} gekocht, ${openCount} open, equity $${totalEquity.toFixed(0)}, cash $${cash.toFixed(0)} [markt: ${regimeLabel}]`;
   return {
     ok: true,
     message: msg,

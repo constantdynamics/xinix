@@ -110,7 +110,7 @@ function lcg(seed: number): () => number {
   };
 }
 
-function mutate(cfg: Cfg, rand: () => number, donors: Cfg[]): Cfg {
+function mutate(cfg: Cfg, rand: () => number, donors: Cfg[], maxMuts = 3): Cfg {
   const donor = donors.length > 0 ? donors[Math.floor(rand() * donors.length)] : null;
 
   function inherit<T>(current: T, donorVal: T | undefined, randomFn: (c: T) => T): T {
@@ -143,7 +143,7 @@ function mutate(cfg: Cfg, rand: () => number, donors: Cfg[]): Cfg {
       v => !v) }),
   ];
 
-  const n = 1 + Math.floor(rand() * 3);
+  const n = 1 + Math.floor(rand() * maxMuts);
   let result = { ...cfg };
   const used = new Set<number>();
   for (let i = 0; i < n; i++) {
@@ -199,12 +199,15 @@ Deno.serve(async (req) => {
     }
 
     // ── Data ophalen ──────────────────────────────────────────────────────────
-    const [stratRes, statesRes, openRes, summaryRes, closedRes] = await Promise.all([
+    const [stratRes, statesRes, openRes, summaryRes, closedRes, lastEvolveRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected").eq("active", true),
-      sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital"),
+      sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, max_drawdown_pct"),
       sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price").is("closed_at", null),
       sb.from("signal_price_summary").select("ticker, last_close"),
       sb.from("xinix_strategy_positions").select("strategy_id, return_pct").not("closed_at", "is", null),
+      // Vorige evolve-run voor stagnatie-detectie (adaptieve mutatierate)
+      sb.from("signal_runs").select("metrics").eq("job", "xinix-evolve").eq("ok", true)
+        .order("ran_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
 
     const strats = stratRes.data ?? [];
@@ -243,9 +246,13 @@ Deno.serve(async (req) => {
       if (r.last_close != null) priceMap.set(r.ticker as string, Number(r.last_close));
     }
 
-    const stateMap = new Map<number, { cash: number; initial: number }>();
+    const stateMap = new Map<number, { cash: number; initial: number; maxDrawdown: number }>();
     for (const s of (statesRes.data ?? [])) {
-      stateMap.set(s.strategy_id as number, { cash: Number(s.cash), initial: Number(s.initial_capital ?? 10000) });
+      stateMap.set(s.strategy_id as number, {
+        cash: Number(s.cash),
+        initial: Number(s.initial_capital ?? 10000),
+        maxDrawdown: Number(s.max_drawdown_pct ?? 0),
+      });
     }
 
     const openVal = new Map<number, number>();
@@ -258,24 +265,41 @@ Deno.serve(async (req) => {
     interface Scored {
       id: number; slug: string; name: string; grp: string;
       config: Cfg; generation: number; protected: boolean;
-      returnPct: number; sharpe: number | null; compositeFitness: number;
+      returnPct: number; sharpe: number | null; maxDrawdown: number; compositeFitness: number;
     }
     const scored: Scored[] = [];
     for (const strat of strats) {
       const state = stateMap.get(strat.id as number);
       if (!state) continue;
-      const posVal          = openVal.get(strat.id as number) ?? 0;
-      const returnPct       = (state.cash + posVal - state.initial) / state.initial * 100;
-      const sharpe          = sharpeByStrat.get(strat.id as number) ?? null;
-      const sharpeBonus     = sharpe != null ? Math.max(-24, Math.min(24, sharpe * SHARPE_WEIGHT)) : 0;
-      const compositeFitness = returnPct + sharpeBonus;
+      const posVal      = openVal.get(strat.id as number) ?? 0;
+      const returnPct   = (state.cash + posVal - state.initial) / state.initial * 100;
+      const sharpe      = sharpeByStrat.get(strat.id as number) ?? null;
+      const sharpeBonus = sharpe != null ? Math.max(-24, Math.min(24, sharpe * SHARPE_WEIGHT)) : 0;
+      const maxDrawdown = state.maxDrawdown;
+      // Drawdown-penalty: elke % max-drawdown kost 0,4 fitness-punt (max -16).
+      // Gecombineerd met Sharpe-bonus selecteert dit op echte risico-gecorrigeerde prestatie.
+      const drawdownPenalty  = Math.min(maxDrawdown * 0.4, 16);
+      const compositeFitness = returnPct + sharpeBonus - drawdownPenalty;
       scored.push({
         id: strat.id as number, slug: strat.slug as string, name: strat.name as string,
         grp: strat.grp as string, config: strat.config as Cfg,
         generation: (strat.generation as number) ?? 1, protected: (strat.protected as boolean) ?? false,
-        returnPct, sharpe, compositeFitness,
+        returnPct, sharpe, maxDrawdown, compositeFitness,
       });
     }
+
+    // ── Stagnatie-detectie voor adaptieve mutatierate ─────────────────────────
+    // Als de top-10% fitness minder dan 1pp verbetert t.o.v. de vorige cyclus →
+    // verhoog het aantal mutaties per nakomeling (meer exploratief).
+    const prevAvgTopFitness = ((lastEvolveRes.data?.metrics ?? {}) as Record<string, unknown>)?.avg_top_fitness as number | null ?? null;
+    const topN = Math.max(5, Math.ceil(scored.length * 0.10));
+    const avgTopFitness = [...scored]
+      .sort((a, b) => b.compositeFitness - a.compositeFitness)
+      .slice(0, topN)
+      .reduce((sum, s) => sum + s.compositeFitness, 0) / topN;
+    const isStagnating = prevAvgTopFitness !== null && (avgTopFitness - prevAvgTopFitness) < 1.0;
+    // maxMuts: normaal 1–3, bij stagnatie 2–5 mutaties per nakomeling
+    const maxMuts = isStagnating ? 5 : 3;
 
     // ── Splits: beschermd vs cullable (gesorteerd op compositeFitness) ────────
     const cullable   = scored.filter(s => !s.protected).sort((a, b) => a.compositeFitness - b.compositeFitness);
@@ -357,7 +381,7 @@ Deno.serve(async (req) => {
       let attempts = 0;
       do {
         const rand = lcg(now + i * 997 + parent.id * 31 + attempts * 7919);
-        newCfg = mutate(parent.config, rand, donorCfgs);
+        newCfg = mutate(parent.config, rand, donorCfgs, maxMuts);
         attempts++;
       } while (activeConfigs.has(cfgHash(newCfg)) && attempts < 10);
 
@@ -409,12 +433,21 @@ Deno.serve(async (req) => {
     const earlyMsg    = earlyRetire.length > 0 ? ` + ${earlyRetire.length} vervroegd gepensioneerd` : "";
     const sharpeMsg   = sharpeByStrat.size > 0 ? `, ${sharpeByStrat.size} met Sharpe-data` : "";
     const nicheMsg    = nicheRedirects > 0 ? `, ${nicheRedirects}× bijgestuurd naar vrije niche` : "";
+    const stagMsg     = isStagnating ? ` [STAGNATIE: hoge mutatierate ${maxMuts}]` : "";
     const nichesNow   = new Set([...nicheCounts.keys()]).size;
     const logMsg = `Gen-${nextGen}: ${toCull.length} gecullled${earlyMsg}, `
-      + `${offspringRows.length} nakomelingen gespawnd (${donors.length} donors${sharpeMsg}${nicheMsg}). `
-      + `Beschermd: ${protected_.length} + ${ELITE_COUNT} elites. Niches actief: ${nichesNow}.`;
+      + `${offspringRows.length} nakomelingen gespawnd (${donors.length} donors${sharpeMsg}${nicheMsg}${stagMsg}). `
+      + `Beschermd: ${protected_.length} + ${ELITE_COUNT} elites. Niches actief: ${nichesNow}. Top-fitness: ${avgTopFitness.toFixed(1)}pp.`;
 
-    await sb.from("signal_runs").insert({ job: "xinix-evolve", ok: true, message: logMsg, ran_at: retiredAt });
+    await sb.from("signal_runs").insert({
+      job: "xinix-evolve", ok: true, message: logMsg, ran_at: retiredAt,
+      metrics: {
+        generation: nextGen, avg_top_fitness: +avgTopFitness.toFixed(2),
+        is_stagnating: isStagnating, max_muts: maxMuts,
+        culled: toCull.length, spawned: offspringRows.length,
+        niche_redirects: nicheRedirects, niches_active: nichesNow,
+      },
+    });
 
     const nicheDistribution: Record<string, number> = {};
     for (const [nk, cnt] of nicheCounts.entries()) nicheDistribution[nk] = cnt;
