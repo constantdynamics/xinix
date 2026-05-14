@@ -466,6 +466,52 @@ export async function fetchSimResults(): Promise<SimResults> {
   return (await res.json()) as SimResults;
 }
 
+// ── Xinix kennisexport ──
+
+export interface KnowledgeExportSummary {
+  id: number;
+  exported_at: string;
+  period_start: string | null;
+  period_end: string | null;
+  type: string;
+  strategy_count: number | null;
+  ticker_count: number | null;
+  closed_positions_count: number | null;
+  open_positions_count: number | null;
+  best_strategy_name: string | null;
+  best_strategy_return: number | null;
+  worst_strategy_name: string | null;
+  worst_strategy_return: number | null;
+  avg_portfolio_return: number | null;
+  strategies_in_profit: number | null;
+  evolution_cycles: number | null;
+  summary: string | null;
+}
+
+export interface KnowledgeExportList {
+  exports: KnowledgeExportSummary[];
+}
+
+export async function fetchKnowledgeExports(): Promise<KnowledgeExportList> {
+  const res = await fetch(apiUrl("/api/xinix-knowledge-export"), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`knowledge-export list ${res.status}`);
+  return (await res.json()) as KnowledgeExportList;
+}
+
+export async function triggerKnowledgeExport(): Promise<{ ok: boolean; export_id: number | null; strategy_count: number; ticker_count: number; closed_positions_count: number }> {
+  const res = await fetch(apiUrl("/api/xinix-knowledge-export"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`knowledge-export ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+export function knowledgeExportDownloadUrl(id: number): string {
+  return apiUrl(`/api/xinix-knowledge-export?id=${id}`);
+}
+
 export async function triggerEvolve(force = false): Promise<unknown> {
   const headers: Record<string, string> = { "Content-Type": "application/json", ...authHeaders() };
   if (force) headers["x-force-evolve"] = "1";

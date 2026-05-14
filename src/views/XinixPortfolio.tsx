@@ -2,8 +2,11 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   fetchXinixPortfolio,
   fetchSimResults,
+  fetchKnowledgeExports,
   triggerJob,
   triggerEvolve,
+  triggerKnowledgeExport,
+  knowledgeExportDownloadUrl,
   getToken,
   type XinixPortfolio,
   type XinixOpenPosition,
@@ -13,6 +16,7 @@ import {
   type SimEvolution,
   type SimPosDetail,
   type SimStrategyConfig,
+  type KnowledgeExportSummary,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
@@ -583,7 +587,8 @@ function GenBadge({ gen, protected: prot }: { gen: number; protected: boolean })
 
 // ── Per-strategie uitleg helpers ─────────────────────────────────────────────
 
-function stratDescBullets(cfg: SimStrategyConfig): [string, string, string] {
+function stratDescBullets(s: SimStrategy): [string, string, string] {
+  const cfg = s.config;
   const sectorDesc = cfg.sector === "biotech" ? "biotechbedrijven"
     : cfg.sector === "mining" ? "mijnbouwbedrijven"
     : "bedrijven uit alle sectoren";
@@ -602,12 +607,18 @@ function stratDescBullets(cfg: SimStrategyConfig): [string, string, string] {
     : "";
   const b2 = `Houdt posities maximaal ${holdDesc}, max. ${cfg.maxPos} posities van ~$${cfg.posSize}${limitDesc}.`;
 
-  const riskParts: string[] = [];
-  if (cfg.stop != null) riskParts.push(`stop-loss op -${Math.round(Math.abs(cfg.stop) * 100)}%`);
-  else riskParts.push("geen stop-loss (tijdvenster als risicogrens)");
-  if (cfg.tp != null) riskParts.push(`take-profit op +${Math.round(cfg.tp * 100)}%`);
-  else riskParts.push("geen take-profit (laat winnaars doorlopen)");
-  const b3 = `Risicobeheer: ${riskParts.join(", ")}.`;
+  // Bullet 3: risicobeheer + echte performance als die beschikbaar is
+  const stopDesc = cfg.stop != null ? `stop-loss op -${Math.round(Math.abs(cfg.stop) * 100)}%` : "geen stop-loss";
+  const tpDesc = cfg.tp != null ? `take-profit op +${Math.round(cfg.tp * 100)}%` : "geen take-profit";
+
+  let b3: string;
+  if (s.closed_count >= 3) {
+    const hitPct = Math.round(s.win_rate * 100);
+    const tone = s.total_return_pct >= 0 ? "positief" : "negatief";
+    b3 = `${stopDesc}, ${tpDesc}. Prestaties tot nu: ${s.closed_count} trades, ${hitPct}% hitrate, gem. ${s.avg_return_pct >= 0 ? "+" : ""}${s.avg_return_pct.toFixed(1)}% per trade — ${tone} begin.`;
+  } else {
+    b3 = `${stopDesc}, ${tpDesc} — ${cfg.tp == null ? "laat winnaars doorlopen tot het tijdvenster sluit" : "neemt winst definitief mee"}.`;
+  }
 
   return [b1, b2, b3];
 }
@@ -889,6 +900,18 @@ function stratLabels(s: SimStrategy): string[] {
   const grpExtra = GRP_LABELS_EXTRA[s.grp] ?? ["Geëvolueerde variant", "Adaptieve strategie"];
   labels.push(...grpExtra);
 
+  // Performance-labels (data-gedreven, optioneel)
+  if (s.closed_count >= 5) {
+    if (s.win_rate >= 0.70) labels.push("Hoge hitrate (≥70%)");
+    else if (s.win_rate <= 0.35) labels.push("Lage hitrate (≤35%)");
+  }
+  if (s.closed_count >= 10) labels.push("Actief handelend (≥10 trades)");
+  if (s.open_count === 0 && s.closed_count === 0) labels.push("Wacht op entry");
+  if (s.rank <= 10) labels.push("🏆 Top-10 performer");
+  else if (s.rank <= 30) labels.push("Top-30");
+  if (s.total_return_pct >= 20) labels.push("Uitzonderlijk rendement (>+20%)");
+  else if (s.total_return_pct >= 10) labels.push("Sterk rendement (>+10%)");
+
   return labels;
 }
 
@@ -957,7 +980,7 @@ function WhyBought({ pos, cfg }: { pos: SimPosDetail; cfg: SimStrategyConfig }) 
 // ── StrategyDetailPanel ───────────────────────────────────────────────────────
 
 function StrategyDetailPanel({ s, all }: { s: SimStrategy; all: SimStrategy[] }) {
-  const descBullets = stratDescBullets(s.config);
+  const descBullets = stratDescBullets(s);
   const uniqueBullets = stratUniqueBullets(s, all);
   const labels = stratLabels(s);
   const hasPositions = (s.open_pos_detail?.length ?? 0) > 0 || (s.closed_pos_detail?.length ?? 0) > 0;
@@ -1451,6 +1474,171 @@ function RetiredSection({ retired }: { retired: SimEvolution["retired"] }) {
   );
 }
 
+// ── KnowledgeExportSection ────────────────────────────────────────────────────
+
+function KnowledgeExportSection({ isAdmin }: { isAdmin: boolean }) {
+  const [exports, setExports] = useState<KnowledgeExportSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [showSummary, setShowSummary] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetchKnowledgeExports()
+      .then(r => setExports(r.exports))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function doExport() {
+    setExporting(true);
+    setExportMsg(null);
+    try {
+      const r = await triggerKnowledgeExport();
+      setExportMsg(`✅ Export #${r.export_id ?? "?"} aangemaakt — ${r.strategy_count} strategieën, ${r.ticker_count} tickers, ${r.closed_positions_count} gesloten trades. Herlaad om te downloaden.`);
+      // Herlaad lijst
+      const updated = await fetchKnowledgeExports();
+      setExports(updated.exports);
+    } catch (e) {
+      setExportMsg(`❌ ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  // Volgende geplande export (1e van de volgende maand)
+  const nextExport = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1, 1);
+    d.setHours(6, 0, 0, 0);
+    return d;
+  }, []);
+  const daysUntilNext = Math.ceil((nextExport.getTime() - Date.now()) / 86400000);
+
+  return (
+    <div className="space-y-4">
+      {/* Header card */}
+      <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.02]">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-1">
+              Kenniscumulatie & export
+            </div>
+            <div className="text-sm font-semibold text-neutral-100">
+              Maandelijkse snapshot van alle strategie-kennis
+            </div>
+          </div>
+          <div className="text-center text-[11px] shrink-0">
+            <div className="text-2xl font-bold tabular text-neutral-100">{exports.length}</div>
+            <div className="text-neutral-500">snapshots</div>
+          </div>
+        </div>
+
+        <p className="text-xs text-neutral-400 leading-relaxed mb-3">
+          Elke <strong className="text-neutral-200">1e van de maand</strong> wordt automatisch een volledige snapshot opgeslagen: alle 100 strategieën met hun config + performance, de volledige watchlist met buy-limieten en medailles, alle gesloten posities uitgesplitst per signaaltype + sector, en configuratie-inzichten.
+          Op de <strong className="text-neutral-200">25e</strong> ontvang je een herinnering om de stand ook handmatig door te nemen.
+        </p>
+
+        <div className="text-[11px] text-neutral-500 mb-3">
+          Volgende automatische export: <strong className="text-neutral-300">{nextExport.toLocaleDateString("nl-NL", { day: "2-digit", month: "long", year: "numeric" })}</strong>
+          {" "}(<span className={daysUntilNext <= 7 ? "text-fog-warn" : ""}>{daysUntilNext} dag{daysUntilNext === 1 ? "" : "en"}</span>)
+        </div>
+
+        {exportMsg && (
+          <div className={`text-xs mb-3 p-2 rounded border ${exportMsg.startsWith("✅") ? "border-fog-lime/30 text-fog-lime" : "border-fog-loss/30 text-fog-loss"}`}>
+            {exportMsg}
+          </div>
+        )}
+
+        {isAdmin && (
+          <Button size="sm" variant="secondary" disabled={exporting} onClick={doExport}>
+            {exporting ? "Exporteren…" : "📦 Export nu"}
+          </Button>
+        )}
+      </Card>
+
+      {/* Export history */}
+      {loading ? (
+        <div className="text-xs text-neutral-500 py-2">Laden…</div>
+      ) : exports.length === 0 ? (
+        <Card className="p-6 text-center text-xs text-neutral-500 italic">
+          Nog geen exports — de eerste automatische export verschijnt op de 1e van volgende maand, of klik "Export nu".
+        </Card>
+      ) : (
+        <Card className="p-0 overflow-hidden">
+          <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
+            Export-archief ({exports.length})
+          </div>
+          <div className="divide-y divide-ink-5/40">
+            {exports.map((ex) => (
+              <div key={ex.id} className="p-3 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-semibold text-neutral-200">
+                        #{ex.id} — {new Date(ex.exported_at).toLocaleDateString("nl-NL", { day: "2-digit", month: "long", year: "numeric" })}
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                        ex.type === "monthly_auto"
+                          ? "bg-fog-lime/10 border-fog-lime/30 text-fog-lime"
+                          : "bg-ink-3 border-ink-5 text-neutral-500"
+                      }`}>
+                        {ex.type === "monthly_auto" ? "auto" : "manueel"}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-3 mt-1 text-[11px] text-neutral-500">
+                      {ex.strategy_count != null && <span>{ex.strategy_count} strategieën</span>}
+                      {ex.ticker_count != null && <span>{ex.ticker_count} tickers</span>}
+                      {ex.closed_positions_count != null && <span>{ex.closed_positions_count} gesloten trades</span>}
+                      {ex.strategies_in_profit != null && ex.strategy_count && (
+                        <span className="text-fog-lime">{ex.strategies_in_profit}/{ex.strategy_count} in winst</span>
+                      )}
+                    </div>
+                    {ex.best_strategy_name && (
+                      <div className="text-[11px] text-neutral-400 mt-0.5">
+                        Beste: <span className="text-fog-lime font-medium">{ex.best_strategy_name}</span>
+                        {ex.best_strategy_return != null && (
+                          <span className="text-fog-lime"> (+{ex.best_strategy_return.toFixed(2)}%)</span>
+                        )}
+                        {ex.worst_strategy_name && ex.worst_strategy_return != null && (
+                          <span className="text-neutral-500"> · slechtste: {ex.worst_strategy_name} ({ex.worst_strategy_return.toFixed(2)}%)</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <a
+                      href={knowledgeExportDownloadUrl(ex.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2 py-1 rounded text-[11px] border border-ink-5 text-neutral-400 hover:text-neutral-200 hover:border-neutral-500 transition-colors"
+                    >
+                      ⬇ JSON
+                    </a>
+                    {ex.summary && (
+                      <button
+                        onClick={() => setShowSummary(showSummary === ex.id ? null : ex.id)}
+                        className="px-2 py-1 rounded text-[11px] border border-ink-5 text-neutral-400 hover:text-neutral-200 hover:border-neutral-500 transition-colors"
+                      >
+                        {showSummary === ex.id ? "▲ Verberg" : "▼ Samenvatting"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {showSummary === ex.id && ex.summary && (
+                  <pre className="text-[10px] text-neutral-400 bg-ink-3/40 rounded p-3 overflow-x-auto whitespace-pre-wrap leading-relaxed border border-ink-5/40">
+                    {ex.summary}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 export function SimulationView() {
   const [sim, setSim] = useState<SimResults | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1569,6 +1757,7 @@ export function SimulationView() {
         <div className="space-y-4">
           <EvolutionPanel evo={evolution} isAdmin={isAdmin} />
           <RetiredSection retired={evolution.retired} />
+          <KnowledgeExportSection isAdmin={isAdmin} />
         </div>
       )}
     </section>
