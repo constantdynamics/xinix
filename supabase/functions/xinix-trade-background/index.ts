@@ -1,19 +1,19 @@
-// xinix-trade-background — dagelijkse paper-trading engine.
+// xinix-trade-background — dagelijkse paper-trading engine (enkelvoudige portefeuille).
 //
-// Strategie (vast tijdvenster):
+// Strategie (vast tijdvenster met slimme exits):
 // - Universe = active watchlist met current price + score
 // - BUY-criteria: score >= ENTRY_MIN_SCORE OF actief rood-signaal,
 //   EN current price <= buy_limit * (1 + ENTRY_LIMIT_BUFFER),
 //   EN nog niet in open positie
 // - Positie-grootte: $POSITION_SIZE, max TARGET_POSITIONS open
 // - EXIT-criteria:
-//   * stop-loss: price <= avg_price * (1 - STOP_LOSS)
+//   * trailing stop: stop_loss_price ratchets mee omhoog — beschermt winsten
+//   * deelwinst: verkoop helft bij +PARTIAL_TP_PCT winst (vergrendel deels)
+//   * signaalverval: alle entry-signalen verlopen + verlies ≥ SIGNAL_DECAY_PCT → vroegtijdig uit
 //   * tijdvenster: vandaag >= scheduled_exit_date (entry + HOLD_DAYS)
-// - Daarna: equity snapshot wegschrijven
+// - Transactiekosten: TX_COST_PCT per transactie (koop én verkoop) — marktconform
 //
 // Wordt aangeroepen door cron `xinix-trade-daily` (22:00 UTC, na US close).
-// Geen ntfy — alles wordt in de DB bijgehouden en zichtbaar op de
-// "Xinix" tab.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -43,18 +43,20 @@ function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r
 function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
 function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
 
-// ── Strategie-config ──────────────────────────────────────────────
-const TARGET_POSITIONS = 8;        // 8 open posities = ~$1200 elk
-const POSITION_SIZE_USD = 1200;    // initieel bedrag per koop
-const CASH_RESERVE_USD = 200;      // minimaal aanhouden voor nieuwe kansen
-const HOLD_DAYS = 60;              // vast tijdvenster
-const STOP_LOSS = 0.15;            // -15% triggert stop-loss
-const ENTRY_MIN_SCORE = 65;        // BUY-criterium op goud_score
-const ENTRY_LIMIT_BUFFER = 0.10;   // koers mag tot 10% boven buy_limit zitten
+// ── Strategie-config ──────────────────────────────────────────────────────────
+const TARGET_POSITIONS = 8;
+const POSITION_SIZE_USD = 1200;
+const CASH_RESERVE_USD = 200;
+const HOLD_DAYS = 60;
+const STOP_LOSS = 0.15;           // trailing stop fractie (ratchets mee omhoog)
+const PARTIAL_TP_PCT = 0.25;      // verkoop helft bij +25% winst (deelwinst)
+const ENTRY_MIN_SCORE = 65;
+const ENTRY_LIMIT_BUFFER = 0.10;
 const RED_SEVERITY_QUALIFIES = true;
+const TX_COST = 0.001;            // 0,1% per transactie (marktconforme papierkosten)
+const SIGNAL_DECAY_LOSS_PCT = -3; // signaalverval-exit bij ≥ 3% verlies na signaalexpiratie
+const SIGNAL_DECAY_MIN_DAYS = 20; // minimaal 20 dagen gehouden voor signaalverval-check
 
-// Heat-bijdrage per signaal type — alleen positieve buy-triggers tellen
-// (zelfde set als dashboard).
 const POSITIVE_SIGNAL_TYPES = new Set([
   "fda_approval", "topline_positive", "phase_success", "breakthrough_designation",
   "buyout_definitive", "bonanza_au", "discovery_announcement", "permit", "first_pour",
@@ -66,6 +68,9 @@ const POSITIVE_SIGNAL_TYPES = new Set([
   "near5y_low_gem", "loser_gem",
 ]);
 
+interface PartialExit {
+  qty_sold: number; net_proceeds: number; at: string; reason: string;
+}
 interface Position {
   id: number;
   ticker: string;
@@ -76,6 +81,7 @@ interface Position {
   stop_loss_price: number;
   entry_signal_types: string[];
   entry_sector: string | null;
+  partial_exits: PartialExit[];
 }
 
 Deno.serve(async (req) => {
@@ -94,13 +100,17 @@ async function run(): Promise<RunResult> {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
 
-  // 1) State + open posities + huidige prijzen ophalen.
+  // 1) State + open posities + marktdata ophalen.
   const [stateRes, posRes, summaryRes, tickersRes, signalsRes] = await Promise.all([
     sb.from("xinix_paper_state").select("*").eq("id", 1).single(),
-    sb.from("xinix_paper_positions").select("id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, entry_signal_types, entry_sector").is("closed_at", null),
+    sb.from("xinix_paper_positions")
+      .select("id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, entry_signal_types, entry_sector, partial_exits")
+      .is("closed_at", null),
     sb.from("signal_price_summary").select("ticker, last_close"),
     sb.from("signal_tickers").select("ticker, company, sector, goud_score, buy_limit, active, price_benched").eq("active", true).eq("price_benched", false),
-    sb.from("signal_events").select("ticker, signal_type, severity, detected_at").or("expires_at.is.null,expires_at.gt." + now.toISOString()).order("detected_at", { ascending: false }).limit(2000),
+    sb.from("signal_events").select("ticker, signal_type, severity, detected_at")
+      .or("expires_at.is.null,expires_at.gt." + now.toISOString())
+      .order("detected_at", { ascending: false }).limit(2000),
   ]);
 
   if (stateRes.error || !stateRes.data) throw new Error(`state: ${stateRes.error?.message ?? "no state"}`);
@@ -124,34 +134,112 @@ async function run(): Promise<RunResult> {
   // 2) Exit-checks op open posities.
   let closedCount = 0;
   let closedRealizedUsd = 0;
+  let partialCount = 0;
+  const closedIds = new Set<number>();
+
   for (const p of positions) {
     const price = priceByTicker.get(p.ticker);
-    if (price == null) continue; // geen prijs vandaag → laat de positie staan
+    if (price == null) continue;
+
+    const fmtPrc = (n: number) => n.toFixed(price < 1 ? 4 : price < 10 ? 3 : 2);
+
+    // Trailing stop: vergelijk met geratchete stop uit DB (gezet in vorige runs)
     const stopTriggered = price <= Number(p.stop_loss_price);
     const timeTriggered = now >= new Date(p.scheduled_exit_date);
-    if (!stopTriggered && !timeTriggered) continue;
 
-    const exitPrice = price; // altijd werkelijke marktprijs; stop-loss is de trigger, niet de fill
-    const proceeds = Number(p.qty) * exitPrice;
-    const cost = Number(p.qty) * Number(p.avg_price);
-    const returnUsd = proceeds - cost;
-    const returnPct = cost > 0 ? (returnUsd / cost) * 100 : 0;
+    // Deelwinst: verkoop helft bij PARTIAL_TP_PCT, maar alleen 1× per positie
+    if (!stopTriggered && !timeTriggered) {
+      const alreadyPartial = (p.partial_exits ?? []).length > 0;
+      if (!alreadyPartial && price >= Number(p.avg_price) * (1 + PARTIAL_TP_PCT)) {
+        const soldQty = Math.floor(Number(p.qty) / 2 * 1000) / 1000;
+        const remainingQty = Number(p.qty) - soldQty;
+        if (soldQty > 0 && remainingQty > 0) {
+          const netProceeds = soldQty * price * (1 - TX_COST);
+          const peEntry: PartialExit = {
+            qty_sold: soldQty,
+            net_proceeds: +netProceeds.toFixed(4),
+            at: now.toISOString(),
+            reason: `Deelwinst +${((price / Number(p.avg_price) - 1) * 100).toFixed(1)}% — helft verkocht`,
+          };
+          const { error } = await sb.from("xinix_paper_positions").update({
+            qty: remainingQty,
+            partial_exits: [...(p.partial_exits ?? []), peEntry],
+          }).eq("id", p.id);
+          if (error) throw new Error(`partial sell ${p.ticker}: ${error.message}`);
+          cash += netProceeds;
+          partialCount++;
+          continue; // positie blijft open met resterende helft
+        }
+      }
+    }
+
+    // Signaalverval-exit: alle entry-signalen verlopen + verlies → eerder uitstappen
+    let signalDecayExit = false;
+    if (!stopTriggered && !timeTriggered) {
+      const entrySigs = p.entry_signal_types ?? [];
+      if (entrySigs.length > 0) {
+        const heldDays = Math.round((now.getTime() - new Date(p.entry_date).getTime()) / 86_400_000);
+        if (heldDays >= SIGNAL_DECAY_MIN_DAYS) {
+          const retPct = (price - Number(p.avg_price)) / Number(p.avg_price) * 100;
+          if (retPct < SIGNAL_DECAY_LOSS_PCT) {
+            const activeSigsForTicker = new Set(
+              (signalsByTicker.get(p.ticker) ?? [])
+                .filter(s => POSITIVE_SIGNAL_TYPES.has(s.signal_type))
+                .map(s => s.signal_type)
+            );
+            signalDecayExit = entrySigs.every(sig => !activeSigsForTicker.has(sig));
+          }
+        }
+      }
+    }
+
+    if (!stopTriggered && !timeTriggered && !signalDecayExit) {
+      // Positie blijft open: trailing stop ratchet bijwerken
+      const newStop = +fmtPrc(price * (1 - STOP_LOSS));
+      if (newStop > Number(p.stop_loss_price)) {
+        await sb.from("xinix_paper_positions").update({ stop_loss_price: newStop }).eq("id", p.id);
+      }
+      continue;
+    }
+
+    // ── Positie volledig sluiten ────────────────────────────────────────────────
+    const prevPartials = p.partial_exits ?? [];
+    let returnUsd: number, returnPct: number, netProceeds: number;
+
+    if (prevPartials.length > 0) {
+      const origQty = Number(p.qty) + prevPartials.reduce((s, pe) => s + pe.qty_sold, 0);
+      const origCost = origQty * Number(p.avg_price) * (1 + TX_COST);
+      const partialProc = prevPartials.reduce((s, pe) => s + pe.net_proceeds, 0);
+      netProceeds = Number(p.qty) * price * (1 - TX_COST);
+      returnUsd = partialProc + netProceeds - origCost;
+      returnPct = origCost > 0 ? (returnUsd / origCost) * 100 : 0;
+    } else {
+      netProceeds = Number(p.qty) * price * (1 - TX_COST);
+      const cost = Number(p.qty) * Number(p.avg_price) * (1 + TX_COST);
+      returnUsd = netProceeds - cost;
+      returnPct = cost > 0 ? (returnUsd / cost) * 100 : 0;
+    }
+
     const holdDays = Math.max(0, Math.round((now.getTime() - new Date(p.entry_date).getTime()) / 86_400_000));
+    const curRetPct = (price - Number(p.avg_price)) / Number(p.avg_price) * 100;
     const reason = stopTriggered
-      ? `Stop-loss (-15% gehaald: koers ${exitPrice.toFixed(price < 10 ? 3 : 2)} ≤ stop ${Number(p.stop_loss_price).toFixed(price < 10 ? 3 : 2)})`
+      ? `Trailing stop -${(STOP_LOSS * 100).toFixed(0)}% (koers ${fmtPrc(price)} ≤ stop ${fmtPrc(Number(p.stop_loss_price))})`
+      : signalDecayExit
+      ? `Signaalthesis verlopen + verlies ${curRetPct.toFixed(1)}%`
       : `Tijdvenster ${HOLD_DAYS}d verstreken — automatische exit`;
 
     const { error } = await sb.from("xinix_paper_positions").update({
       closed_at: now.toISOString(),
-      closed_price: exitPrice,
+      closed_price: price,
       closed_reason: reason,
-      return_pct: returnPct,
-      return_usd: returnUsd,
+      return_pct: +returnPct.toFixed(4),
+      return_usd: +returnUsd.toFixed(4),
       hold_days: holdDays,
     }).eq("id", p.id);
     if (error) throw new Error(`close ${p.ticker}: ${error.message}`);
 
-    cash += proceeds;
+    cash += netProceeds;
+    closedIds.add(p.id);
     closedCount++;
     closedRealizedUsd += returnUsd;
   }
@@ -181,40 +269,38 @@ async function run(): Promise<RunResult> {
     const hasRed = RED_SEVERITY_QUALIFIES && sigs.some((s) => s.severity === "red" && POSITIVE_SIGNAL_TYPES.has(s.signal_type));
     const scoreOk = score >= ENTRY_MIN_SCORE;
     if (!scoreOk && !hasRed) continue;
-    // Limit-check: prijs mag tot ENTRY_LIMIT_BUFFER boven buy_limit zitten.
     if (t.buy_limit != null && price > Number(t.buy_limit) * (1 + ENTRY_LIMIT_BUFFER)) continue;
 
     const positiveSignals = sigs.filter((s) => POSITIVE_SIGNAL_TYPES.has(s.signal_type));
     const redCount = positiveSignals.filter((s) => s.severity === "red").length;
     const orangeCount = positiveSignals.filter((s) => s.severity === "orange").length;
-    // Ranking: score + bonus per signal-severity (red >> orange >> yellow).
     const rankScore = score + redCount * 25 + orangeCount * 10;
     const reasonParts: string[] = [];
     if (scoreOk) reasonParts.push(`score ${score}/100`);
     if (redCount > 0) reasonParts.push(`${redCount}× rood signaal`);
     if (orangeCount > 0) reasonParts.push(`${orangeCount}× oranje signaal`);
     if (t.buy_limit != null && price <= Number(t.buy_limit)) reasonParts.push("op/onder buy_limit");
-    const reason = reasonParts.join(" · ") || "kwalificeert";
     candidates.push({
       ticker: t.ticker, company: t.company, sector: t.sector,
       price, score, buyLimit: t.buy_limit != null ? Number(t.buy_limit) : null,
-      signals: positiveSignals, rankScore, reason,
+      signals: positiveSignals, rankScore, reason: reasonParts.join(" · ") || "kwalificeert",
     });
   }
   candidates.sort((a, b) => b.rankScore - a.rankScore);
 
-  // 5) BUY uitvoeren tot we slots vol hebben.
+  // 5) BUY uitvoeren (transactiekosten inbegrepen).
   let bought = 0;
   const buyReasons: string[] = [];
   for (const c of candidates) {
     if (bought >= slotsAvailable) break;
-    if (cash - POSITION_SIZE_USD < CASH_RESERVE_USD) break; // kasreserve respecteren
     if (c.price <= 0) continue;
-    const qty = Math.floor((POSITION_SIZE_USD / c.price) * 1000) / 1000; // 3 decimalen
+    const qty = Math.floor((POSITION_SIZE_USD / c.price) * 1000) / 1000;
     if (qty <= 0) continue;
-    const cost = qty * c.price;
-    if (cash - cost < CASH_RESERVE_USD) continue;
-    const stopLoss = Number((c.price * (1 - STOP_LOSS)).toFixed(c.price < 1 ? 4 : c.price < 10 ? 3 : 2));
+    const actualCost = qty * c.price * (1 + TX_COST); // totaal uit kas incl. transactiekosten
+    if (cash - actualCost < CASH_RESERVE_USD) continue;
+    // Initiële stop = startpunt voor trailing stop (ratchets omhoog in latere runs)
+    const fmtP = (n: number) => n.toFixed(c.price < 1 ? 4 : c.price < 10 ? 3 : 2);
+    const stopLoss = +fmtP(c.price * (1 - STOP_LOSS));
     const exitDate = new Date(now.getTime() + HOLD_DAYS * 86_400_000);
     const signalTypes = [...new Set(c.signals.map((s) => s.signal_type))];
 
@@ -230,7 +316,7 @@ async function run(): Promise<RunResult> {
     });
     if (error) throw new Error(`buy ${c.ticker}: ${error.message}`);
 
-    cash -= cost;
+    cash -= actualCost;
     bought++;
     openTickers.add(c.ticker);
     buyReasons.push(`${c.ticker} @ ${c.price.toFixed(c.price < 10 ? 3 : 2)} (${c.reason})`);
@@ -242,7 +328,6 @@ async function run(): Promise<RunResult> {
   }).eq("id", 1);
   if (stateUpdErr) throw new Error(`state update: ${stateUpdErr.message}`);
 
-  // Equity snapshot: cash + alle open posities aan huidige koersen.
   let positionsValue = 0;
   let openCount = 0;
   {
@@ -259,12 +344,12 @@ async function run(): Promise<RunResult> {
     total_equity: totalEquity, positions_count: openCount, computed_at: now.toISOString(),
   }, { onConflict: "date" });
 
-  const msg = `${closedCount} gesloten (${closedRealizedUsd >= 0 ? "+" : ""}$${closedRealizedUsd.toFixed(0)} gerealiseerd), ${bought} gekocht, ${openCount} open, equity $${totalEquity.toFixed(0)}, cash $${cash.toFixed(0)}`;
+  const msg = `${closedCount} gesloten (${closedRealizedUsd >= 0 ? "+" : ""}$${closedRealizedUsd.toFixed(0)}), ${partialCount} deelwinst, ${bought} gekocht, ${openCount} open, equity $${totalEquity.toFixed(0)}, cash $${cash.toFixed(0)}`;
   return {
     ok: true,
     message: msg,
     metrics: {
-      closed: closedCount, bought, open_positions: openCount,
+      closed: closedCount, partial_sells: partialCount, bought, open_positions: openCount,
       cash: Number(cash.toFixed(2)), positions_value: Number(positionsValue.toFixed(2)),
       total_equity: Number(totalEquity.toFixed(2)), realized_usd: Number(closedRealizedUsd.toFixed(2)),
       candidates_qualified: candidates.length,
