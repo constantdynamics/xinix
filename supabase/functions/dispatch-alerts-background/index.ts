@@ -40,13 +40,13 @@ const BULLISH_CATALYST_TYPES = new Set<string>([
 const POSITIVE_ACTIONS = new Set<string>(["BUY", "STRONG_BUY"]);
 
 // Bepaalt of een signaal überhaupt een notificatie waard is.
-//  - buy_limit_hit (koers ≤ limiet): altijd.
-//  - buy_limit_close / buy_limit_warmup ("dicht bij de limiet"): alleen voor
-//    aandelen met minimaal 2 gouden medailles (wens owner — anders te veel ruis).
-//  - bullish catalyst: alleen als de score BUY/STRONG_BUY is.
-function shouldNotify(signalType: string, action: string | null | undefined, goldMedals: number): boolean {
-  if (signalType === "buy_limit_hit") return true;
-  if (signalType === "buy_limit_close" || signalType === "buy_limit_warmup") return goldMedals >= 2;
+//  - Vereist altijd: ≥2 goud OF ≥3 zilver (anders te veel ruis).
+//  - Daarna: buy_limit events altijd; bullish catalysts alleen bij BUY/STRONG_BUY.
+function shouldNotify(signalType: string, action: string | null | undefined, medals: Medals | null): boolean {
+  const g = medals?.gold ?? 0;
+  const si = medals?.silver ?? 0;
+  if (g < 2 && si < 3) return false;
+  if (LIMIT_EVENT_TYPES.has(signalType)) return true;
   if (BULLISH_CATALYST_TYPES.has(signalType) && action != null && POSITIVE_ACTIONS.has(action)) return true;
   return false;
 }
@@ -82,9 +82,6 @@ async function sendNtfy(server: string, topic: string, title: string, body: stri
   const payload: Record<string, unknown> = { topic, title, message: body, priority, tags };
   if (clickUrl) {
     payload.click = clickUrl;
-    // Expliciete actie-button "Open Google Finance" zodat het linkje altijd zichtbaar is,
-    // ook als de notification-body te lang is voor een preview.
-    payload.actions = [{ action: "view", label: "Open Google Finance", url: clickUrl, clear: false }];
   }
   const res = await fetch(server.replace(/\/$/, ""), {
     method: "POST",
@@ -110,7 +107,19 @@ function googleExchangeCode(raw: string | null | undefined): string | null {
   if (e === "toronto") return "TSE";
   return null;
 }
-function googleFinanceUrl(ticker: string, exchange?: string | null): string { const t = ticker.trim().toUpperCase(); const dot = t.indexOf("."); if (dot === -1) { const code = googleExchangeCode(exchange); return code ? `https://www.google.com/finance/quote/${encodeURIComponent(t)}:${code}` : `https://www.google.com/finance/quote/${encodeURIComponent(t)}`; } const base = t.slice(0, dot); const exch = SUFFIX_TO_EXCHANGE[t.slice(dot + 1)]; if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`; return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`; }
+function googleFinanceUrl(ticker: string, exchange?: string | null): string {
+  const t = ticker.trim().toUpperCase();
+  const dot = t.indexOf(".");
+  if (dot === -1) {
+    // US ticker zonder landsuffix: altijd exchange-code meegeven voor betrouwbare deep-link
+    const code = googleExchangeCode(exchange) ?? "NASDAQ";
+    return `https://www.google.com/finance/quote/${encodeURIComponent(t)}:${code}`;
+  }
+  const base = t.slice(0, dot);
+  const exch = SUFFIX_TO_EXCHANGE[t.slice(dot + 1)];
+  if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
+  return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`;
+}
 interface ScoreSnapshot { action: string; final_score: number; expected_outcome: { catalystLabel?: string; peakReturnEst?: number; t90ReturnEst?: number; hitRateBaseline?: number; expectedPeakPrice?: number | null; expectedT90Price?: number | null; exitWindowDays?: number; } | null; components: { nearest_catalyst?: { type?: string; daysUntil?: number | null; date?: string | null; } | null; } | null; trade_setup: { entry?: number; target?: number; stop?: number; rr?: number; } | null; }
 function pct(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `${x >= 0 ? "+" : ""}${(x * 100).toFixed(0)}%`; }
 function fmtPrice(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `$${x.toFixed(x < 5 ? 3 : 2)}`; }
@@ -120,7 +129,7 @@ interface Medals { gold: number; silver: number; bronze: number; }
 function medalLine(m: Medals | null): string | null {
   if (!m || (m.gold + m.silver + m.bronze) === 0) return null;
   const parts: string[] = [];
-  if (m.gold > 0) parts.push(`\u{1F947}${m.gold}`);
+  if (m.gold > 0) parts.push(`🏆${m.gold}`);
   if (m.silver > 0) parts.push(`\u{1F948}${m.silver}`);
   if (m.bronze > 0) parts.push(`\u{1F949}${m.bronze}`);
   return `${parts.join(" ")} (medailles, 5y koers-runs)`;
@@ -147,18 +156,24 @@ function formatAlert(
   const cat = showAction ? (score?.components?.nearest_catalyst ?? null) : null;
   const ts = showAction ? (score?.trade_setup ?? null) : null;
 
-  const emoji = isLimit ? "\u{1F4B0}" : showAction ? "\u{1F680}" : "\u{1F4CC}";
+  const emoji = isLimit ? "📉" : showAction ? "\u{1F680}" : "\u{1F4CC}";
   const priority = isLimit ? 5 : showAction && action === "STRONG_BUY" ? 5 : 4;
-  const tags = isLimit ? ["moneybag"] : ["rocket"];
+  const tags = isLimit ? ["chart_with_downwards_trend"] : ["rocket"];
+
+  // Verwijder leading ticker uit de signaaltitel om dubbele ticker in header te voorkomen
+  const cleanSigTitle = safeTitleBase
+    .replace(new RegExp(`^${tickerDisp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[·\\-–—:,]?\\s*`, "u"), "")
+    .replace(new RegExp(`^${sig.ticker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[·\\-–—:,]?\\s*`, "u"), "")
+    .trim();
 
   const titleParts: string[] = [`${emoji} ${tickerDisp}`];
   if (showAction) titleParts.push(action!);
   if (isLimit) {
-    titleParts.push(safeTitleBase);
+    if (cleanSigTitle) titleParts.push(cleanSigTitle);
   } else {
     if (exp?.peakReturnEst != null) titleParts.push(`piek ${pct(exp.peakReturnEst)}`);
     if (cat?.type && cat?.daysUntil != null) { const lbl = exp?.catalystLabel ?? cat.type; titleParts.push(`${lbl} ${cat.daysUntil}d`); }
-    else titleParts.push(safeTitleBase);
+    else if (cleanSigTitle) titleParts.push(cleanSigTitle);
   }
   const title = titleParts.join(" · ").slice(0, 120);
 
@@ -200,8 +215,7 @@ function formatAlert(
     lines.push(sig.detail.replaceAll(sig.ticker, tickerDisp));
     lines.push("");
   }
-  lines.push(`Open op Google Finance: ${gfUrl}`);
-  return { title, body: lines.join("\n"), priority, tags };
+  return { title, body: lines.join("\n").trimEnd(), priority, tags };
 }
 
 Deno.serve(runBackground("dispatch-alerts", async () => {
@@ -240,7 +254,7 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     const isLimit = LIMIT_EVENT_TYPES.has(sig.signal_type);
     const medals = medalsByTicker.get(sig.ticker) ?? null;
 
-    if (!shouldNotify(sig.signal_type, score?.action ?? null, medals?.gold ?? 0)) {
+    if (!shouldNotify(sig.signal_type, score?.action ?? null, medals)) {
       await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
       suppressed++;
       continue;

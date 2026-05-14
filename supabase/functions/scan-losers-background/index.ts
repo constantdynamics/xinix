@@ -271,7 +271,7 @@ Deno.serve(runBackground("scan-losers", async () => {
     for (const g of gems) {
       await sb.from("signal_events").insert({
         ticker: g.yahoo, signal_type: "loser_gem", severity: "yellow",
-        title: `${g.yahoo} — grote daler · \u{1F947}${g.gold} \u{1F948}${g.silver} (5y koers-runs)`,
+        title: `${g.yahoo} — grote daler · 🏆${g.gold} \u{1F948}${g.silver} (5y koers-runs)`,
         detail: `${g.name}${g.changePct != null ? ` · vandaag ${g.changePct.toFixed(1)}%` : ""}. Auto-toegevoegd aan de watchlist (≥1g+1s OF ≥${MIN_GOLD_ALT}g OF ≥${MIN_SILVER_ALT}s).`,
         payload: { source: "tradingview_losers", gold: g.gold, silver: g.silver, bronze: g.bronze, change_pct: g.changePct },
         // markeer meteen als alerted: de notificatie gaat hieronder rechtstreeks, niet via dispatch-alerts
@@ -286,11 +286,11 @@ Deno.serve(runBackground("scan-losers", async () => {
     if (topic) {
       const lines = gems
         .sort((a, b) => b.gold - a.gold || b.silver - a.silver)
-        .map((g) => `\u{1F947}${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}`);
+        .map((g) => `🏆${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}`);
       await sendNtfy(
         (settings?.ntfy_server as string) ?? "https://ntfy.sh",
         topic,
-        `\u{1F947} ${gems.length} grote daler${gems.length > 1 ? "s" : ""} met medaille-track-record toegevoegd`,
+        `🏆 ${gems.length} grote daler${gems.length > 1 ? "s" : ""} met medaille-track-record toegevoegd`,
         lines.join("\n") + "\n\nUit de TradingView 'biggest losers' van vandaag; nu in je watchlist.",
       );
     }

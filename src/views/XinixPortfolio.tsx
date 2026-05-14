@@ -81,8 +81,6 @@ export function XinixPortfolioView() {
   const [data, setData] = useState<XinixPortfolio | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [triggering, setTriggering] = useState(false);
-  const [triggerMsg, setTriggerMsg] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -92,23 +90,6 @@ export function XinixPortfolioView() {
   }
   useEffect(() => { load(); }, []);
 
-  async function triggerNow() {
-    if (!getToken()) {
-      setTriggerMsg("Eerst Admin-token instellen bovenaan");
-      return;
-    }
-    setTriggering(true);
-    setTriggerMsg(null);
-    try {
-      await triggerJob("xinix-trade-background");
-      setTriggerMsg("Trade-run getriggerd — herlaad over enkele seconden.");
-      setTimeout(load, 4000);
-    } catch (e) {
-      setTriggerMsg(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTriggering(false);
-    }
-  }
 
   if (loading) {
     return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
@@ -156,11 +137,7 @@ export function XinixPortfolioView() {
               de scoring slimmer af te stellen.
             </div>
           </div>
-          <Button size="sm" variant="secondary" onClick={triggerNow} disabled={triggering}>
-            {triggering ? "…" : "▶ Run nu"}
-          </Button>
         </div>
-        {triggerMsg && <div className="mt-2 text-[11px] text-neutral-400">{triggerMsg}</div>}
       </Card>
 
       {/* KPI's */}
@@ -254,8 +231,7 @@ function OpenPositionsSection({ positions }: { positions: XinixOpenPosition[] })
       />
       {positions.length === 0 ? (
         <Card className="p-8 text-center text-sm text-neutral-500">
-          Xinix heeft nog geen posities ingenomen. De volgende run is dagelijks om 22:00 UTC, of klik
-          "Run nu" om handmatig te triggeren.
+          Xinix heeft nog geen posities ingenomen. De volgende run is dagelijks om 22:05 UTC (na US close).
         </Card>
       ) : (
         <Card className="overflow-x-auto">
@@ -1669,11 +1645,7 @@ export function SimulationView() {
             ? `Laatste run: ${new Date(meta.last_run_at).toLocaleString("nl-NL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
             : "Nog niet gerund"
         }
-        aside={isAdmin ? (
-          <Button size="sm" variant="secondary" onClick={() => {
-            triggerJob("xinix-sim-background").then(() => window.location.reload()).catch(() => {});
-          }}>▶ Sim run</Button>
-        ) : undefined}
+        aside={undefined}
       />
 
       {/* KPI row */}
