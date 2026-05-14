@@ -1,17 +1,21 @@
 // xinix-evolve-background — survival-of-the-fittest voor de 100-strategie simulatie.
 //
-// v3 — drie extra verbeteringen bovenop v2:
-//   1. Elitisme: top 2 cullable strategieën overleven altijd (nooit gecullled of vervroegd gepensioneerd)
-//   2. Sharpe-fitness: returnPct + sharpe_bonus (max ±24pp) — risico-gecorrigeerd rendement
-//   3. Niche-diversiteitsdruk: overcrowded niches (sector × score-bucket × signaalfilter)
-//      krijgen een fitness-penalty zodat selectie-aanpakken structureel van elkaar blijven verschillen
+// v4 — niche-diversiteit via spawn-sturing (geen fitness-penalty):
+//   Als een nakomelingniche al vol zit (>NICHE_MAX strategieën met dezelfde
+//   sector × score-bucket × signaalfilter), wordt de selectie-dimensie van de
+//   nakomelingen gemuteerd totdat ze een andere niche vertegenwoordigen.
+//   Diversiteit ontstaat zo inhoudelijk — de evolutie verkent bewust lege ruimte.
+//
+// Alle verbeteringen op een rij:
+//   1. Elitisme: top 2 cullable strategieën (op raw returnPct) overleven altijd
+//   2. Sharpe-fitness: compositeFitness = returnPct + clamp(sharpe×8, ±24pp)
+//   3. Niche-sturing bij spawnen: volle niches worden actief vermeden
 //   4. Geleide crossover: 60% kans om top-donor waarde te erven i.p.v. random walk
-//   5. Vervroegd pensioen: 30+ trades én hitrate < 30% → elites zijn uitgezonderd
+//   5. Vervroegd pensioen: 30+ trades én hitrate < 30% (elites uitgezonderd)
 //   6. trailingStop + opportunityReplace in de mutatie-ruimte
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
-const PROJECT_ID = "zfcjugqgufsyltxhvkuu";
 const ALLOWED = new Set(["https://constantdynamics.github.io","http://localhost:5173","http://localhost:4173"]);
 
 function getServiceClient() {
@@ -32,18 +36,17 @@ function cors(req: Request) {
   };
 }
 
-const CULL_RATE                = 0.10;  // 10% van de cullable pool per cyclus
-const PARENT_POOL              = 0.25;  // top 25% als donor-kandidaten voor crossover
-const MIN_CYCLE_DAYS           = 75;    // snellere cyclus: ~4-5 per jaar
-const MIN_AGE_DAYS             = 90;    // minimale leeftijd vóór eerste evolutie
-const CROSSOVER_RATE           = 0.60;  // kans om donor-waarde te erven i.p.v. random walk
-const EARLY_RETIRE_MIN_TRADES  = 30;    // minimale trades voor vervroegd pensioen
-const EARLY_RETIRE_MAX_HITRATE = 0.30;  // < 30% hitrate → vervroegd pensioen
-const ELITE_COUNT              = 2;     // top-N cullable strategieën overleven altijd
-const SHARPE_WEIGHT            = 8;     // per Sharpe-eenheid: +8pp fitness-bonus
-const SHARPE_MIN_TRADES        = 10;    // minimum trades voor betrouwbare Sharpe
-const NICHE_TARGET             = 5;     // max gewenst aantal strategieën per niche
-const NICHE_PENALTY            = 2;     // -2pp fitness per strategie boven NICHE_TARGET
+const CULL_RATE                = 0.10;
+const PARENT_POOL              = 0.25;
+const MIN_CYCLE_DAYS           = 75;
+const MIN_AGE_DAYS             = 90;
+const CROSSOVER_RATE           = 0.60;
+const EARLY_RETIRE_MIN_TRADES  = 30;
+const EARLY_RETIRE_MAX_HITRATE = 0.30;
+const ELITE_COUNT              = 2;
+const SHARPE_WEIGHT            = 8;
+const SHARPE_MIN_TRADES        = 10;
+const NICHE_MAX                = 5;   // max strategieën per niche vóór spawn-sturing
 
 interface Cfg {
   minScore:           number;
@@ -56,12 +59,11 @@ interface Cfg {
   tp:                 number | null;
   limitBuf:           number | null;
   minGold:            number;
-  trailingStop:       number | null;   // trailing stop fractie; null = vaste stop
-  opportunityReplace: boolean;         // kansrotatie activeren
+  trailingStop:       number | null;
+  opportunityReplace: boolean;
 }
 
-// Selectieprofiel: sector × score-bucket × signaalfilter.
-// Strategieën met hetzelfde profiel concurreren direct met elkaar.
+// Selectieprofiel op basis van de drie inhoudelijke keuze-dimensies.
 function nicheKey(cfg: Cfg): string {
   const sb  = cfg.minScore <= 55 ? "low" : cfg.minScore <= 70 ? "med" : "hi";
   const sf  = cfg.redReq || cfg.minGold > 0 ? "sig" : "open";
@@ -69,7 +71,37 @@ function nicheKey(cfg: Cfg): string {
   return `${sec}_${sb}_${sf}`;
 }
 
-// Lineaire congruentiële generator — deterministisch op basis van seed.
+// Forceert een andere selectie-aanpak door één niche-dimensie te draaien.
+// Probeert tot maxAttempts keer; geeft het beste resultaat terug (ook al zit
+// het nog in een volle niche — liever dat dan uren zoeken naar perfectie).
+function forceNicheMutation(cfg: Cfg, rand: () => number, crowded: Set<string>): Cfg {
+  const sectorAlts = cfg.sector === "all"
+    ? ["biotech", "mining"]
+    : ["all"];
+  const scoreBucketTargets: number[] = cfg.minScore <= 55 ? [65, 75] : cfg.minScore <= 70 ? [50, 75] : [50, 65];
+  const signalFlip: Cfg[] = [
+    { ...cfg, redReq: !cfg.redReq },
+    { ...cfg, minGold: cfg.minGold > 0 ? 0 : 1 },
+  ];
+
+  const candidates: Cfg[] = [
+    ...sectorAlts.map(s => ({ ...cfg, sector: s })),
+    ...scoreBucketTargets.map(v => ({ ...cfg, minScore: v })),
+    ...signalFlip,
+  ];
+
+  // Shuffle candidates deterministisch
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+
+  for (const c of candidates) {
+    if (!crowded.has(nicheKey(c))) return c;
+  }
+  return candidates[0] ?? cfg; // alle niches vol → neem eerste kandidaat
+}
+
 function lcg(seed: number): () => number {
   let s = (seed >>> 0) || 1;
   return () => {
@@ -78,7 +110,6 @@ function lcg(seed: number): () => number {
   };
 }
 
-// Geleide mutatie: 60% kans om donor-waarde te erven, anders random walk.
 function mutate(cfg: Cfg, rand: () => number, donors: Cfg[]): Cfg {
   const donor = donors.length > 0 ? donors[Math.floor(rand() * donors.length)] : null;
 
@@ -112,7 +143,7 @@ function mutate(cfg: Cfg, rand: () => number, donors: Cfg[]): Cfg {
       v => !v) }),
   ];
 
-  const n = 1 + Math.floor(rand() * 3); // 1, 2 of 3 mutaties
+  const n = 1 + Math.floor(rand() * 3);
   let result = { ...cfg };
   const used = new Set<number>();
   for (let i = 0; i < n; i++) {
@@ -130,9 +161,9 @@ function cfgHash(cfg: Cfg): string {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
 
-  const cronSecret = Deno.env.get("CRON_SECRET") ?? "";
+  const cronSecret     = Deno.env.get("CRON_SECRET") ?? "";
   const incomingSecret = req.headers.get("x-cron-secret") ?? "";
-  const isForced = req.headers.get("x-force-evolve") === "1";
+  const isForced       = req.headers.get("x-force-evolve") === "1";
 
   if (cronSecret && incomingSecret !== cronSecret && !isForced) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: cors(req) });
@@ -143,31 +174,19 @@ Deno.serve(async (req) => {
 
     // ── Tijdcontrole ──────────────────────────────────────────────────────────
     const { data: lastEvolve } = await sb
-      .from("signal_runs")
-      .select("ran_at")
-      .eq("job", "xinix-evolve")
-      .eq("ok", true)
-      .order("ran_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .from("signal_runs").select("ran_at").eq("job", "xinix-evolve").eq("ok", true)
+      .order("ran_at", { ascending: false }).limit(1).maybeSingle();
 
     let readyToEvolve = false;
-
     if (!lastEvolve) {
       const { data: oldest } = await sb
-        .from("xinix_strategy_state")
-        .select("started_at")
-        .order("started_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
+        .from("xinix_strategy_state").select("started_at")
+        .order("started_at", { ascending: true }).limit(1).maybeSingle();
       if (oldest?.started_at) {
-        const ageDays = (Date.now() - new Date(oldest.started_at).getTime()) / 86400000;
-        readyToEvolve = ageDays >= MIN_AGE_DAYS;
+        readyToEvolve = (Date.now() - new Date(oldest.started_at).getTime()) / 86400000 >= MIN_AGE_DAYS;
       }
     } else {
-      const daysSinceLast = (Date.now() - new Date(lastEvolve.ran_at).getTime()) / 86400000;
-      readyToEvolve = daysSinceLast >= MIN_CYCLE_DAYS;
+      readyToEvolve = (Date.now() - new Date(lastEvolve.ran_at).getTime()) / 86400000 >= MIN_CYCLE_DAYS;
     }
 
     if (!readyToEvolve && !isForced) {
@@ -179,15 +198,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Laad actieve strategieën + closed positions voor hitrate + Sharpe ──────
+    // ── Data ophalen ──────────────────────────────────────────────────────────
     const [stratRes, statesRes, openRes, summaryRes, closedRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected").eq("active", true),
       sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital"),
       sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price").is("closed_at", null),
       sb.from("signal_price_summary").select("ticker, last_close"),
-      sb.from("xinix_strategy_positions")
-        .select("strategy_id, return_pct")
-        .not("closed_at", "is", null),
+      sb.from("xinix_strategy_positions").select("strategy_id, return_pct").not("closed_at", "is", null),
     ]);
 
     const strats = stratRes.data ?? [];
@@ -198,34 +215,29 @@ Deno.serve(async (req) => {
     }
 
     // ── Hitrate + Sharpe per strategie ────────────────────────────────────────
-    const hitByStrat    = new Map<number, { cnt: number; wins: number }>();
+    const hitByStrat     = new Map<number, { cnt: number; wins: number }>();
     const returnsByStrat = new Map<number, number[]>();
 
     for (const p of (closedRes.data ?? [])) {
       const sid = p.strategy_id as number;
       const ret = Number(p.return_pct);
-
-      const hs = hitByStrat.get(sid) ?? { cnt: 0, wins: 0 };
-      hs.cnt++;
-      if (ret > 0) hs.wins++;
+      const hs  = hitByStrat.get(sid) ?? { cnt: 0, wins: 0 };
+      hs.cnt++; if (ret > 0) hs.wins++;
       hitByStrat.set(sid, hs);
-
-      const rs = returnsByStrat.get(sid) ?? [];
-      rs.push(ret);
+      const rs = returnsByStrat.get(sid) ?? []; rs.push(ret);
       returnsByStrat.set(sid, rs);
     }
 
-    // Sharpe per strategie: gemiddeld per-trade rendement / standaarddeviatie (min. 10 trades)
     const sharpeByStrat = new Map<number, number>();
     for (const [sid, rets] of returnsByStrat.entries()) {
       if (rets.length < SHARPE_MIN_TRADES) continue;
-      const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const mean     = rets.reduce((a, b) => a + b, 0) / rets.length;
       const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length;
-      const std = Math.sqrt(variance);
+      const std      = Math.sqrt(variance);
       if (std > 0) sharpeByStrat.set(sid, mean / std);
     }
 
-    // ── Performance per strategie berekenen ───────────────────────────────────
+    // ── Performance per strategie ─────────────────────────────────────────────
     const priceMap = new Map<string, number>();
     for (const r of (summaryRes.data ?? [])) {
       if (r.last_close != null) priceMap.set(r.ticker as string, Number(r.last_close));
@@ -239,73 +251,48 @@ Deno.serve(async (req) => {
     const openVal = new Map<number, number>();
     for (const p of (openRes.data ?? [])) {
       const sid = p.strategy_id as number;
-      const px = priceMap.get(p.ticker as string) ?? Number(p.avg_price);
+      const px  = priceMap.get(p.ticker as string) ?? Number(p.avg_price);
       openVal.set(sid, (openVal.get(sid) ?? 0) + Number(p.qty) * px);
     }
 
     interface Scored {
       id: number; slug: string; name: string; grp: string;
       config: Cfg; generation: number; protected: boolean;
-      returnPct: number; sharpe: number | null;
-      compositeFitness: number; adjustedFitness: number;
+      returnPct: number; sharpe: number | null; compositeFitness: number;
     }
     const scored: Scored[] = [];
     for (const strat of strats) {
       const state = stateMap.get(strat.id as number);
       if (!state) continue;
-      const posVal = openVal.get(strat.id as number) ?? 0;
-      const returnPct = (state.cash + posVal - state.initial) / state.initial * 100;
-      const sharpe = sharpeByStrat.get(strat.id as number) ?? null;
-      // Sharpe-bonus: geclampt op ±24pp om uitschieters te beperken
-      const sharpeBonus = sharpe != null ? Math.max(-24, Math.min(24, sharpe * SHARPE_WEIGHT)) : 0;
+      const posVal          = openVal.get(strat.id as number) ?? 0;
+      const returnPct       = (state.cash + posVal - state.initial) / state.initial * 100;
+      const sharpe          = sharpeByStrat.get(strat.id as number) ?? null;
+      const sharpeBonus     = sharpe != null ? Math.max(-24, Math.min(24, sharpe * SHARPE_WEIGHT)) : 0;
       const compositeFitness = returnPct + sharpeBonus;
       scored.push({
-        id:               strat.id as number,
-        slug:             strat.slug as string,
-        name:             strat.name as string,
-        grp:              strat.grp as string,
-        config:           strat.config as Cfg,
-        generation:       (strat.generation as number) ?? 1,
-        protected:        (strat.protected as boolean) ?? false,
-        returnPct,
-        sharpe,
-        compositeFitness,
-        adjustedFitness:  compositeFitness, // niche-penalty wordt hieronder opgeteld
+        id: strat.id as number, slug: strat.slug as string, name: strat.name as string,
+        grp: strat.grp as string, config: strat.config as Cfg,
+        generation: (strat.generation as number) ?? 1, protected: (strat.protected as boolean) ?? false,
+        returnPct, sharpe, compositeFitness,
       });
     }
 
-    // ── Niche-diversiteitsdruk ────────────────────────────────────────────────
-    // Tel hoeveel actieve strategieën per niche aanwezig zijn.
-    // Overcrowded niches krijgen een penalty zodat vergelijkbare selectie-aanpakken
-    // worden weggeselecteerd ten gunste van strategieën met een unieke invalshoek.
-    const nicheCounts = new Map<string, number>();
-    for (const s of scored) nicheCounts.set(nicheKey(s.config), (nicheCounts.get(nicheKey(s.config)) ?? 0) + 1);
-
-    for (const s of scored) {
-      const overcrowd = Math.max(0, (nicheCounts.get(nicheKey(s.config)) ?? 1) - NICHE_TARGET);
-      s.adjustedFitness = s.compositeFitness - overcrowd * NICHE_PENALTY;
-    }
-
-    // ── Splits: beschermd vs cullable ─────────────────────────────────────────
-    // Sorteer cullable op adjustedFitness oplopend (slechtste eerst)
-    const cullable   = scored.filter(s => !s.protected).sort((a, b) => a.adjustedFitness - b.adjustedFitness);
+    // ── Splits: beschermd vs cullable (gesorteerd op compositeFitness) ────────
+    const cullable   = scored.filter(s => !s.protected).sort((a, b) => a.compositeFitness - b.compositeFitness);
     const protected_ = scored.filter(s => s.protected);
-
     const numToCull  = Math.max(1, Math.floor(cullable.length * CULL_RATE));
 
-    // Elitisme: de top-2 cullable (op returnPct, niet op adjustedFitness) overleven altijd
+    // Elitisme: top-2 op raw returnPct overleven altijd
     const eliteIds = new Set(
       [...cullable].sort((a, b) => b.returnPct - a.returnPct).slice(0, ELITE_COUNT).map(s => s.id)
     );
 
-    // Normale cull: slechtste numToCull op basis van adjustedFitness
     const normalCull    = cullable.filter(s => !eliteIds.has(s.id)).slice(0, numToCull);
     const normalCullIds = new Set(normalCull.map(s => s.id));
 
-    // Vervroegd pensioen: slechte hitrate — elites zijn uitgezonderd
+    // Vervroegd pensioen: slechte hitrate — elites uitgezonderd
     const earlyRetire = cullable.filter(s => {
-      if (normalCullIds.has(s.id)) return false;
-      if (eliteIds.has(s.id)) return false;
+      if (normalCullIds.has(s.id) || eliteIds.has(s.id)) return false;
       const hs = hitByStrat.get(s.id);
       return hs != null && hs.cnt >= EARLY_RETIRE_MIN_TRADES && (hs.wins / hs.cnt) < EARLY_RETIRE_MAX_HITRATE;
     });
@@ -318,16 +305,30 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Donor-pool: top-25% op compositeFitness (Sharpe-gecorrigeerd, zonder niche-penalty) ──
+    // ── Donor-pool: top-25% op compositeFitness ───────────────────────────────
     const allSorted  = [...scored].sort((a, b) => b.compositeFitness - a.compositeFitness);
     const numDonors  = Math.max(2, Math.ceil(allSorted.length * PARENT_POOL));
     const donors     = allSorted.slice(0, numDonors);
     const donorCfgs  = donors.map(d => d.config);
 
-    // Volgende generatienummer
+    // ── Niche-tellingen van overlevende strategieën ───────────────────────────
+    // Berekend nádat we weten wie gecullled wordt, zodat de spawn-sturing
+    // de werkelijke toestand na culling weerspiegelt.
+    const culledIds = new Set(toCull.map(s => s.id));
+    const nicheCounts = new Map<string, number>();
+    for (const s of scored) {
+      if (!culledIds.has(s.id)) {
+        const nk = nicheKey(s.config);
+        nicheCounts.set(nk, (nicheCounts.get(nk) ?? 0) + 1);
+      }
+    }
+    // Niches die al vol zitten — nakomelingen die hier in vallen worden bijgestuurd
+    const crowdedNiches = new Set(
+      [...nicheCounts.entries()].filter(([, cnt]) => cnt >= NICHE_MAX).map(([nk]) => nk)
+    );
+
     const nextGen = Math.max(...scored.map(s => s.generation ?? 1)) + 1;
 
-    // Bestaande config-hashes om duplicaten te voorkomen
     const { data: allStrats } = await sb.from("xinix_strategies").select("slug, config, active");
     const existingSlugs = new Set((allStrats ?? []).map(r => r.slug as string));
     const activeConfigs = new Set(
@@ -335,24 +336,23 @@ Deno.serve(async (req) => {
     );
 
     // ── Retire culled strategieën ─────────────────────────────────────────────
-    const cullIds   = toCull.map(s => s.id);
     const retiredAt = new Date().toISOString();
     await sb.from("xinix_strategies")
       .update({ active: false, retired_at: retiredAt })
-      .in("id", cullIds);
+      .in("id", [...culledIds]);
 
-    // ── Spawn nakomelingen via geleide crossover ───────────────────────────────
+    // ── Spawn nakomelingen met niche-sturing ──────────────────────────────────
     type OffspringRow = {
       slug: string; name: string; grp: string; config: Cfg;
       active: boolean; generation: number; protected: boolean; parent_id: number;
     };
     const offspringRows: OffspringRow[] = [];
     const now = Date.now();
+    let nicheRedirects = 0;
 
     for (let i = 0; i < toCull.length; i++) {
       const parent = donors[i % donors.length];
 
-      // Muteer totdat unieke config gevonden (max 10 pogingen)
       let newCfg = parent.config;
       let attempts = 0;
       do {
@@ -360,6 +360,17 @@ Deno.serve(async (req) => {
         newCfg = mutate(parent.config, rand, donorCfgs);
         attempts++;
       } while (activeConfigs.has(cfgHash(newCfg)) && attempts < 10);
+
+      // Als de nakomelingniche vol is: stuur bij naar een andere selectie-aanpak
+      if (crowdedNiches.has(nicheKey(newCfg))) {
+        const randNiche = lcg(now + i * 4567 + parent.id * 89);
+        newCfg = forceNicheMutation(newCfg, randNiche, crowdedNiches);
+        nicheRedirects++;
+      }
+      // Registreer niche van nieuwe strategie zodat volgende iteraties dit meenemen
+      const nk = nicheKey(newCfg);
+      nicheCounts.set(nk, (nicheCounts.get(nk) ?? 0) + 1);
+      if ((nicheCounts.get(nk) ?? 0) >= NICHE_MAX) crowdedNiches.add(nk);
 
       activeConfigs.add(cfgHash(newCfg));
 
@@ -382,55 +393,44 @@ Deno.serve(async (req) => {
     }
 
     const { data: inserted, error: insErr } = await sb
-      .from("xinix_strategies")
-      .insert(offspringRows)
-      .select("id");
-
+      .from("xinix_strategies").insert(offspringRows).select("id");
     if (insErr) throw new Error(`Insert nakomelingen: ${insErr.message}`);
 
-    // Initialiseer state voor nieuwe strategieën
     if (inserted?.length) {
-      const stateRows = (inserted as { id: number }[]).map(s => ({
-        strategy_id:     s.id,
-        cash:            10000,
-        initial_capital: 10000,
-        started_at:      retiredAt,
-        last_run_at:     null,
-      }));
-      await sb.from("xinix_strategy_state").insert(stateRows);
+      await sb.from("xinix_strategy_state").insert(
+        (inserted as { id: number }[]).map(s => ({
+          strategy_id: s.id, cash: 10000, initial_capital: 10000,
+          started_at: retiredAt, last_run_at: null,
+        }))
+      );
     }
 
-    // ── Niche-verdeling na evolutie ───────────────────────────────────────────
-    const nicheSummary: Record<string, number> = {};
-    for (const [nk, cnt] of nicheCounts.entries()) nicheSummary[nk] = cnt;
-
     // ── Log ───────────────────────────────────────────────────────────────────
-    const earlyMsg = earlyRetire.length > 0
-      ? ` + ${earlyRetire.length} vervroegd gepensioneerd (slechte hitrate)`
-      : "";
-    const sharpeMsg = sharpeByStrat.size > 0
-      ? `, ${sharpeByStrat.size} strategieën met Sharpe-data`
-      : "";
-    const logMsg = `Gen-${nextGen}: ${toCull.length} gecullled${earlyMsg} (${toCull.map(s => `${s.slug}(${s.returnPct.toFixed(1)}%)`).join(", ")}), `
-      + `${offspringRows.length} nakomelingen gespawnd via geleide crossover (${donors.length} donors)${sharpeMsg}. `
-      + `Beschermd: ${protected_.length} + ${ELITE_COUNT} elites. `
-      + `Niches: ${Object.keys(nicheSummary).length} uniek.`;
+    const earlyMsg    = earlyRetire.length > 0 ? ` + ${earlyRetire.length} vervroegd gepensioneerd` : "";
+    const sharpeMsg   = sharpeByStrat.size > 0 ? `, ${sharpeByStrat.size} met Sharpe-data` : "";
+    const nicheMsg    = nicheRedirects > 0 ? `, ${nicheRedirects}× bijgestuurd naar vrije niche` : "";
+    const nichesNow   = new Set([...nicheCounts.keys()]).size;
+    const logMsg = `Gen-${nextGen}: ${toCull.length} gecullled${earlyMsg}, `
+      + `${offspringRows.length} nakomelingen gespawnd (${donors.length} donors${sharpeMsg}${nicheMsg}). `
+      + `Beschermd: ${protected_.length} + ${ELITE_COUNT} elites. Niches actief: ${nichesNow}.`;
 
-    await sb.from("signal_runs").insert({
-      job: "xinix-evolve", ok: true, message: logMsg, ran_at: retiredAt,
-    });
+    await sb.from("signal_runs").insert({ job: "xinix-evolve", ok: true, message: logMsg, ran_at: retiredAt });
+
+    const nicheDistribution: Record<string, number> = {};
+    for (const [nk, cnt] of nicheCounts.entries()) nicheDistribution[nk] = cnt;
 
     return new Response(JSON.stringify({
-      generation:       nextGen,
-      culled:           toCull.map(s => ({ id: s.id, slug: s.slug, returnPct: +s.returnPct.toFixed(2), adjustedFitness: +s.adjustedFitness.toFixed(2) })),
-      early_retired:    earlyRetire.map(s => ({ id: s.id, slug: s.slug, returnPct: +s.returnPct.toFixed(2) })),
-      elite_survivors:  [...eliteIds],
-      spawned:          offspringRows.map(o => ({ slug: o.slug, parent_id: o.parent_id })),
-      protected_count:  protected_.length,
-      cullable_count:   cullable.length,
-      donors_used:      donors.length,
-      sharpe_coverage:  sharpeByStrat.size,
-      niche_summary:    nicheSummary,
+      generation:          nextGen,
+      culled:              toCull.map(s => ({ id: s.id, slug: s.slug, returnPct: +s.returnPct.toFixed(2) })),
+      early_retired:       earlyRetire.map(s => ({ id: s.id, slug: s.slug, returnPct: +s.returnPct.toFixed(2) })),
+      elite_survivors:     [...eliteIds],
+      spawned:             offspringRows.map(o => ({ slug: o.slug, parent_id: o.parent_id, niche: nicheKey(o.config) })),
+      protected_count:     protected_.length,
+      cullable_count:      cullable.length,
+      donors_used:         donors.length,
+      sharpe_coverage:     sharpeByStrat.size,
+      niche_redirects:     nicheRedirects,
+      niche_distribution:  nicheDistribution,
     }), { status: 200, headers: { ...cors(req), "content-type": "application/json" } });
 
   } catch (e) {
