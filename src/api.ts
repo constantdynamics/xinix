@@ -364,6 +364,17 @@ export async function fetchXinixPortfolio(): Promise<XinixPortfolio> {
 }
 
 // ── Xinix 100-strategie simulatie ──
+export interface SimPosDetail {
+  ticker: string;
+  entry_signal_types: string[];
+  entry_sector: string | null;
+  entry_date: string;
+  entry_reason: string;
+  return_pct?: number;
+  closed_at?: string;
+  closed_reason?: string;
+}
+
 export interface SimStrategyConfig {
   minScore: number;
   redReq: boolean;
@@ -397,6 +408,8 @@ export interface SimStrategy {
   win_rate: number;
   avg_return_pct: number;
   last_run_at: string | null;
+  open_pos_detail: SimPosDetail[];
+  closed_pos_detail: SimPosDetail[];
 }
 
 export interface SimDimensionEntry {

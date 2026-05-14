@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   fetchXinixPortfolio,
   fetchSimResults,
@@ -11,6 +11,8 @@ import {
   type SimResults,
   type SimStrategy,
   type SimEvolution,
+  type SimPosDetail,
+  type SimStrategyConfig,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
@@ -579,9 +581,465 @@ function GenBadge({ gen, protected: prot }: { gen: number; protected: boolean })
   );
 }
 
+// ── Per-strategie uitleg helpers ─────────────────────────────────────────────
+
+function stratDescBullets(cfg: SimStrategyConfig): [string, string, string] {
+  const sectorDesc = cfg.sector === "biotech" ? "biotechbedrijven"
+    : cfg.sector === "mining" ? "mijnbouwbedrijven"
+    : "bedrijven uit alle sectoren";
+  const goldDesc = cfg.minGold > 0
+    ? ` en minstens ${cfg.minGold} goud-medaille${cfg.minGold > 1 ? "s" : ""}`
+    : "";
+  const redDesc = cfg.redReq ? " — rood-signaal verplicht als entry-bevestiging" : "";
+  const b1 = `Selecteert ${sectorDesc} met een minimale score van ${cfg.minScore}${goldDesc}${redDesc}.`;
+
+  const holdDesc = cfg.holdDays <= 30 ? `${cfg.holdDays} dagen (ultra-korte termijn)`
+    : cfg.holdDays <= 60 ? `${cfg.holdDays} dagen (korte termijn)`
+    : cfg.holdDays <= 90 ? `${cfg.holdDays} dagen (middellange termijn)`
+    : `${cfg.holdDays} dagen (lange termijn)`;
+  const limitDesc = cfg.limitBuf != null
+    ? ` via limietorder ${Math.round(cfg.limitBuf * 100)}% boven actuele koers`
+    : "";
+  const b2 = `Houdt posities maximaal ${holdDesc}, max. ${cfg.maxPos} posities van ~$${cfg.posSize}${limitDesc}.`;
+
+  const riskParts: string[] = [];
+  if (cfg.stop != null) riskParts.push(`stop-loss op -${Math.round(Math.abs(cfg.stop) * 100)}%`);
+  else riskParts.push("geen stop-loss (tijdvenster als risicogrens)");
+  if (cfg.tp != null) riskParts.push(`take-profit op +${Math.round(cfg.tp * 100)}%`);
+  else riskParts.push("geen take-profit (laat winnaars doorlopen)");
+  const b3 = `Risicobeheer: ${riskParts.join(", ")}.`;
+
+  return [b1, b2, b3];
+}
+
+function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string, string] {
+  if (all.length < 2) return [
+    "Originele configuratie — eerste generatie.",
+    "Parameters zorgvuldig gekozen voor maximale diversiteit.",
+    `Behoort tot groep "${groupLabel(s.grp)}".`,
+  ];
+
+  function med(arr: number[]): number {
+    const sorted = [...arr].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }
+
+  const cfg = s.config;
+  const candidates: Array<{ score: number; text: string }> = [];
+
+  // holdDays
+  const medHold = med(all.map(x => x.config.holdDays));
+  const zHold = Math.abs(cfg.holdDays - medHold) / (medHold || 1);
+  if (zHold > 0.25) {
+    candidates.push({ score: zHold, text: cfg.holdDays > medHold
+      ? `Bovengemiddeld lange houdperiode van ${cfg.holdDays} dagen (mediaan: ${medHold}d) — richt zich op langetermijnontwikkelingen die kortetermijnstrategieën missen.`
+      : `Korte houdperiode van ${cfg.holdDays} dagen (mediaan: ${medHold}d) — roteert sneller en pakt korte koersbewegingen.` });
+  }
+
+  // minScore
+  const medScore = med(all.map(x => x.config.minScore));
+  const zScr = Math.abs(cfg.minScore - medScore) / (medScore || 1);
+  if (zScr > 0.04) {
+    candidates.push({ score: zScr * 2.5, text: cfg.minScore > medScore
+      ? `Hoge score-drempel van ≥${cfg.minScore} (mediaan: ≥${medScore}) — koopt enkel bij sterke signalen, maximaliseert kwaliteitszekerheid per trade.`
+      : `Lage score-drempel van ≥${cfg.minScore} (mediaan: ≥${medScore}) — bredere selectie, hogere activiteitsgraad bij iets zwakkere signalen.` });
+  }
+
+  // sector
+  if (cfg.sector !== "all") {
+    const pct = Math.round(all.filter(x => x.config.sector === cfg.sector).length / all.length * 100);
+    candidates.push({ score: 2.5, text: `Pure ${cfg.sector === "biotech" ? "biotech" : "mijnbouw"}-specialist (${pct}% van strategieën richt zich op dezelfde sector) — diep gespecialiseerd in één markt.` });
+  }
+
+  // stop
+  const stopCount = all.filter(x => x.config.stop != null).length;
+  const stopPct = Math.round(stopCount / all.length * 100);
+  if (cfg.stop == null && stopPct > 55) {
+    candidates.push({ score: 1.5, text: `Geen stop-loss (${100 - stopPct}% van strategieën ook niet) — accepteert grotere interimdaling, laat het tijdvenster als enige exitregel werken.` });
+  } else if (cfg.stop != null) {
+    const allStops = all.filter(x => x.config.stop != null).map(x => Math.abs(x.config.stop!));
+    if (allStops.length > 1) {
+      const medStop = med(allStops);
+      const thisStop = Math.abs(cfg.stop);
+      const zStop = Math.abs(thisStop - medStop) / (medStop || 1);
+      if (zStop > 0.2) candidates.push({ score: zStop + 1, text: thisStop < medStop
+        ? `Strak stop-loss van -${Math.round(thisStop * 100)}% (mediaan: -${Math.round(medStop * 100)}%) — snijdt verliezen radicaal af, beschermt kapitaal maximaal.`
+        : `Ruime stop-loss van -${Math.round(thisStop * 100)}% (mediaan: -${Math.round(medStop * 100)}%) — geeft aandelen meer speelruimte voor herstel.` });
+    }
+  }
+
+  // TP
+  const tpCount = all.filter(x => x.config.tp != null).length;
+  const tpPct = Math.round(tpCount / all.length * 100);
+  if (cfg.tp != null && tpPct < 40) {
+    candidates.push({ score: 1.6, text: `Take-profit op +${Math.round(cfg.tp * 100)}% (slechts ${tpPct}% van strategieën hanteert een TP) — neemt winst definitief mee, voorkomt terugval.` });
+  } else if (cfg.tp == null && tpPct > 55) {
+    candidates.push({ score: 1.2, text: `Geen take-profit (${100 - tpPct}% ook niet) — trend-following aanpak, laat winnaars zo lang mogelijk doorlopen.` });
+  }
+
+  // maxPos
+  const medMaxPos = med(all.map(x => x.config.maxPos));
+  const zPos = Math.abs(cfg.maxPos - medMaxPos) / (medMaxPos || 1);
+  if (zPos > 0.25) {
+    candidates.push({ score: zPos + 0.5, text: cfg.maxPos < medMaxPos
+      ? `Geconcentreerde portefeuille van max. ${cfg.maxPos} posities (mediaan: ${medMaxPos}) — hoge conviction per trade, grotere impact van individuele winnaars.`
+      : `Brede spreiding over max. ${cfg.maxPos} posities (mediaan: ${medMaxPos}) — lagere concentratierisico, meer diversificatie.` });
+  }
+
+  // minGold
+  if (cfg.minGold >= 2) {
+    candidates.push({ score: 2.0, text: `Vereist minimaal ${cfg.minGold} goud-medailles — de strengste medaille-eis in het veld, enkel de meest beproefde signaalcombinaties passeren.` });
+  } else if (cfg.minGold === 1) {
+    candidates.push({ score: 1.3, text: `Eén goud-medaille als minimumeis (${Math.round(all.filter(x => x.config.minGold >= 1).length / all.length * 100)}% ook) — extra kwaliteitsfilter bovenop de score.` });
+  }
+
+  // redReq
+  if (cfg.redReq) {
+    candidates.push({ score: 1.4, text: `Rood-signaal verplicht bij entry (${Math.round(all.filter(x => x.config.redReq).length / all.length * 100)}% van strategieën) — vereist bewijs van kortetermijndruk als bevestiging.` });
+  }
+
+  // limitBuf
+  if (cfg.limitBuf != null) {
+    candidates.push({ score: 1.3, text: `Koopt via limietorder ${Math.round(cfg.limitBuf * 100)}% boven actuele koers (${Math.round(all.filter(x => x.config.limitBuf != null).length / all.length * 100)}% van strategieën) — disciplines entry-prijs.` });
+  }
+
+  // posSize
+  const medSize = med(all.map(x => x.config.posSize));
+  const zSize = Math.abs(cfg.posSize - medSize) / (medSize || 1);
+  if (zSize > 0.2) {
+    candidates.push({ score: zSize + 0.4, text: cfg.posSize > medSize
+      ? `Grote positiegrootte van $${cfg.posSize} per trade (mediaan: $${medSize}) — hogere absolute blootstelling per aandeel.`
+      : `Kleine positiegrootte van $${cfg.posSize} per trade (mediaan: $${medSize}) — conservatief kapitaalsgebruik, lagere blootstelling.` });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const fallbacks = [
+    `Behoort tot groep "${groupLabel(s.grp)}" — geoptimaliseerd voor die specifieke configuratie-dimensie.`,
+    "Gebalanceerde combinatie van parameters, zonder extreme uitschieters t.o.v. het gemiddelde van de 100 strategieën.",
+    `${s.protected ? "Beschermde" : "Cullbare"} ${s.generation > 1 ? `Gen-${s.generation}` : "originele"} strategie met solide parameterruimte.`,
+  ];
+  while (candidates.length < 3) {
+    candidates.push({ score: 0, text: fallbacks[candidates.length % fallbacks.length] });
+  }
+  return [candidates[0].text, candidates[1].text, candidates[2].text];
+}
+
+const GRP_LABELS_EXTRA: Record<string, string[]> = {
+  "A-Score":       ["Score-geoptimaliseerd", "Fundamentele selectie"],
+  "B-Hold":        ["Tijdvenster-expert",     "Hold-strategie"],
+  "C-Stop":        ["Stop-loss specialist",   "Risicobeheer focus"],
+  "D-TP":          ["Winstnemings-expert",    "Target-price strategie"],
+  "E-Sector":      ["Sector-specialist",      "Niche-markt"],
+  "F-Concentratie":["Concentratie-expert",    "Positiebeheer"],
+  "G-Signaal":     ["Signaal-specialist",     "Signaalintensiteit focus"],
+  "H-Medaille":    ["Medaille-filter expert", "Kwaliteits-selectie"],
+  "I-Limiet":      ["Limietorder-expert",     "Prijsdiscipline"],
+  "J-Exit-combo":  ["Exit-combinatie",        "Multi-factor exit"],
+  "K-Profiel":     ["Agressief geoptimaliseerd","High-risk high-reward"],
+  "L-Profiel":     ["Conservatief geoptimaliseerd","Kapitaalsbehoud"],
+  "M-Combo":       ["Cross-factor strategie", "Multi-dimensioneel"],
+};
+
+function stratLabels(s: SimStrategy): string[] {
+  const c = s.config;
+  const labels: string[] = [];
+
+  // Always present (8)
+  labels.push("Algoritmisch", "Kwantitatief", "Daily signal scan", "Paper portefeuille",
+    "Small/mid-cap focus", "US & Internationaal", "Technisch + Fundamenteel", "Niet-leveraged");
+
+  // Sector (3-4)
+  if (c.sector === "biotech") {
+    labels.push("Biotech", "Healthcare", "FDA-katalysator", "Klinische trials");
+  } else if (c.sector === "mining") {
+    labels.push("Mining", "Grondstoffen", "Commodity", "Edelmetalen");
+  } else {
+    labels.push("Multi-sector", "Sector-neutraal", "Brede markt");
+  }
+
+  // Tijdshorizon (2-3)
+  if (c.holdDays <= 30) {
+    labels.push("Ultra-korte termijn", "Swing-trading", "Tactisch");
+  } else if (c.holdDays <= 60) {
+    labels.push("Korte termijn", "Momentum-trading", "Rotatie-stijl");
+  } else if (c.holdDays <= 90) {
+    labels.push("Middellange termijn", "Positie-trading");
+  } else if (c.holdDays <= 120) {
+    labels.push("Lange termijn", "Langetermijn-houder");
+  } else {
+    labels.push("Ultra-lange termijn", "Lottery-ticket", "5-jaar-horizon");
+  }
+
+  // Stop-loss (2-3)
+  if (c.stop == null) {
+    labels.push("Geen stop-loss", "Tijdvenster-exit", "Onbeperkt houdpotentieel");
+  } else if (Math.abs(c.stop) <= 0.08) {
+    labels.push("Tight stop (<8%)", "Beschermend", "Laag verliesrisico");
+  } else if (Math.abs(c.stop) <= 0.15) {
+    labels.push("Normale stop", "Gebalanceerd risicobeheer");
+  } else {
+    labels.push("Ruime stop (>15%)", "Hoge volatiliteitstolerantie", "Contrarian");
+  }
+
+  // Take-profit (1-2)
+  if (c.tp == null) {
+    labels.push("Geen take-profit", "Trend-following");
+  } else if (c.tp >= 0.40) {
+    labels.push("Hoge take-profit (≥40%)", "Agressief winstnemend");
+  } else {
+    labels.push("Take-profit actief", "Winstnemingsstrategie");
+  }
+
+  // Concentratie (1-2)
+  if (c.maxPos <= 4) {
+    labels.push("Geconcentreerd (≤4 pos)", "High-conviction");
+  } else if (c.maxPos >= 8) {
+    labels.push("Breed gespreide portefeuille", "Gediversifieerd");
+  } else {
+    labels.push("Gebalanceerde concentratie");
+  }
+
+  // Positiegrootte (1-2)
+  if (c.posSize <= 900) {
+    labels.push("Micro-posities", "Laag kapitaal per trade");
+  } else if (c.posSize >= 1600) {
+    labels.push("Grote posities", "Hoog kapitaal per trade");
+  } else {
+    labels.push("Standaard positiegrootte");
+  }
+
+  // Score-drempel (1-2)
+  if (c.minScore >= 72) {
+    labels.push("Strikt signaalfilter", "Hoge kwaliteitseis");
+  } else if (c.minScore <= 58) {
+    labels.push("Breed signaalnet", "Actief handelen");
+  } else {
+    labels.push("Gebalanceerde scorefilter");
+  }
+
+  // Entry type (1-2)
+  if (c.redReq) {
+    labels.push("Rood-signaal vereist", "Bevestigingsstrategie");
+  } else {
+    labels.push("Breed entry-criterium");
+  }
+
+  // Medaille-eis (1-2)
+  if (c.minGold === 0) {
+    labels.push("Geen medaille-eis");
+  } else if (c.minGold === 1) {
+    labels.push("Eén goud-medaille vereist", "Kwaliteitsfilter");
+  } else {
+    labels.push(`≥${c.minGold} goud-medailles vereist`, "Ultra-selectief");
+  }
+
+  // Limiet-buffer (1-2)
+  if (c.limitBuf == null) {
+    labels.push("Marktorder-entry");
+  } else if (c.limitBuf <= 0.05) {
+    labels.push("Strakke limietorder", "Prijsdiscipline");
+  } else {
+    labels.push("Ruime limietorder", "Geduldig instappen");
+  }
+
+  // Generatie (2)
+  if (s.generation <= 1) {
+    labels.push("Originele strategie", "Gen-1");
+  } else {
+    labels.push(`Evolutie Gen-${s.generation}`, "Nakomelingsstrategie");
+  }
+
+  // Bescherming (1)
+  labels.push(s.protected ? "🛡️ Beschermd" : "Cullbaar");
+
+  // Risicoprofiel composite (1-2)
+  const riskScore =
+    (c.stop == null ? 0 : Math.abs(c.stop) > 0.15 ? 1 : Math.abs(c.stop) < 0.08 ? -1 : 0) +
+    (c.tp == null ? 1 : 0) +
+    (c.maxPos <= 4 ? 1 : c.maxPos >= 8 ? -1 : 0) +
+    (c.holdDays >= 90 ? 1 : c.holdDays <= 30 ? -1 : 0);
+  if (riskScore >= 2) {
+    labels.push("Agressief profiel", "Hoog risico / hoog potentieel");
+  } else if (riskScore <= -2) {
+    labels.push("Conservatief profiel", "Laag risico");
+  } else {
+    labels.push("Gebalanceerd risicoprofiel");
+  }
+
+  // Handelsfrequentie (1)
+  const tradesPerYear = Math.round((365 / c.holdDays) * c.maxPos);
+  labels.push(tradesPerYear >= 50 ? "Hoge handelsfrequentie" : tradesPerYear <= 10 ? "Lage handelsfrequentie" : "Gemiddelde handelsfrequentie");
+
+  // Stijl composite (1-2)
+  if (c.sector !== "all" && c.minGold >= 1) {
+    labels.push("Event-driven", "Catalyst-speler");
+  } else if (c.holdDays <= 40 && c.stop != null) {
+    labels.push("Momentum-trader", "Technisch georiënteerd");
+  } else if (c.holdDays >= 100) {
+    labels.push("Value-investing-stijl", "Geduldig");
+  } else {
+    labels.push("Kwantitatief signaal-gedreven");
+  }
+
+  // Kapitaalefficiëntie (1)
+  const maxDeploy = Math.min(100, Math.round((c.maxPos * c.posSize) / 10000 * 100));
+  labels.push(`Max. ${maxDeploy}% gedeployed`);
+
+  // Groep (2)
+  const grpExtra = GRP_LABELS_EXTRA[s.grp] ?? ["Geëvolueerde variant", "Adaptieve strategie"];
+  labels.push(...grpExtra);
+
+  return labels;
+}
+
+// ── WhyBought ─────────────────────────────────────────────────────────────────
+
+const SIG_EXPLAIN: Record<string, string> = {
+  near_90d_low:    "nabij 90d-bodem",
+  big_drop:        "forse koersdaling",
+  price_spike_up:  "plotse koerssprong",
+  volume_spike:    "volume-spike",
+  jv_strategic:    "strategische deal / JV",
+  "8k_material":   "SEC 8-K materieel event",
+  buy_limit_hit:   "buy-limit bereikt",
+  buy_limit_warmup:"buy-limit nadert",
+  buy_limit_close: "vlak boven buy-limit",
+  pre_catalyst_7d: "catalyst <7d",
+  pre_catalyst_14d:"catalyst <14d",
+  pre_catalyst_30d:"catalyst <30d",
+  pre_catalyst_60d:"catalyst <60d",
+  financing:       "financieringsronde",
+  takeover_bid:    "overnamebod",
+  buyout_definitive:"definitieve overname",
+  topline_positive:"positieve trial-resultaten",
+  pfs:             "mining prefeasibility-studie",
+  resource_update: "resource-update",
+  loser_gem:       "daler met sterk track-record",
+  near5y_low_gem:  "nabij 5j-dieptepunt + track-record",
+  macro_tide:      "macro-stroming",
+};
+
+function WhyBought({ pos, cfg }: { pos: SimPosDetail; cfg: SimStrategyConfig }) {
+  const sigParts = pos.entry_signal_types.slice(0, 4).map(s => SIG_EXPLAIN[s] ?? s);
+  const explanation = sigParts.length > 0 ? sigParts.join(", ") : (pos.entry_reason || "signaaldrempel gehaald");
+
+  const ctxParts: string[] = [];
+  if (cfg.redReq) ctxParts.push("rood-signaal aanwezig");
+  if (cfg.minGold > 0) ctxParts.push(`≥${cfg.minGold} goud-medaille${cfg.minGold > 1 ? "s" : ""}`);
+  if (cfg.sector !== "all") ctxParts.push(cfg.sector);
+
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 py-0.5">
+      <a
+        href={googleFinanceUrl(pos.ticker)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[11px] text-fog-pink font-medium hover:underline shrink-0"
+      >
+        {pos.ticker}
+      </a>
+      {pos.entry_date && (
+        <span className="text-[10px] text-neutral-600 shrink-0">{fmtDate(pos.entry_date)}</span>
+      )}
+      <span className="text-[10px] text-neutral-400">
+        {explanation}
+        {ctxParts.length > 0 && <span className="text-neutral-600"> ({ctxParts.join(", ")})</span>}
+        {pos.return_pct != null && (
+          <span className={`ml-1 font-medium ${pos.return_pct >= 0 ? "text-fog-lime" : "text-fog-loss"}`}>
+            → {pos.return_pct >= 0 ? "+" : ""}{pos.return_pct.toFixed(1)}%
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+// ── StrategyDetailPanel ───────────────────────────────────────────────────────
+
+function StrategyDetailPanel({ s, all }: { s: SimStrategy; all: SimStrategy[] }) {
+  const descBullets = stratDescBullets(s.config);
+  const uniqueBullets = stratUniqueBullets(s, all);
+  const labels = stratLabels(s);
+  const hasPositions = (s.open_pos_detail?.length ?? 0) > 0 || (s.closed_pos_detail?.length ?? 0) > 0;
+
+  return (
+    <div className="px-4 py-4 bg-ink-3/25 border-b border-ink-5/40 space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-fog-pink font-bold mb-2">
+            Wat doet deze strategie
+          </div>
+          <ul className="space-y-1.5">
+            {descBullets.map((b, i) => (
+              <li key={i} className="text-[11px] text-neutral-300 flex gap-2 leading-relaxed">
+                <span className="text-fog-pink shrink-0 mt-0.5">•</span>
+                <span>{b}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-fog-lime font-bold mb-2">
+            Wat maakt haar uniek t.o.v. de andere strategieën
+          </div>
+          <ul className="space-y-1.5">
+            {uniqueBullets.map((b, i) => (
+              <li key={i} className="text-[11px] text-neutral-300 flex gap-2 leading-relaxed">
+                <span className="text-fog-lime shrink-0 mt-0.5">◆</span>
+                <span>{b}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+          Familie & types <span className="text-neutral-600">({labels.length} labels)</span>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {labels.map((l, i) => (
+            <span
+              key={i}
+              className="px-1.5 py-0.5 rounded text-[10px] bg-ink-3 border border-ink-5/60 text-neutral-500"
+            >
+              {l}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+          Waarom specifiek deze aandelen op dit moment gekocht
+        </div>
+        {hasPositions ? (
+          <div className="space-y-0.5">
+            {(s.open_pos_detail ?? []).map((pos, i) => (
+              <WhyBought key={`o-${i}`} pos={pos} cfg={s.config} />
+            ))}
+            {(s.closed_pos_detail ?? []).slice(0, 3).map((pos, i) => (
+              <WhyBought key={`c-${i}`} pos={pos} cfg={s.config} />
+            ))}
+          </div>
+        ) : (
+          <div className="text-[11px] text-neutral-500 italic">
+            Nog geen posities ingenomen — wacht op het juiste moment dat aan alle criteria voldoet:
+            score ≥{s.config.minScore}
+            {s.config.redReq ? ", rood-signaal vereist" : ""}
+            {s.config.minGold > 0 ? `, ≥${s.config.minGold} goud-medaille` : ""}
+            {s.config.sector !== "all" ? `, sector: ${s.config.sector}` : ""}.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   const [grpFilter, setGrpFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"rank" | "winrate" | "closed">("rank");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const groups = useMemo(() => ["all", ...new Set(strategies.map((s) => s.grp))], [strategies]);
   const filtered = useMemo(() => {
@@ -639,47 +1097,60 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
           </thead>
           <tbody>
             {filtered.map((s) => (
-              <tr key={s.id} className={`border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors ${s.protected ? "bg-fog-watch/[0.03]" : ""}`}>
-                <td className="p-2 tabular text-neutral-400">{s.rank}</td>
-                <td className="p-2 text-base leading-none">{s.medal ?? ""}</td>
-                <td className="p-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-neutral-100">{s.name}</span>
-                    <GenBadge gen={s.generation ?? 1} protected={s.protected ?? false} />
-                  </div>
-                  <div className="text-[10px] text-neutral-500 mt-0.5">
-                    {s.config.holdDays}d
-                    {s.config.stop != null && ` · stop-${(Math.abs(s.config.stop) * 100).toFixed(0)}%`}
-                    {s.config.tp != null && ` · tp+${(s.config.tp * 100).toFixed(0)}%`}
-                    {s.config.sector !== "all" && ` · ${s.config.sector}`}
-                    {s.config.minGold > 0 && ` · ≥${s.config.minGold}🏆`}
-                  </div>
-                </td>
-                <td className="p-2 hidden md:table-cell text-neutral-400 text-[11px]">
-                  {groupLabel(s.grp)}
-                </td>
-                <td className="p-2 text-right tabular font-bold">
-                  <RetCell v={s.total_return_pct} />
-                </td>
-                <td className="p-2 text-right tabular text-neutral-300">
-                  ${s.total_equity.toFixed(0)}
-                </td>
-                <td className="p-2 text-right tabular hidden sm:table-cell">
-                  {s.closed_count > 0 ? (
-                    <span className={s.win_rate >= 0.5 ? "text-fog-lime" : "text-fog-loss"}>
-                      {(s.win_rate * 100).toFixed(0)}%
-                    </span>
-                  ) : (
-                    <span className="text-neutral-500">—</span>
-                  )}
-                </td>
-                <td className="p-2 text-right tabular hidden sm:table-cell text-neutral-400">
-                  {s.closed_count}
-                </td>
-                <td className="p-2 text-right tabular hidden lg:table-cell text-neutral-400">
-                  {s.open_count}
-                </td>
-              </tr>
+              <Fragment key={s.id}>
+                <tr
+                  className={`border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors cursor-pointer select-none ${s.protected ? "bg-fog-watch/[0.03]" : ""} ${expandedId === s.id ? "bg-ink-3/30" : ""}`}
+                  onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
+                >
+                  <td className="p-2 tabular text-neutral-400">{s.rank}</td>
+                  <td className="p-2 text-base leading-none">{s.medal ?? ""}</td>
+                  <td className="p-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-neutral-100">{s.name}</span>
+                      <GenBadge gen={s.generation ?? 1} protected={s.protected ?? false} />
+                      <span className="text-[10px] text-neutral-600 ml-auto">{expandedId === s.id ? "▲" : "▼"}</span>
+                    </div>
+                    <div className="text-[10px] text-neutral-500 mt-0.5">
+                      {s.config.holdDays}d
+                      {s.config.stop != null && ` · stop-${(Math.abs(s.config.stop) * 100).toFixed(0)}%`}
+                      {s.config.tp != null && ` · tp+${(s.config.tp * 100).toFixed(0)}%`}
+                      {s.config.sector !== "all" && ` · ${s.config.sector}`}
+                      {s.config.minGold > 0 && ` · ≥${s.config.minGold}🏆`}
+                    </div>
+                  </td>
+                  <td className="p-2 hidden md:table-cell text-neutral-400 text-[11px]">
+                    {groupLabel(s.grp)}
+                  </td>
+                  <td className="p-2 text-right tabular font-bold">
+                    <RetCell v={s.total_return_pct} />
+                  </td>
+                  <td className="p-2 text-right tabular text-neutral-300">
+                    ${s.total_equity.toFixed(0)}
+                  </td>
+                  <td className="p-2 text-right tabular hidden sm:table-cell">
+                    {s.closed_count > 0 ? (
+                      <span className={s.win_rate >= 0.5 ? "text-fog-lime" : "text-fog-loss"}>
+                        {(s.win_rate * 100).toFixed(0)}%
+                      </span>
+                    ) : (
+                      <span className="text-neutral-500">—</span>
+                    )}
+                  </td>
+                  <td className="p-2 text-right tabular hidden sm:table-cell text-neutral-400">
+                    {s.closed_count}
+                  </td>
+                  <td className="p-2 text-right tabular hidden lg:table-cell text-neutral-400">
+                    {s.open_count}
+                  </td>
+                </tr>
+                {expandedId === s.id && (
+                  <tr>
+                    <td colSpan={9} className="p-0">
+                      <StrategyDetailPanel s={s} all={strategies} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

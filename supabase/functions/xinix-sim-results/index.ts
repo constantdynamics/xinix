@@ -28,11 +28,11 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   try {
     const sb = getServiceClient();
-    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes] = await Promise.all([
+    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected, parent_id").eq("active", true),
       sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, last_run_at, started_at"),
       sb.from("xinix_strategy_positions").select("strategy_id, return_usd, return_pct, entry_signal_types, entry_sector").not("closed_at","is",null),
-      sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price").is("closed_at", null),
+      sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price, entry_signal_types, entry_sector, entry_date, entry_reason").is("closed_at", null),
       sb.from("signal_price_summary").select("ticker, last_close"),
       sb.from("xinix_strategies").select("id, slug, name, grp, generation, retired_at, config")
         .eq("active", false).order("retired_at", { ascending: false }).limit(30),
@@ -41,6 +41,11 @@ Deno.serve(async (req) => {
         .order("ran_at", { ascending: false }).limit(10),
       sb.from("xinix_strategy_state").select("started_at")
         .order("started_at", { ascending: true }).limit(1),
+      sb.from("xinix_strategy_positions")
+        .select("strategy_id, ticker, entry_signal_types, entry_sector, entry_date, entry_reason, return_pct, closed_at, closed_reason")
+        .not("closed_at", "is", null)
+        .order("closed_at", { ascending: false })
+        .limit(500),
     ]);
 
     const priceMap = new Map<string, number>();
@@ -60,7 +65,11 @@ Deno.serve(async (req) => {
       agg.set(sid, a);
     }
 
+    type OpenDetail = { ticker: string; entry_signal_types: string[]; entry_sector: string | null; entry_date: string; entry_reason: string };
+    type ClosedDetail = OpenDetail & { return_pct: number; closed_at: string; closed_reason: string };
+
     const openVal = new Map<number, { val: number; cnt: number }>();
+    const openDetailMap = new Map<number, OpenDetail[]>();
     for (const p of (openRes.data ?? [])) {
       const sid = p.strategy_id as number;
       const px = priceMap.get(p.ticker as string) ?? Number(p.avg_price);
@@ -68,6 +77,34 @@ Deno.serve(async (req) => {
       const cur = openVal.get(sid) ?? { val: 0, cnt: 0 };
       cur.val += mv; cur.cnt++;
       openVal.set(sid, cur);
+      const d = openDetailMap.get(sid) ?? [];
+      d.push({
+        ticker: p.ticker as string,
+        entry_signal_types: (p.entry_signal_types as string[]) ?? [],
+        entry_sector: (p.entry_sector as string) ?? null,
+        entry_date: (p.entry_date as string) ?? "",
+        entry_reason: (p.entry_reason as string) ?? "",
+      });
+      openDetailMap.set(sid, d);
+    }
+
+    const closedDetailMap = new Map<number, ClosedDetail[]>();
+    for (const p of (posDetailRes.data ?? [])) {
+      const sid = p.strategy_id as number;
+      const d = closedDetailMap.get(sid) ?? [];
+      if (d.length < 5) {
+        d.push({
+          ticker: p.ticker as string,
+          entry_signal_types: (p.entry_signal_types as string[]) ?? [],
+          entry_sector: (p.entry_sector as string) ?? null,
+          entry_date: (p.entry_date as string) ?? "",
+          entry_reason: (p.entry_reason as string) ?? "",
+          return_pct: Number(p.return_pct ?? 0),
+          closed_at: (p.closed_at as string) ?? "",
+          closed_reason: (p.closed_reason as string) ?? "",
+        });
+        closedDetailMap.set(sid, d);
+      }
     }
 
     const stateByStrat = new Map<number, Record<string, unknown>>();
@@ -82,6 +119,8 @@ Deno.serve(async (req) => {
       open_count: number; closed_count: number;
       win_rate: number; avg_return_pct: number;
       last_run_at: string | null;
+      open_pos_detail: OpenDetail[];
+      closed_pos_detail: ClosedDetail[];
     }
 
     const results: StratResult[] = [];
@@ -112,6 +151,8 @@ Deno.serve(async (req) => {
         win_rate: a.closed > 0 ? a.wins / a.closed : 0,
         avg_return_pct: a.closed > 0 ? a.sumRetPct / a.closed : 0,
         last_run_at: (state.last_run_at as string | null) ?? null,
+        open_pos_detail: openDetailMap.get(sid) ?? [],
+        closed_pos_detail: closedDetailMap.get(sid) ?? [],
       });
     }
 
