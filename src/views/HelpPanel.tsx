@@ -1,6 +1,6 @@
 // Per-pagina uitleg, onderaan elk tabblad. Vervangt het losse Legenda-tab.
-// Elk blokje heeft een "✓ dit snap ik"-knop die het permanent verbergt
-// (in localStorage); via "weer tonen" komt het terug.
+// Elk blokje heeft een "✓ dit snap ik"-knop; onderaan staat "Ik snap het" om
+// alles in één keer weg te klikken. Via "Toon weer" komen verborgen blokken terug.
 import { useState } from "react";
 import { Card, SectionHeader } from "../components/ui";
 
@@ -36,6 +36,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     intro:
       "Elke tegel is één aandeel uit je watchlist. De achtergrondkleur van de tegel zegt hoe 'koopwaardig' het er nu uitziet (heat). Hottere tegels staan bovenaan.",
     blocks: [
+      {
+        id: "dash-topbar",
+        title: "Knoppen in de topbalk — token · ↓uitleg · ↻ vernieuw",
+        body:
+          "● token = je admin-wachtwoord invullen. Vereist voor acties die de DB wijzigen (aandelen toevoegen, instellingen opslaan, jobs handmatig starten). Wordt alleen lokaal in je browser opgeslagen.\n↓ uitleg = scrolt direct naar dit uitleg-blok onderaan de pagina.\n↻ vernieuw = haalt een verse snapshot op van de backend (normaal gebeurt dit automatisch elke 60 seconden). Het groene bolletje naast de tijd pulseert ~3 seconden na een verse reload.",
+      },
       {
         id: "dash-heat",
         title: "Heat / tegelkleur — Hot · Warm · Pre · Rust",
@@ -91,9 +97,15 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         id: "dash-filters",
-        title: "Filter-pills bovenaan",
+        title: "Filter-pills bovenaan — heat-filter",
         body:
-          "Filteren op heat-niveau (alleen Hot, alleen Warm, enz.) zodat je niet door 3600 tegels hoeft te scrollen. Welke onderdelen op een tegel verschijnen kun je trouwens zelf aan/uit zetten via de tegel-instellingen.",
+          "Filteren op heat-niveau (alleen Hot, alleen Warm, enz.) zodat je niet door 3600 tegels hoeft te scrollen. Klik op een pill om te activeren; opnieuw klikken zet 'm uit. 'Alles' toont de volledige watchlist.",
+      },
+      {
+        id: "dash-tileprefs",
+        title: "Tegel-instellingen (via het ⚙ icoon of Instellingen-tab)",
+        body:
+          "Welke velden er op een tegel verschijnen kun je zelf aan/uitzetten: medailles, goud-score, range-balk, catalyst-blok, signaal-blok, dagverandering, enz. Pas je dit aan, dan wordt de voorkeur opgeslagen in je browser.",
       },
     ],
   },
@@ -158,6 +170,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
           "Trader (default) = swing-trades rond catalysts: lagere structurele gewichten (het bedrijf hoeft niet 10 jaar te bestaan, alleen tot het event), hogere timing-gewichten, strengere sell-the-news-straffen. Investor = klassiek buy-and-hold-profiel.",
       },
       {
+        id: "sc-filter",
+        title: "Filter- en zoekbalk bovenaan",
+        body:
+          "Filter op actie (STRONG_BUY / BUY / WATCH / HOLD / AVOID), sector (Biotech / Mining / Overig), en zoek op ticker of bedrijfsnaam. Combinaties zijn mogelijk: alleen STRONG_BUY in Biotech, enz. Het getal achter elke pill laat zien hoeveel aandelen in die categorie vallen.",
+      },
+      {
         id: "sc-recompute",
         title: "Herbereken-knop",
         body:
@@ -186,7 +204,13 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         id: "wl-fields",
         title: "De detailvelden (modality, disease area, phase, jurisdiction, cash runway, market cap, …)",
         body:
-          "Handmatig in te vullen via het detail-venster (klik op een rij). Hoe meer je invult, hoe minder de score hoeft te gokken (zie 'Data completeness' op Scores). Een paar in begrijpelijke taal: cash runway = hoeveel maanden geld het bedrijf nog heeft voordat het moet bijfinancieren; jurisdiction tier-1 = Canada/Australië/VS (laag landrisico), tier-3 = bv. DRC/Mali (hoog risico); phase = welke klinische fase de hoofdstudie is.",
+          "Handmatig in te vullen via het detail-venster (klik op een rij of op het ✏️-icoon). Hoe meer je invult, hoe minder de score hoeft te gokken (zie 'Data completeness' op Scores). Een paar in begrijpelijke taal: cash runway = hoeveel maanden geld het bedrijf nog heeft voordat het moet bijfinancieren; jurisdiction tier-1 = Canada/Australië/VS (laag landrisico), tier-3 = bv. DRC/Mali (hoog risico); phase = welke klinische fase de hoofdstudie is.",
+      },
+      {
+        id: "wl-rowactions",
+        title: "Acties per rij — ✏️ bewerken · 🗑 verwijderen · bank",
+        body:
+          "✏️ (of klik op een rij) = opent het detail-venster waar je alle velden kunt invullen. 🗑 = verwijdert het aandeel volledig uit de watchlist, inclusief alle signalen en koersdata. 'Op de bank' zetten (zie ook het bank-blok hieronder) doe je door het bench-vlag in het detail-venster aan te zetten.",
       },
       {
         id: "wl-add",
@@ -195,6 +219,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
           "Plak losse tickers, of een CSV met de kolommen Ticker, Name, Currency en Buy Limit. De Currency-hint helpt het systeem bij dubbelzinnige tickers. Niet-herkende tickers krijg je apart te zien zodat je ze kunt corrigeren of weglaten; grote lijsten worden in stukjes verwerkt.",
         example:
           "`2382` + currency `HKD` → het systeem snapt: Sunny Optical op de beurs van Hongkong (`2382.HK`), niet Quanta Computer op Taiwan.",
+      },
+      {
+        id: "wl-cleanup",
+        title: "Opruimen — dedup · valideer · bankfilter",
+        body:
+          "Dedup = verwijdert dubbele tickers (zelfde Yahoo-symbool). Valideer = controleert alle tickers opnieuw via Yahoo; ongeldige symbolen worden gemarkeerd. Bankfilter = toont alleen 'gebenched' aandelen zodat je ze kunt herstellen (goed symbool invullen) of definitief verwijderen.",
       },
       {
         id: "wl-suffix",
@@ -242,6 +272,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
           "Dezelfde thermometer als op het dashboard: waar de koers nu staat tussen het 1-jaars dieptepunt en de 1-jaars top. Links/groen = dicht bij de bodem.",
       },
       {
+        id: "lim-view",
+        title: "Weergave — lijst vs tegel · sorteer-opties",
+        body:
+          "Rechts bovenaan kun je schakelen tussen lijstweergave (tabel) en tegelweergave (kaartjes). Sorteeropties: dichtstbij limiet, medailleklassement, koers omhoog/omlaag, dividend hoog-laag, ticker A–Z. De geselecteerde weergave en sortering worden onthouden per browser-sessie.",
+      },
+      {
         id: "lim-import",
         title: "Bulk-import van limieten (onderaan de pagina)",
         body:
@@ -249,8 +285,8 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         id: "lim-remove",
-        title: "Limiet verwijderen",
-        body: "Het ✕'je achter een rij wist alleen de aankooplimiet — het aandeel blijft in je watchlist.",
+        title: "Limiet verwijderen (het ✕ achter een rij)",
+        body: "Wist alleen de aankooplimiet — het aandeel blijft gewoon in je watchlist. Je koers-alerts voor dit aandeel worden ook uitgeschakeld tot je een nieuwe limiet instelt.",
       },
     ],
   },
@@ -267,15 +303,21 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         id: "bt-run",
-        title: "Backtest draaien",
+        title: "Backtest draaien (de knop)",
         body:
-          "De knop start de test — Yahoo wordt langzaam doorlopen voor de historische koersen, dat duurt ~1 minuut. Vereist het admin-token. Vernieuw daarna de pagina voor de resultaten.",
+          "De knop start de test — Yahoo wordt langzaam doorlopen voor de historische koersen, dat duurt ~1 minuut. Vereist het admin-token (in te vullen via de 'token'-knop bovenaan). Na voltooiing: vernieuw de pagina voor de resultaten.",
       },
       {
         id: "bt-read",
-        title: "De uitkomst lezen",
+        title: "De uitkomst lezen — ✓ correct / ✗ fout / gelijk",
         body:
-          "Per paar zie je of het systeem de winnaar correct hoger scoorde. Dit is een sanity-check op de logica, geen voorspelling — de echte validatie gebeurt op het Track record-tabblad zodra er genoeg live signalen zijn geweest.",
+          "Per paar zie je of het systeem de winnaar correct hoger scoorde (✓ groen), de verliezer hoger scoorde (✗ rood), of gelijk eindigde. Het totaal-percentage bovenaan = hoe goed het algoritme de historische uitkomsten sorteert.\nDit is een sanity-check op de logica, geen garantie voor de toekomst — de echte validatie gebeurt op het Track record-tabblad zodra er genoeg live signalen zijn.",
+      },
+      {
+        id: "bt-detail",
+        title: "Detail per testgeval",
+        body:
+          "Klik op een rij voor de uitgebreide scorebreakdown: welke deelscores (Structureel / Catalyst / Timing) hoe gewogen zijn, en welke rode vlaggen of bonussen er zijn meegeteld. Handig om te zien waar de logica sterk of zwak is.",
       },
     ],
   },
@@ -288,7 +330,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         id: "tr-forward",
         title: "Forward returns (7d / 14d / 30d / 90d)",
         body:
-          "Wat het aandeel daadwerkelijk deed 7, 14, 30 en 90 dagen ná het signaal. Worden automatisch achteraf gemeten.",
+          "Wat het aandeel daadwerkelijk deed 7, 14, 30 en 90 dagen ná het signaal. Worden automatisch achteraf gemeten zodra die termijnen verstrijken.",
         example: "Signaal op dag 0, koers $1,00 → 30 dagen later $1,40 → 30d-forward-return = +40%.",
       },
       {
@@ -298,16 +340,177 @@ export const PAGE_HELP: Record<string, PageHelp> = {
           "De verwachte uitkomst (de historische mediaan voor dat catalyst-type) naast de gerealiseerde return. Het verschil = of het systeem het deze keer goed had. Eén case zegt weinig — het gaat om het patroon over veel signalen.",
       },
       {
+        id: "tr-columns",
+        title: "Tabelkolommen — Gemiddeld · Mediaan · P25/P75 · Hit rate · N",
+        body:
+          "Gemiddeld = rekenkundig gemiddelde (gevoelig voor uitschieters). Mediaan = middelste waarde (robuuster). P25/P75 = onderste en bovenste kwartiel — hoe breed de spreiding is. Hit rate 50% = % signalen dat op enig moment +50% bereikte. N = aantal signalen waarop de statistiek is gebaseerd.",
+      },
+      {
         id: "tr-confidence",
         title: "Wanneer is dit betrouwbaar?",
         body:
-          "Pas na grofweg 90 STRONG_BUY-signalen over 6+ maanden bevatten deze cijfers signaal boven ruis (briefing §10). Daarvoor is de steekproef te klein om er conclusies aan te verbinden.",
+          "Pas na grofweg 90 STRONG_BUY-signalen over 6+ maanden bevatten deze cijfers signaal boven ruis. Daarvoor is de steekproef te klein om er conclusies aan te verbinden.",
       },
       {
         id: "tr-filter",
-        title: "Filter op data completeness",
+        title: "Filter op data completeness (de schuifbalk)",
         body:
-          "Met de minimum-completeness-filter gooi je signalen weg die op veel ontbrekende invulvelden gebaseerd waren — die voegen vooral ruis toe.",
+          "Met de minimum-completeness-filter gooi je signalen weg die op veel ontbrekende invulvelden gebaseerd waren — die voegen vooral ruis toe. Schuif naar rechts (bv. min 60%) om alleen signalen te zien met goed gevulde data. Linksonder staat hoeveel signalen er overblijven.",
+      },
+    ],
+  },
+
+  signaallog: {
+    intro:
+      "Alle BUY/STRONG_BUY-episodes uit de gekozen periode, met instapkoers, huidige koers en de gerealiseerde return. Handig om te zien hoe eerder uitgegeven koop-signalen er achteraf uitzien.",
+    blocks: [
+      {
+        id: "sl-episode",
+        title: "Wat is een episode?",
+        body:
+          "Een episode = een aaneengesloten reeks dagen waarop het algoritme BUY of STRONG_BUY gaf voor dezelfde ticker. Als er meer dan 5 dagen zonder signaal tussen zitten, telt het als een nieuw signaal. Return = (huidige koers − koers op de eerste signaaldag) ÷ instapkoers.\nBij lopende episodes is de 'huidige koers' de meest recente slotkoers; bij afgesloten episodes is het de koers op de dag dat het signaal wegviel.",
+        example:
+          "Algoritme geeft STRONG_BUY op 1 jan, 2 jan, 5 jan → één episode van 3 signaal-dagen. Op 15 jan gaat het signaal weg → episode afgesloten.",
+      },
+      {
+        id: "sl-kpis",
+        title: "Samenvatting-KPI's — Episodes · Lopend · Gem. return · Positief",
+        body:
+          "Episodes = totaal aantal episodes in de huidige filter. Lopend = hoeveel daarvan het algoritme nóg steeds BUY/STRONG_BUY geeft. Gem. return = gemiddeld rendement over alle episodes met een bekende koers. Positief = % episodes dat momenteel in de plus staat.",
+      },
+      {
+        id: "sl-filters",
+        title: "Filters — Signaal · Status · Sector · Periode · Zoek",
+        body:
+          "Signaal: filter op STRONG_BUY of BUY. Status: Lopend = signaal nog actief, Afgesloten = al gestopt. Sector: Biotech / Mining / Other. Periode: hoever terug je kijkt (30d / 60d / 90d / 180d / 365d). Zoek: typ een ticker om direct te filteren. Combinaties werken: bv. alle lopende STRONG_BUY-signalen in Biotech.",
+      },
+      {
+        id: "sl-columns",
+        title: "Tabelkolommen — Ticker · Signaal · Gestart · Dagen · Gestopt · Instap · Nu · Return · Score",
+        body:
+          "Ticker = het aandeel; klik voor Google Finance. Signaal = hoogste actie-label in die episode (STRONG BUY of BUY), met een groen bolletje als 'ie nog actief is. Gestart = eerste dag van het signaal. Dagen = hoe lang het signaal liep/loopt. Gestopt = datum waarop het signaal wegviel (of 'actief'). Instap = koers op de startdag. Nu = meest recente koers. Return = rendement vanaf instap. Score = hoogste algorithme-score in de episode.",
+      },
+      {
+        id: "sl-return",
+        title: "Return-visualisatie (balk + %)",
+        body:
+          "De minibalkie naast het %-getal loopt links van het midden voor verlies, rechts voor winst. De schaal is logaritmisch: tot ±50% lineair, daarboven afnemend (zodat een +500%-run niet alles overschaduwt). Kleur: groen = winst, rood = verlies.",
+      },
+      {
+        id: "sl-sort",
+        title: "Sorteerbare kolommen (klik op een kolomkop)",
+        body:
+          "Klik op Ticker, Gestart, Dagen, Return of Score om op die kolom te sorteren. Klik nog een keer voor omgekeerde volgorde (↑ / ↓). Null-waarden staan altijd onderaan, ongeacht de sort-richting.",
+      },
+      {
+        id: "sl-refresh",
+        title: "↻ Vernieuw-knop",
+        body:
+          "Haalt de nieuwste episodelijst op. Normaal worden koersen elk uur ververst, dus na beurstijd zijn de returns up to date. De knop is ook handig als je net een score hebt herberekend en wil zien of lopende signalen zijn veranderd.",
+      },
+    ],
+  },
+
+  scans: {
+    intro:
+      "Dagelijkse automatische TradingView-scans zoeken naar aandelen met een medailletrack record die op het punt staan te bewegen: de grootste dalers van de dag én aandelen die vlak bij hun 5-jaars bodem staan. Treffers worden automatisch aan je watchlist toegevoegd.",
+    blocks: [
+      {
+        id: "scan-status",
+        title: "Scan-status kaarten — scan-losers · scan-bottoms",
+        body:
+          "Twee achtergrond-jobs, elk met een eigen statuskaart:\nscan-losers = doorzoekt dagelijks de TradingView 'grootste dalers'-screener. Alleen aandelen met ≥1× goud én ≥1× zilveren medaille worden meegenomen — pure koersspuiers zonder track record worden gefilterd.\nscan-bottoms = doorzoekt de TradingView '5-jaars bodem'-screener. Alleen aandelen met ≥3× gouden medailles worden meegenomen (hogere lat, want een bodem is geen trigger op zich).\nHet groene/rode bolletje = status van de laatste run. Klik op 'Status' in de navigatie voor uitgebreide job-details.",
+      },
+      {
+        id: "scan-metrics",
+        title: "Run-statistieken — dalers · nieuw · gecheckt · treffers · toegevoegd",
+        body:
+          "Dalers = hoeveel aandelen de TradingView-screener die dag opleverde. Gecheckt = hoeveel daarvan al in je watchlist stonden (die worden niet dubbel toegevoegd). Nieuw = hoeveel onbekende tickers zijn gecontroleerd. Treffers = hoeveel voldoen aan het medaillecriterium. Toegevoegd = hoeveel er daadwerkelijk zijn toegevoegd aan de watchlist (groen getal).",
+      },
+      {
+        id: "scan-filters",
+        title: "Filter- en zoekbalk — Bron · Sector · Zoek · Sorteer",
+        body:
+          "Bron: filter op 'Grootste dalers' of '5y-bodem'. Sector: Biotech / Mining / Overig. Zoek: ticker of bedrijfsnaam. Sorteer: datum (nieuw eerst of oud eerst), medailleklassement (Olympisch), aantal gouden medailles, of ticker A–Z.",
+      },
+      {
+        id: "scan-columns",
+        title: "Tabelkolommen — Ticker · Bedrijf · Sector · Bron · Medailles · Koers · Slim limit · Toegevoegd · Reden",
+        body:
+          "Ticker = klikbaar (opent Google Finance). Bron = welke scan dit aandeel heeft gevonden (badge 'Grootste dalers' of '5y-bodem'). Medailles = 🏆🥈🥉 uit de 5-jaarsgeschiedenis. Koers = laatste slotkoers. Slim limit = automatisch berekend aankooplimiet (als beschikbaar). Toegevoegd = datum/tijd van automatisch toevoegen. Reden = toelichting van de scan (bv. 'goud×2, zilver×1, daler −12%').",
+      },
+      {
+        id: "scan-slimlimit",
+        title: "Slim limit (de auto-berekende aankooplimiet)",
+        body:
+          "Als het systeem een buy limit kan afleiden uit de technische data (bv. een recent support-niveau of de 52-weeks bodem) zet het die in de 'Slim limit'-kolom. Groen en vet = de koers staat al op of onder die limiet. Je kunt de limiet altijd handmatig overschrijven via de Limieten-tab.",
+      },
+    ],
+  },
+
+  xinix: {
+    intro:
+      "De lerende gesimuleerde belegger Xinix. Dit tabblad toont twee dingen: de 'Basisportefeuille' (één papieren portefeuille van $10.000 met vaste parameters) en de '100 Strategieën' (106 parallelle papieren portefeuilles die allemaal andere parameters testen).",
+    blocks: [
+      {
+        id: "xi-tabs",
+        title: "Tab-switcher — 📈 Basisportefeuille · 🔬 100 Strategieën",
+        body:
+          "Basisportefeuille = de gecureerde enkelvoudige portefeuille: max 8 posities, ~$1200 per positie, 60 dagen holdperiode, trailing stop -15%, deelwinst bij +25%. Doel: één duidelijk referentiepunt.\n100 Strategieën = 106 parallelle papieren portefeuilles die elk een andere parameter-combinatie testen. Doel: ontdekken welke instelling-mix het beste werkt. Na verloop van tijd 'evolueren' de zwakste strategieën weg.",
+      },
+      {
+        id: "xi-kpis",
+        title: "KPI's — Totaal vermogen · Rendement · Open posities · Gesloten trades",
+        body:
+          "Totaal vermogen = cash + waarde open posities. Rendement = (totaal vermogen − startkapitaal) ÷ startkapitaal. Open posities = hoe veel slots er nu bezet zijn (max 8). Gesloten trades = hoeveel keer er al verkocht is. 'Gerealiseerd' = al in cash omgezet, 'open' = nog op papier.",
+      },
+      {
+        id: "xi-equitycurve",
+        title: "Equity-curve (de lijngraaf)",
+        body:
+          "Dagelijkse snapshots van het totale vermogen. Een stijgende lijn = gemiddeld positieve koersen of goede exits. Een platte lijn = weinig open posities of weinig beweging. De curve begint pas zodra er ≥2 dagelijkse snapshots zijn (dus na dag 2).",
+      },
+      {
+        id: "xi-openpos",
+        title: "Open posities — Ticker · Qty · Entry · Koers · P/L · Stop · Dagen · Reden",
+        body:
+          "Qty = aantal aandelen. Entry = gemiddelde aankoopkoers + datum. Koers = huidige slotkoers. P/L = ongerealiseerd rendement (% én dollar). Stop = huidige trailing-stop-prijs (ratchets mee omhoog als de koers stijgt). Dagen = nog hoeveel dagen tot het maximale hold-venster verstrijkt (rood/oranje bij ≤7 dagen). Reden = welke signaaltypen de aankoop triggerde.",
+      },
+      {
+        id: "xi-exits",
+        title: "Exit-types (hoe Xinix verkoopt)",
+        body:
+          "Er zijn vier manieren waarop een positie gesloten wordt:\n1. Trailing stop geraakt: koers zakt onder de ratchet-stop → directe verkoop.\n2. Deelwinst (+25%): zodra de koers +25% is, verkoopt Xinix de helft — de rest blijft open.\n3. Signaalverval: het koop-signaal is verlopen, er is verlies, en de positie is lang genoeg aangehouden → vroegtijdige exit.\n4. Holdperiode verstreken: na 60 dagen wordt de volledige positie gesloten.\nIn de 'Reden exit'-kolom staat welke van deze vier van toepassing was.",
+      },
+      {
+        id: "xi-closedpos",
+        title: "Gesloten posities — filter Winnaars / Verliezers",
+        body:
+          "Elke afgesloten trade met entry-koers, exit-koers, held dagen, P/L en de reden van entry én exit. Filter op Winnaars (P/L > 0) of Verliezers (P/L < 0) om patronen te zoeken — werkt een bepaald signaaltype consistent goed of slecht?",
+      },
+      {
+        id: "xi-insights",
+        title: "Inzichten & aanbevelingen (het lerende deel)",
+        body:
+          "Zodra er ≥3 gesloten trades per signaaltype zijn, genereert Xinix automatisch aanbevelingen: welke signaaltypen het best presteren, welke sectoren over- of onderpresteren, en suggesties om de scoring aan te passen. Dit is het doel van de simulatie: data verzamelen om slimmer te worden.",
+      },
+      {
+        id: "xi-sim",
+        title: "100 Strategieën — ranglijst, groepen, parameters",
+        body:
+          "De 106 strategieën zijn verdeeld in groepen (A t/m N): elke groep test één dimensie — score-drempel, holdperiode, stop-loss %, take-profit, sector-focus, positiegrootte, signaaltype, medaille-filter, limiet-buffer, enz. De ranglijst sorteert op samengestelde fitness (rendement + Sharpe-ratio − drawdown-straf). Strategie-kaartjes tonen de huidige return, het aantal open posities en de drawdown.",
+      },
+      {
+        id: "xi-evolve",
+        title: "Evolutie-knop (wekelijkse pensionering + mutatie)",
+        body:
+          "Elke week worden de onderste 5% strategieën 'gepensioneerd' (gestopt, hun gesloten posities blijven zichtbaar). De top 5% wordt licht gemuteerd en opnieuw gestart — kleine aanpassingen aan hun parameters. Zo convergeert het systeem over maanden naar de best werkende combinaties. De 'Evolutie starten'-knop triggert dit handmatig (vereist admin-token).",
+      },
+      {
+        id: "xi-export",
+        title: "Kennis-export (maandelijkse snapshot)",
+        body:
+          "Op de 1e van elke maand maakt Xinix een volledige snapshot: welke strategieën het beste werkten, welke signaaltypen het meest rendabel waren, aanbevelingen voor de scoring. Terug te vinden in de 'Evolutie'-sectie onder 'Kennis-export'. Via de knop 'Export nu' kun je ook handmatig exporteren (vereist admin-token).",
       },
     ],
   },
@@ -337,6 +540,18 @@ export const PAGE_HELP: Record<string, PageHelp> = {
           "De laatste ~15 runs als kleine vierkantjes, links = oudst. Groen = gelukt, rood = fout. Zo zie je in één oogopslag of iets structureel hapert of maar één keer een hik had. Houd je muis erboven voor tijd + boodschap van die run.",
       },
       {
+        id: "st-detail",
+        title: "Run-detail modal (klik op een balkje)",
+        body:
+          "Klik op een gekleurd balkje in de run-histoire om het volledige detail van die run te zien: exacte starttijd, looptijd, foutmelding of uitvoer-JSON (bij succesvolle runs: metrics zoals aantal verwerkte tickers, gevonden signalen, enz.).",
+      },
+      {
+        id: "st-trigger",
+        title: "Handmatig triggeren van een job",
+        body:
+          "Sommige jobs hebben een '▶ Nu starten'-knop. Vereist het admin-token. Handig voor de markt-regime-check, de kennis-export of het herberekenen van scores zonder te wachten op de automatische cron. De run-status verschijnt daarna in de balkjes-rij.",
+      },
+      {
         id: "st-falsealarm",
         title: "Bekend 'vals alarm'",
         body:
@@ -344,6 +559,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
   },
+
   settings: {
     intro: "Hier stel je in waar en wanneer je notificaties krijgt, en welke aandelen wél een melding waard zijn.",
     blocks: [
@@ -363,11 +579,29 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         id: "set-policy",
         title: "Wat wordt er eigenlijk gepusht?",
         body:
-          "Bewust streng, om ruis te voorkomen: (1) je aankooplimiet die geráákt is — altijd, voor elk aandeel; (2) 'dicht bij je aankooplimiet' — alleen voor aandelen met minimaal 2 gouden medailles; (3) bullish catalyst-nieuws — alleen als de algoritmische score op BUY of STRONG_BUY staat. Al het andere (koersdalingen, near-low, 8-K-ruis, volume-spikes, JV-nieuws…) zie je wél op het dashboard maar krijg je niet als melding.",
+          "Bewust streng, om ruis te voorkomen: (1) je aankooplimiet die geráákt is — altijd, voor elk aandeel; (2) 'dicht bij je aankooplimiet' — alleen voor aandelen met minimaal 2 gouden medailles; (3) bullish catalyst-nieuws — alleen als de algoritmische score op BUY of STRONG_BUY staat. Al het andere (koersdalingen, near-low, 8-K-ruis, volume-spikes, JV-nieuws…) zie je wél op het dashboard maar krijg je niet als melding.\nDe schakelaar 'Alleen very-hot events' zet dit beleid aan (aanbevolen). Uit = je krijgt ook 'zachte' triggers zoals koerssprongen en JV-deals.",
+      },
+      {
+        id: "set-tile",
+        title: "Tegel-instellingen",
+        body:
+          "Welke velden er op elke dashboard-tegel worden getoond: goud-score, medailles, 1y/5y-range, catalyst-blok, signaalblok, dagverandering. Schakel ze aan/uit naar voorkeur. De instelling wordt opgeslagen in je browser (localStorage) en geldt alleen voor dit apparaat.",
+      },
+      {
+        id: "set-pricescan",
+        title: "Prijs-scan regels",
+        body:
+          "Regels die bepalen wanneer een koersbeweging een signaal oplevert (bv. 'big_drop: daling ≥20% in 5 dagen'). Dit zijn geavanceerde instellingen — de standaardwaarden werken goed voor de meeste situaties. Aanpassen kan zinvol zijn als je meer of minder gevoelig wil zijn voor dagdalingen.",
+      },
+      {
+        id: "set-save",
+        title: "Opslaan-knop",
+        body:
+          "Sla gewijzigde instellingen op in de database. Vereist het admin-token. Na opslaan zie je kort een 'Opgeslagen'-bevestiging. Als je een '401 Unauthorized' foutmelding krijgt, is het admin-token niet (meer) ingevuld — vul 'm in via de 'token'-knop rechtsboven.",
       },
       {
         id: "set-token",
-        title: "Admin-token",
+        title: "Admin-token (● token knop rechtsboven)",
         body:
           "Het wachtwoord voor admin-acties: aandelen toevoegen, instellingen opslaan, jobs handmatig triggeren (de 'Herbereken'-knop op Scores, de Backtest-knop). In te vullen via de 'token'-knop bovenaan in de balk; wordt alleen lokaal in je browser bewaard. Als acties met '401 Unauthorized' falen, klopt dit token niet.",
       },
@@ -388,6 +622,14 @@ export function HelpPanel({ pageId }: { pageId: string }) {
     setDismissed(next);
     saveDismissed(next);
   }
+
+  function dismissAll() {
+    const next = new Set(dismissed);
+    for (const b of help.blocks) next.add(b.id);
+    setDismissed(next);
+    saveDismissed(next);
+  }
+
   function resetPage() {
     const next = new Set(dismissed);
     for (const b of help.blocks) next.delete(b.id);
@@ -436,14 +678,25 @@ export function HelpPanel({ pageId }: { pageId: string }) {
               )}
             </Card>
           ))}
-          {hiddenCount > 0 && (
+
+          {/* "Ik snap het" — verbergt alle resterende blokken in één klik */}
+          <div className="flex items-center justify-between pt-2">
             <button
-              onClick={resetPage}
-              className="text-xs text-neutral-500 hover:text-fog-pink hover:underline"
+              onClick={dismissAll}
+              className="inline-flex items-center gap-2 rounded-full bg-fog-lime/10 border border-fog-lime/30 px-4 py-1.5 text-sm font-semibold text-fog-lime hover:bg-fog-lime/20 hover:border-fog-lime/60 transition"
+              title="Verberg alle uitleg op deze pagina"
             >
-              {hiddenCount} verborgen blokje{hiddenCount > 1 ? "s" : ""} op deze pagina weer tonen
+              ✓ Ik snap het — verberg alle uitleg
             </button>
-          )}
+            {hiddenCount > 0 && (
+              <button
+                onClick={resetPage}
+                className="text-xs text-neutral-500 hover:text-fog-pink hover:underline"
+              >
+                {hiddenCount} verborgen blokje{hiddenCount > 1 ? "s" : ""} weer tonen
+              </button>
+            )}
+          </div>
         </div>
       )}
     </section>
