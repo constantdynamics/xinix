@@ -189,8 +189,121 @@ const STRATEGIES: Cfg[] = [
   c({slug:"trail10_tp50", name:"Trailing -10% + TP+50%",                   grp:"N-Trailing", trailingStop:0.10, stop:null, tp:0.50}),
   c({slug:"trail15_bio",  name:"Trailing -15% Biotech",                    grp:"N-Trailing", trailingStop:0.15, stop:null, sector:"biotech"}),
   c({slug:"opreplace",    name:"Kans-rotatie (S≥70, trailing -12%, dynm.)", grp:"N-Trailing", minScore:70, trailingStop:0.12, stop:null, opportunityReplace:true}),
+
+  // O: Kans-rotatie varianten (8) — opportunityReplace gecombineerd met andere dimensies
+  c({slug:"opr_s75",      name:"Kansrot. Score≥75",                     grp:"O-OppReplace", minScore:75, opportunityReplace:true}),
+  c({slug:"opr_trail10",  name:"Kansrot. trailing -10%",                grp:"O-OppReplace", trailingStop:0.10, stop:null, opportunityReplace:true}),
+  c({slug:"opr_trail20",  name:"Kansrot. trailing -20%",                grp:"O-OppReplace", trailingStop:0.20, stop:null, opportunityReplace:true}),
+  c({slug:"opr_bio",      name:"Kansrot. Biotech",                      grp:"O-OppReplace", sector:"biotech",  opportunityReplace:true}),
+  c({slug:"opr_min",      name:"Kansrot. Mining",                       grp:"O-OppReplace", sector:"mining",   opportunityReplace:true}),
+  c({slug:"opr_h30",      name:"Kansrot. 30d",                          grp:"O-OppReplace", holdDays:30, opportunityReplace:true}),
+  c({slug:"opr_pos15",    name:"Kansrot. 15 pos",                       grp:"O-OppReplace", maxPos:15, posSize:600, opportunityReplace:true}),
+  c({slug:"opr_red",      name:"Kansrot. Rood signaal",                 grp:"O-OppReplace", minScore:0, redReq:true, opportunityReplace:true}),
+
+  // P: Trailing stop uitbreidingen (10) — meer granulariteit in de trailing-dimensie
+  c({slug:"trail8",         name:"Trailing stop -8% (strak)",           grp:"P-Trailing2", trailingStop:0.08, stop:null}),
+  c({slug:"trail12",        name:"Trailing stop -12%",                  grp:"P-Trailing2", trailingStop:0.12, stop:null}),
+  c({slug:"trail25",        name:"Trailing stop -25% (ruim)",           grp:"P-Trailing2", trailingStop:0.25, stop:null}),
+  c({slug:"trail15_s75",    name:"Trailing -15% + Score≥75",            grp:"P-Trailing2", trailingStop:0.15, stop:null, minScore:75}),
+  c({slug:"trail15_h90",    name:"Trailing -15% + 90d",                 grp:"P-Trailing2", trailingStop:0.15, stop:null, holdDays:90}),
+  c({slug:"trail15_min",    name:"Trailing -15% + Mining",              grp:"P-Trailing2", trailingStop:0.15, stop:null, sector:"mining"}),
+  c({slug:"trail10_tp100",  name:"Trailing -10% + TP+100%",             grp:"P-Trailing2", trailingStop:0.10, stop:null, tp:1.00}),
+  c({slug:"trail20_h120",   name:"Trailing -20% + 120d",                grp:"P-Trailing2", trailingStop:0.20, stop:null, holdDays:120}),
+  c({slug:"trail12_red",    name:"Trailing -12% + Rood",                grp:"P-Trailing2", trailingStop:0.12, stop:null, minScore:0, redReq:true}),
+  c({slug:"trail15_tp25",   name:"Trailing -15% + TP+25%",              grp:"P-Trailing2", trailingStop:0.15, stop:null, tp:0.25}),
+
+  // Q: Score × Hold matrix (10) — vult gaten in de score-hold combinatieruimte
+  c({slug:"s50_h45",   name:"Score≥50 + 45d",  grp:"Q-ScoreHold", minScore:50, holdDays:45}),
+  c({slug:"s60_h30",   name:"Score≥60 + 30d",  grp:"Q-ScoreHold", minScore:60, holdDays:30}),
+  c({slug:"s60_h90",   name:"Score≥60 + 90d",  grp:"Q-ScoreHold", minScore:60, holdDays:90}),
+  c({slug:"s70_h20",   name:"Score≥70 + 20d",  grp:"Q-ScoreHold", minScore:70, holdDays:20}),
+  c({slug:"s70_h45",   name:"Score≥70 + 45d",  grp:"Q-ScoreHold", minScore:70, holdDays:45}),
+  c({slug:"s70_h90",   name:"Score≥70 + 90d",  grp:"Q-ScoreHold", minScore:70, holdDays:90}),
+  c({slug:"s70_h120",  name:"Score≥70 + 120d", grp:"Q-ScoreHold", minScore:70, holdDays:120}),
+  c({slug:"s75_h120",  name:"Score≥75 + 120d", grp:"Q-ScoreHold", minScore:75, holdDays:120}),
+  c({slug:"s80_h30",   name:"Score≥80 + 30d",  grp:"Q-ScoreHold", minScore:80, holdDays:30}),
+  c({slug:"s80_h90",   name:"Score≥80 + 90d",  grp:"Q-ScoreHold", minScore:80, holdDays:90}),
+
+  // R: Stop × Score (8) — hoe beïnvloedt stop-striktheid een score-drempel?
+  c({slug:"s50_stop5",  name:"Score≥50 + Stop -5%",  grp:"R-StopScore", minScore:50, stop:0.05}),
+  c({slug:"s60_stop5",  name:"Score≥60 + Stop -5%",  grp:"R-StopScore", minScore:60, stop:0.05}),
+  c({slug:"s65_stop5",  name:"Score≥65 + Stop -5%",  grp:"R-StopScore", stop:0.05}),
+  c({slug:"s70_stop20", name:"Score≥70 + Stop -20%", grp:"R-StopScore", minScore:70, stop:0.20}),
+  c({slug:"s75_stop10", name:"Score≥75 + Stop -10%", grp:"R-StopScore", minScore:75, stop:0.10}),
+  c({slug:"s75_stop25", name:"Score≥75 + Stop -25%", grp:"R-StopScore", minScore:75, stop:0.25}),
+  c({slug:"s80_stop10", name:"Score≥80 + Stop -10%", grp:"R-StopScore", minScore:80, stop:0.10}),
+  c({slug:"s80_nostop", name:"Score≥80 + geen stop", grp:"R-StopScore", minScore:80, stop:null}),
+
+  // S: TP varianten uitgebreid (8)
+  c({slug:"tp25_h30",      name:"TP+25% + 30d",              grp:"S-TPVariant", tp:0.25, holdDays:30}),
+  c({slug:"tp25_h90",      name:"TP+25% + 90d",              grp:"S-TPVariant", tp:0.25, holdDays:90}),
+  c({slug:"tp50_h90",      name:"TP+50% + 90d",              grp:"S-TPVariant", tp:0.50, holdDays:90}),
+  c({slug:"tp50_s75",      name:"TP+50% + Score≥75",         grp:"S-TPVariant", tp:0.50, minScore:75}),
+  c({slug:"tp100_h120",    name:"TP+100% + 120d",            grp:"S-TPVariant", tp:1.00, holdDays:120}),
+  c({slug:"tp100_s80",     name:"TP+100% + Score≥80",        grp:"S-TPVariant", tp:1.00, minScore:80}),
+  c({slug:"tp200_s75",     name:"TP+200% + Score≥75",        grp:"S-TPVariant", tp:2.00, minScore:75}),
+  c({slug:"tp25_s80_st10", name:"TP+25% + S≥80 + Stop-10%", grp:"S-TPVariant", tp:0.25, minScore:80, stop:0.10}),
+
+  // T: Sector verrijkt (8)
+  c({slug:"bio_tp50",     name:"Biotech + TP+50%",               grp:"T-SectorRich", sector:"biotech", tp:0.50}),
+  c({slug:"bio_tp100",    name:"Biotech + TP+100%",              grp:"T-SectorRich", sector:"biotech", tp:1.00}),
+  c({slug:"bio_s70_tp50", name:"Biotech + Score≥70 + TP+50%",   grp:"T-SectorRich", sector:"biotech", minScore:70, tp:0.50}),
+  c({slug:"bio_trail15",  name:"Biotech + trailing -15%",        grp:"T-SectorRich", sector:"biotech", trailingStop:0.15, stop:null}),
+  c({slug:"min_trail15",  name:"Mining + trailing -15%",         grp:"T-SectorRich", sector:"mining",  trailingStop:0.15, stop:null}),
+  c({slug:"min_tp100",    name:"Mining + TP+100%",               grp:"T-SectorRich", sector:"mining",  tp:1.00}),
+  c({slug:"min_s70_tp50", name:"Mining + Score≥70 + TP+50%",    grp:"T-SectorRich", sector:"mining",  minScore:70, tp:0.50}),
+  c({slug:"min_h120_ns",  name:"Mining + 120d + geen stop",      grp:"T-SectorRich", sector:"mining",  holdDays:120, stop:null}),
+
+  // U: Conservatieve profielen uitgebreid (6)
+  c({slug:"ultra_safe",  name:"Ultra veilig (20 pos, Stop -5%)",       grp:"U-ConsProfiel", minScore:50, maxPos:20, posSize:400, holdDays:90, stop:0.05}),
+  c({slug:"diversified", name:"Gediversifieerd (15 pos, 90d)",         grp:"U-ConsProfiel", minScore:55, maxPos:15, posSize:600, holdDays:90}),
+  c({slug:"income",      name:"Inkomsten (12 pos, TP+25%)",            grp:"U-ConsProfiel", minScore:60, maxPos:12, posSize:700, tp:0.25, stop:0.15}),
+  c({slug:"patient_all", name:"Geduldig (10 pos, 120d, Stop -10%)",   grp:"U-ConsProfiel", minScore:65, maxPos:10, posSize:900, holdDays:120, stop:0.10}),
+  c({slug:"gold_cons",   name:"Goud conservatief (15 pos, 90d)",      grp:"U-ConsProfiel", minGold:1, minScore:60, maxPos:15, posSize:600, holdDays:90, stop:0.15}),
+  c({slug:"low_risk_bio",name:"Laag risico Biotech (8 pos, 90d)",     grp:"U-ConsProfiel", sector:"biotech", minScore:70, maxPos:8, posSize:900, holdDays:90, stop:0.10}),
+
+  // V: Agressieve profielen uitgebreid (6)
+  c({slug:"ultra_agg",    name:"Ultra agressief (S≥80+Rood, 3 pos, 20d, TP+100%)", grp:"V-AggProfiel", minScore:80, redReq:true, maxPos:3, posSize:2500, holdDays:20, stop:null, tp:1.00}),
+  c({slug:"trend_follow", name:"Trend follower (S≥70, trailing -12%, 4 pos)",      grp:"V-AggProfiel", minScore:70, maxPos:4, posSize:2000, trailingStop:0.12, stop:null}),
+  c({slug:"breakout",     name:"Breakout (S≥75+Rood, 4 pos, 30d, TP+75%)",        grp:"V-AggProfiel", minScore:75, redReq:true, maxPos:4, posSize:2000, holdDays:30, stop:0.20, tp:0.75}),
+  c({slug:"bio_explosive",name:"Bio explosief (Rood, 3 pos, TP+100%)",             grp:"V-AggProfiel", sector:"biotech", redReq:true, maxPos:3, posSize:2500, stop:null, tp:1.00}),
+  c({slug:"min_momentum", name:"Mining momentum (S≥70, trailing -15%, TP+50%)",   grp:"V-AggProfiel", sector:"mining", minScore:70, trailingStop:0.15, stop:null, tp:0.50}),
+  c({slug:"hybrid_trail", name:"Hybride trail+rotatie (S≥70, TP+50%)",            grp:"V-AggProfiel", minScore:70, trailingStop:0.10, stop:null, tp:0.50, opportunityReplace:true}),
+
+  // W: Multi-factor combos (30) — kruisverbanden van 3+ dimensies
+  c({slug:"s75_red_h45",      name:"S≥75 + Rood + 45d",              grp:"W-MultiCombo", minScore:75, redReq:true, holdDays:45}),
+  c({slug:"s70_gold1_h60",    name:"S≥70 + ≥1 Goud + 60d",           grp:"W-MultiCombo", minScore:70, minGold:1}),
+  c({slug:"s75_gold1_h45",    name:"S≥75 + ≥1 Goud + 45d",           grp:"W-MultiCombo", minScore:75, minGold:1, holdDays:45}),
+  c({slug:"s70_lim0_h60",     name:"S≥70 + Strikt limiet + 60d",      grp:"W-MultiCombo", minScore:70, limitBuf:0.00}),
+  c({slug:"s80_lim0",         name:"S≥80 + Strikt limiet",            grp:"W-MultiCombo", minScore:80, limitBuf:0.00}),
+  c({slug:"red_gold1_h60",    name:"Rood + ≥1 Goud + 60d",           grp:"W-MultiCombo", redReq:true, minGold:1}),
+  c({slug:"bio_gold1_trail",  name:"Biotech + Goud + trailing -15%",  grp:"W-MultiCombo", sector:"biotech", minGold:1, trailingStop:0.15, stop:null}),
+  c({slug:"min_gold1_h90",    name:"Mining + ≥1 Goud + 90d",          grp:"W-MultiCombo", sector:"mining", minGold:1, holdDays:90}),
+  c({slug:"bio_s70_h90",      name:"Biotech + S≥70 + 90d",            grp:"W-MultiCombo", sector:"biotech", minScore:70, holdDays:90}),
+  c({slug:"s70_trail15_h90",  name:"S≥70 + trailing -15% + 90d",      grp:"W-MultiCombo", minScore:70, trailingStop:0.15, stop:null, holdDays:90}),
+  c({slug:"s75_trail10_tp50", name:"S≥75 + trailing -10% + TP+50%",   grp:"W-MultiCombo", minScore:75, trailingStop:0.10, stop:null, tp:0.50}),
+  c({slug:"s65_opr_trail",    name:"S≥65 + kansrot. + trailing -12%", grp:"W-MultiCombo", trailingStop:0.12, stop:null, opportunityReplace:true}),
+  c({slug:"red_trail15_h60",  name:"Rood + trailing -15% + 60d",      grp:"W-MultiCombo", minScore:0, redReq:true, trailingStop:0.15, stop:null}),
+  c({slug:"gold1_trail15_h90",name:"≥1 Goud + trailing -15% + 90d",   grp:"W-MultiCombo", minGold:1, minScore:60, trailingStop:0.15, stop:null, holdDays:90}),
+  c({slug:"bio_opr",          name:"Biotech + kansrotatie",           grp:"W-MultiCombo", sector:"biotech", opportunityReplace:true}),
+  c({slug:"min_opr",          name:"Mining + kansrotatie",            grp:"W-MultiCombo", sector:"mining",  opportunityReplace:true}),
+  c({slug:"s80_opr_trail",    name:"S≥80 + kansrot. + trailing -12%", grp:"W-MultiCombo", minScore:80, trailingStop:0.12, stop:null, opportunityReplace:true}),
+  c({slug:"pos5_trail15",     name:"5 pos $1800 + trailing -15%",     grp:"W-MultiCombo", maxPos:5, posSize:1800, trailingStop:0.15, stop:null}),
+  c({slug:"pos3_trail10_tp",  name:"3 pos $2500 + trailing -10% + TP+50%", grp:"W-MultiCombo", maxPos:3, posSize:2500, trailingStop:0.10, stop:null, tp:0.50}),
+  c({slug:"s70_h30_tp50",     name:"S≥70 + 30d + TP+50%",            grp:"W-MultiCombo", minScore:70, holdDays:30, tp:0.50}),
+  c({slug:"s75_stop15_tp100", name:"S≥75 + Stop-15% + TP+100%",      grp:"W-MultiCombo", minScore:75, stop:0.15, tp:1.00}),
+  c({slug:"bio_h90_ns",       name:"Biotech + 90d + geen stop",       grp:"W-MultiCombo", sector:"biotech", holdDays:90, stop:null}),
+  c({slug:"min_h30_tp50",     name:"Mining + 30d + TP+50%",          grp:"W-MultiCombo", sector:"mining", holdDays:30, tp:0.50}),
+  c({slug:"red_s70_trail",    name:"Rood + S≥70 + trailing -12%",    grp:"W-MultiCombo", minScore:70, redReq:true, trailingStop:0.12, stop:null}),
+  c({slug:"s60_h30_tp25",     name:"S≥60 + 30d + TP+25%",            grp:"W-MultiCombo", minScore:60, holdDays:30, tp:0.25}),
+  c({slug:"gold2_trail",      name:"≥2 Goud + trailing -15%",         grp:"W-MultiCombo", minGold:2, minScore:60, trailingStop:0.15, stop:null}),
+  c({slug:"s80_red_trail",    name:"S≥80 + Rood + trailing -12%",    grp:"W-MultiCombo", minScore:80, redReq:true, trailingStop:0.12, stop:null}),
+  c({slug:"lim0_trail15",     name:"Strikt limiet + trailing -15%",   grp:"W-MultiCombo", limitBuf:0.00, trailingStop:0.15, stop:null}),
+  c({slug:"s65_bio_trail",    name:"S≥65 + Biotech + trailing -15%",  grp:"W-MultiCombo", minScore:65, sector:"biotech", trailingStop:0.15, stop:null}),
+  c({slug:"min_red_h60",      name:"Mining + Rood + 60d",             grp:"W-MultiCombo", sector:"mining", redReq:true, minScore:0}),
 ];
-// A:10 + B:6 + C:5 + D:4 + E:6 + F:8 + G:7 + H:5 + I:5 + J:8 + K:5 + L:5 + M:26 + N:6 = 106
+// A:10 + B:6 + C:5 + D:4 + E:6 + F:8 + G:7 + H:5 + I:5 + J:8 + K:5 + L:5 + M:26 + N:6
+// + O:8 + P:10 + Q:10 + R:8 + S:8 + T:8 + U:6 + V:6 + W:30 = 200
 
 // ── Positieve signaal-types ──────────────────────────────────────────────────
 const POS_SIGNALS = new Set([
