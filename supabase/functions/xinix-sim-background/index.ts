@@ -379,16 +379,20 @@ async function run() {
     sb.from("signal_events").select("ticker, signal_type, severity")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
       .order("detected_at", { ascending: false }).limit(3000),
-    sb.from("market_regime").select("is_bull, updated_at").eq("id", 1).maybeSingle(),
+    sb.from("market_regime").select("is_bull, regime, updated_at").eq("id", 1).maybeSingle(),
   ]);
 
-  // Marktregime: alleen kopen in bull-markt (SPY > 200d MA). Bij ontbrekende of
-  // verouderde data (>3 dagen) geldt standaard bull zodat de sim niet vastloopt.
-  const regimeRow = regimeRes.data;
+  // Marktregime: 3 staten. Bij ontbrekende/verouderde data (>3d) → standaard strong_bull.
+  const regimeRow  = regimeRes.data;
   const regimeAgeD = regimeRow?.updated_at
     ? (now.getTime() - new Date(regimeRow.updated_at).getTime()) / 86400000
     : 999;
-  const isBullMarket = regimeAgeD < 3 ? (regimeRow?.is_bull ?? true) : true;
+  const regime        = regimeAgeD < 3 ? (regimeRow?.regime ?? "strong_bull") : "strong_bull";
+  const isBullMarket  = regime !== "bear";
+  // weak_bull: 60% positiegrootte (voorzichtig kopen); bear: 0% (geen aankopen)
+  const regimePosScale    = regime === "strong_bull" ? 1.0 : regime === "weak_bull" ? 0.6 : 0.0;
+  // bear/weak_bull: trailing stop ratchets dichter bij de koers → snellere exit bij verdere daling
+  const stopTightenFactor = regime === "strong_bull" ? 1.0 : regime === "weak_bull" ? 0.75 : 0.5;
 
   const cashByStrategy = new Map<number, number>();
   const maxEquityByStrategy = new Map<number, number>();
@@ -498,9 +502,10 @@ async function run() {
       }
 
       if (!stopHit && !tpHit && !timeUp && !signalDecayExit) {
-        // Nog open: trailing stop ratchet bijwerken voor morgen
+        // Trailing stop ratchet: in zwakkere markt dichter bij de koers → snellere exit
         if (cfg.trailingStop != null) {
-          const ratchet = +(price * (1 - cfg.trailingStop)).toFixed(price < 1 ? 4 : price < 10 ? 3 : 2);
+          const effectiveTrail = cfg.trailingStop * stopTightenFactor;
+          const ratchet = +(price * (1 - effectiveTrail)).toFixed(price < 1 ? 4 : price < 10 ? 3 : 2);
           if (ratchet > (p.stop_loss_price ?? 0)) {
             stopRatchets.push({ id: p.id, stop_loss_price: ratchet });
           }
@@ -603,8 +608,9 @@ async function run() {
     }
 
     // ── Buy-kandidaten zoeken & kopen ──────────────────────────────────────────
-    const slotsAvailable = Math.max(0, cfg.maxPos - stillOpenTickers.size);
-    if (slotsAvailable > 0 && cash - cfg.posSize >= 200 && isBullMarket) {
+    const slotsAvailable    = Math.max(0, cfg.maxPos - stillOpenTickers.size);
+    const effectivePosSize  = Math.round(cfg.posSize * regimePosScale);
+    if (slotsAvailable > 0 && cash - effectivePosSize >= 200 && isBullMarket) {
       const candidates: Array<{
         ticker: string; price: number; score: number; rankScore: number;
         sector: string | null; signals: SigRow[]; reason: string;
@@ -638,7 +644,7 @@ async function run() {
       let bought = 0;
       for (const cand of candidates) {
         if (bought >= slotsAvailable) break;
-        const buyCost = cfg.posSize; // beoogde positiewaarde
+        const buyCost = effectivePosSize; // geschaald op marktregime
         if (cash - buyCost * (1 + TX_COST) < 200) break; // inclusief transactiekosten
         const qty = Math.floor((buyCost / cand.price) * 1000) / 1000;
         if (qty <= 0) continue;
@@ -709,8 +715,8 @@ async function run() {
 
   await sb.from("signal_runs").insert({
     job: "xinix-sim", finished_at: now.toISOString(), ok: true,
-    message: `${STRATEGIES.length} strategieën: ${exits.length} exits (incl. ${partialSells.length} deelwinst), ${buys.length} aankopen, ${stopRatchets.length} stop-ratchets`,
-    metrics: { strategies: STRATEGIES.length, exits: exits.length, partial_sells: partialSells.length, buys: buys.length, stop_ratchets: stopRatchets.length, equity_rows: equityRows.length },
+    message: `${STRATEGIES.length} strategieën: ${exits.length} exits (incl. ${partialSells.length} deelwinst), ${buys.length} aankopen, ${stopRatchets.length} stop-ratchets [regime: ${regime}]`,
+    metrics: { strategies: STRATEGIES.length, exits: exits.length, partial_sells: partialSells.length, buys: buys.length, stop_ratchets: stopRatchets.length, equity_rows: equityRows.length, regime },
   });
 
   return { ok: true, strategies: STRATEGIES.length, exits: exits.length, partial_sells: partialSells.length, buys: buys.length, stop_ratchets: stopRatchets.length };

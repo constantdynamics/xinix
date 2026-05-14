@@ -26,41 +26,65 @@ Deno.serve(async (req) => {
   const now = new Date().toISOString();
 
   try {
-    // Yahoo Finance: SPY dagelijkse koersen, 1 jaar history (~252 handelsdagen)
-    const url = "https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=1y";
-    const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!resp.ok) throw new Error(`Yahoo Finance HTTP ${resp.status}`);
+    // Haal SPY (1 jaar history) en VIX (5 dagen) parallel op
+    const [spyResp, vixResp] = await Promise.all([
+      fetch("https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=1y", { headers: { "User-Agent": "Mozilla/5.0" } }),
+      fetch("https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?interval=1d&range=5d", { headers: { "User-Agent": "Mozilla/5.0" } }),
+    ]);
+    if (!spyResp.ok) throw new Error(`Yahoo Finance SPY HTTP ${spyResp.status}`);
 
-    const json = await resp.json();
-    const result = json?.chart?.result?.[0];
-    if (!result) throw new Error("Geen data van Yahoo Finance");
+    const [spyJson, vixJson] = await Promise.all([spyResp.json(), vixResp.json()]);
 
-    const rawCloses: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+    const spyResult = spyJson?.chart?.result?.[0];
+    if (!spyResult) throw new Error("Geen SPY data van Yahoo Finance");
+
+    const rawCloses: (number | null)[] = spyResult.indicators?.quote?.[0]?.close ?? [];
     const closes = rawCloses.filter((c): c is number => c != null && isFinite(c));
 
-    if (closes.length < 50) throw new Error(`Te weinig koerspunten: ${closes.length}`);
+    if (closes.length < 50) throw new Error(`Te weinig SPY koerspunten: ${closes.length}`);
 
     const lastClose = closes[closes.length - 1];
-    // Gebruik de laatste 200 beschikbare datapunten voor het MA
-    const window   = closes.slice(-200);
-    const ma200    = window.reduce((a, b) => a + b, 0) / window.length;
-    const isBull   = lastClose > ma200;
+    const window200 = closes.slice(-200);
+    const ma200     = window200.reduce((a, b) => a + b, 0) / window200.length;
+    const window50  = closes.slice(-50);
+    const ma50      = window50.reduce((a, b) => a + b, 0) / window50.length;
+
+    // VIX: meest recente slotkoers (paniekmeter — boven 30 = hoge angst)
+    const vixRaw: (number | null)[] = vixJson?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    const vixClose = vixRaw.filter((c): c is number => c != null && isFinite(c)).at(-1) ?? null;
+
+    // Regime-bepaling (3 staten):
+    //   bear:        death cross (50d MA < 200d MA) OF VIX > 30 (paniekmodus)
+    //   weak_bull:   golden cross maar koers onder 50d MA → voorzichtig kopen (60% positiegrootte)
+    //   strong_bull: golden cross EN koers boven 50d MA EN VIX ≤ 30 → normaal kopen
+    const deathCross = ma50 < ma200;
+    const panicMode  = vixClose != null && vixClose > 30;
+    const regime: "strong_bull" | "weak_bull" | "bear" =
+      (deathCross || panicMode) ? "bear"
+      : lastClose > ma50        ? "strong_bull"
+      :                           "weak_bull";
+    const isBull = regime !== "bear";
 
     await sb.from("market_regime").upsert({
       id:         1,
       updated_at: now,
       spy_close:  +lastClose.toFixed(2),
       ma_200:     +ma200.toFixed(2),
+      ma_50:      +ma50.toFixed(2),
+      vix_close:  vixClose != null ? +vixClose.toFixed(2) : null,
+      regime,
       is_bull:    isBull,
     }, { onConflict: "id" });
 
-    const msg = `SPY ${lastClose.toFixed(2)} ${isBull ? ">" : "≤"} 200d MA ${ma200.toFixed(2)} → ${isBull ? "BULL 🐂" : "BEAR 🐻"} (${closes.length} datapunten)`;
+    const regimeLabel = regime === "strong_bull" ? "STRONG BULL 🐂🟢" : regime === "weak_bull" ? "WEAK BULL 🐂🟡" : "BEAR 🐻";
+    const vixLabel = vixClose != null ? ` | VIX ${vixClose.toFixed(1)}${vixClose > 30 ? " ⚠️" : ""}` : "";
+    const msg = `SPY ${lastClose.toFixed(2)} | 50d MA ${ma50.toFixed(2)} | 200d MA ${ma200.toFixed(2)}${vixLabel} → ${regimeLabel}`;
     await sb.from("signal_runs").insert({
       job: "xinix-market-regime", ran_at: now, ok: true, message: msg,
-      metrics: { spy_close: +lastClose.toFixed(2), ma_200: +ma200.toFixed(2), is_bull: isBull, data_points: closes.length },
+      metrics: { spy_close: +lastClose.toFixed(2), ma_50: +ma50.toFixed(2), ma_200: +ma200.toFixed(2), vix_close: vixClose, regime, is_bull: isBull, data_points: closes.length },
     });
 
-    return new Response(JSON.stringify({ ok: true, spy_close: lastClose, ma_200: ma200, is_bull: isBull, data_points: closes.length }), {
+    return new Response(JSON.stringify({ ok: true, spy_close: lastClose, ma_50: ma50, ma_200: ma200, vix_close: vixClose, regime, is_bull: isBull, data_points: closes.length }), {
       status: 200, headers: { "content-type": "application/json" },
     });
   } catch (e) {

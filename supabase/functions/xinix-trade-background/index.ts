@@ -115,7 +115,7 @@ async function run(): Promise<RunResult> {
     sb.from("signal_events").select("ticker, signal_type, severity, detected_at")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
       .order("detected_at", { ascending: false }).limit(2000),
-    sb.from("market_regime").select("is_bull, updated_at").eq("id", 1).maybeSingle(),
+    sb.from("market_regime").select("is_bull, regime, updated_at").eq("id", 1).maybeSingle(),
     // Hoeveel strategieën houden momenteel elk ticker? → consensus-signaal
     sb.from("xinix_strategy_positions").select("ticker").is("closed_at", null),
   ]);
@@ -123,12 +123,17 @@ async function run(): Promise<RunResult> {
   if (stateRes.error || !stateRes.data) throw new Error(`state: ${stateRes.error?.message ?? "no state"}`);
   let cash = Number(stateRes.data.cash);
 
-  // Marktregime: kopen alleen in bull-markt. Verouderde data (>3d) → standaard bull.
+  // Marktregime: 3 staten. Bij ontbrekende/verouderde data (>3d) → standaard strong_bull.
   const regimeRow  = regimeRes.data;
   const regimeAgeD = regimeRow?.updated_at
     ? (now.getTime() - new Date(regimeRow.updated_at).getTime()) / 86400000
     : 999;
-  const isBullMarket = regimeAgeD < 3 ? (regimeRow?.is_bull ?? true) : true;
+  const regime        = regimeAgeD < 3 ? (regimeRow?.regime ?? "strong_bull") : "strong_bull";
+  const isBullMarket  = regime !== "bear";
+  // weak_bull: 60% positiegrootte; bear: geen aankopen
+  const regimePosScale    = regime === "strong_bull" ? 1.0 : regime === "weak_bull" ? 0.6 : 0.0;
+  // In bear/weak_bull: trailing stop ratchets dichter bij de koers → snellere exit
+  const stopTightenFactor = regime === "strong_bull" ? 1.0 : regime === "weak_bull" ? 0.75 : 0.5;
 
   // Consensus: tel hoeveel strategieën elk ticker momenteel houden.
   const consensusByTicker = new Map<string, number>();
@@ -215,8 +220,9 @@ async function run(): Promise<RunResult> {
     }
 
     if (!stopTriggered && !timeTriggered && !signalDecayExit) {
-      // Positie blijft open: trailing stop ratchet bijwerken
-      const newStop = +fmtPrc(price * (1 - STOP_LOSS));
+      // Trailing stop ratchet: in zwakkere markt dichter bij de koers → snellere exit
+      const effectiveStop = STOP_LOSS * stopTightenFactor;
+      const newStop = +fmtPrc(price * (1 - effectiveStop));
       if (newStop > Number(p.stop_loss_price)) {
         await sb.from("xinix_paper_positions").update({ stop_loss_price: newStop }).eq("id", p.id);
       }
@@ -313,13 +319,14 @@ async function run(): Promise<RunResult> {
   candidates.sort((a, b) => b.rankScore - a.rankScore);
 
   // 5) BUY uitvoeren (transactiekosten inbegrepen).
-  // In een bear-markt (SPY ≤ 200d MA) kopen we niets — bestaande posities lopen door.
+  // Bear: geen aankopen. Weak_bull: 60% positiegrootte.
+  const effectivePositionSize = Math.round(POSITION_SIZE_USD * regimePosScale);
   let bought = 0;
   const buyReasons: string[] = [];
   for (const c of isBullMarket ? candidates : []) {
     if (bought >= slotsAvailable) break;
     if (c.price <= 0) continue;
-    const qty = Math.floor((POSITION_SIZE_USD / c.price) * 1000) / 1000;
+    const qty = Math.floor((effectivePositionSize / c.price) * 1000) / 1000;
     if (qty <= 0) continue;
     const actualCost = qty * c.price * (1 + TX_COST); // totaal uit kas incl. transactiekosten
     if (cash - actualCost < CASH_RESERVE_USD) continue;
@@ -369,7 +376,7 @@ async function run(): Promise<RunResult> {
     total_equity: totalEquity, positions_count: openCount, computed_at: now.toISOString(),
   }, { onConflict: "date" });
 
-  const regimeLabel = isBullMarket ? "bull" : "bear (geen aankopen)";
+  const regimeLabel = regime === "strong_bull" ? "strong bull" : regime === "weak_bull" ? "weak bull (60% pos)" : "bear (geen aankopen)";
   const msg = `${closedCount} gesloten (${closedRealizedUsd >= 0 ? "+" : ""}$${closedRealizedUsd.toFixed(0)}), ${partialCount} deelwinst, ${bought} gekocht, ${openCount} open, equity $${totalEquity.toFixed(0)}, cash $${cash.toFixed(0)} [markt: ${regimeLabel}]`;
   return {
     ok: true,
