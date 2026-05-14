@@ -1,12 +1,13 @@
 // xinix-evolve-background — survival-of-the-fittest voor de 100-strategie simulatie.
 //
-// Na elke 75 dagen:
-//   1. Cull de onderste 10% van de NIET-beschermde strategieën (mark active=false)
-//   2. Vervroegd pensioen voor strategieën met 30+ trades en hitrate < 30%
-//   3. Spawn nakomelingen via geleide crossover: 60% kans om top-donor waarde te erven
-//   4. Nieuwe dimensies in het mutatieruimte: trailingStop + opportunityReplace
-//
-// Beschermde strategieën (holdDays >= 90 OF protected=true) overleven altijd.
+// v3 — drie extra verbeteringen bovenop v2:
+//   1. Elitisme: top 2 cullable strategieën overleven altijd (nooit gecullled of vervroegd gepensioneerd)
+//   2. Sharpe-fitness: returnPct + sharpe_bonus (max ±24pp) — risico-gecorrigeerd rendement
+//   3. Niche-diversiteitsdruk: overcrowded niches (sector × score-bucket × signaalfilter)
+//      krijgen een fitness-penalty zodat selectie-aanpakken structureel van elkaar blijven verschillen
+//   4. Geleide crossover: 60% kans om top-donor waarde te erven i.p.v. random walk
+//   5. Vervroegd pensioen: 30+ trades én hitrate < 30% → elites zijn uitgezonderd
+//   6. trailingStop + opportunityReplace in de mutatie-ruimte
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -31,27 +32,41 @@ function cors(req: Request) {
   };
 }
 
-const CULL_RATE              = 0.10;  // 10% van de cullable pool per cyclus
-const PARENT_POOL            = 0.25;  // top 25% als donor-kandidaten voor crossover
-const MIN_CYCLE_DAYS         = 75;    // snellere cyclus: ~4-5 per jaar
-const MIN_AGE_DAYS           = 90;    // minimale leeftijd vóór eerste evolutie
-const CROSSOVER_RATE         = 0.60;  // 60% kans dat mutatie donor-waarde erft i.p.v. random walk
-const EARLY_RETIRE_MIN_TRADES = 30;   // minimale trades voor vervroegd pensioen
-const EARLY_RETIRE_MAX_HITRATE = 0.30; // < 30% hitrate → vervroegd pensioen
+const CULL_RATE                = 0.10;  // 10% van de cullable pool per cyclus
+const PARENT_POOL              = 0.25;  // top 25% als donor-kandidaten voor crossover
+const MIN_CYCLE_DAYS           = 75;    // snellere cyclus: ~4-5 per jaar
+const MIN_AGE_DAYS             = 90;    // minimale leeftijd vóór eerste evolutie
+const CROSSOVER_RATE           = 0.60;  // kans om donor-waarde te erven i.p.v. random walk
+const EARLY_RETIRE_MIN_TRADES  = 30;    // minimale trades voor vervroegd pensioen
+const EARLY_RETIRE_MAX_HITRATE = 0.30;  // < 30% hitrate → vervroegd pensioen
+const ELITE_COUNT              = 2;     // top-N cullable strategieën overleven altijd
+const SHARPE_WEIGHT            = 8;     // per Sharpe-eenheid: +8pp fitness-bonus
+const SHARPE_MIN_TRADES        = 10;    // minimum trades voor betrouwbare Sharpe
+const NICHE_TARGET             = 5;     // max gewenst aantal strategieën per niche
+const NICHE_PENALTY            = 2;     // -2pp fitness per strategie boven NICHE_TARGET
 
 interface Cfg {
-  minScore:         number;
-  redReq:           boolean;
-  sector:           string;
-  maxPos:           number;
-  posSize:          number;
-  holdDays:         number;
-  stop:             number | null;
-  tp:               number | null;
-  limitBuf:         number | null;
-  minGold:          number;
-  trailingStop:     number | null;   // trailing stop fractie; null = vaste stop
-  opportunityReplace: boolean;       // kansrotatie activeren
+  minScore:           number;
+  redReq:             boolean;
+  sector:             string;
+  maxPos:             number;
+  posSize:            number;
+  holdDays:           number;
+  stop:               number | null;
+  tp:                 number | null;
+  limitBuf:           number | null;
+  minGold:            number;
+  trailingStop:       number | null;   // trailing stop fractie; null = vaste stop
+  opportunityReplace: boolean;         // kansrotatie activeren
+}
+
+// Selectieprofiel: sector × score-bucket × signaalfilter.
+// Strategieën met hetzelfde profiel concurreren direct met elkaar.
+function nicheKey(cfg: Cfg): string {
+  const sb  = cfg.minScore <= 55 ? "low" : cfg.minScore <= 70 ? "med" : "hi";
+  const sf  = cfg.redReq || cfg.minGold > 0 ? "sig" : "open";
+  const sec = cfg.sector === "all" ? "all" : cfg.sector.startsWith("bio") ? "bio" : "min";
+  return `${sec}_${sb}_${sf}`;
 }
 
 // Lineaire congruentiële generator — deterministisch op basis van seed.
@@ -164,8 +179,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Laad actieve strategieën + closed positions voor hitrate ──────────────
-    const [stratRes, statesRes, openRes, summaryRes, hitRateRes] = await Promise.all([
+    // ── Laad actieve strategieën + closed positions voor hitrate + Sharpe ──────
+    const [stratRes, statesRes, openRes, summaryRes, closedRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected").eq("active", true),
       sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital"),
       sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price").is("closed_at", null),
@@ -182,14 +197,32 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Hitrate per strategie (voor vervroegd pensioen) ───────────────────────
-    const hitByStrat = new Map<number, { cnt: number; wins: number }>();
-    for (const p of (hitRateRes.data ?? [])) {
+    // ── Hitrate + Sharpe per strategie ────────────────────────────────────────
+    const hitByStrat    = new Map<number, { cnt: number; wins: number }>();
+    const returnsByStrat = new Map<number, number[]>();
+
+    for (const p of (closedRes.data ?? [])) {
       const sid = p.strategy_id as number;
-      const cur = hitByStrat.get(sid) ?? { cnt: 0, wins: 0 };
-      cur.cnt++;
-      if (Number(p.return_pct) > 0) cur.wins++;
-      hitByStrat.set(sid, cur);
+      const ret = Number(p.return_pct);
+
+      const hs = hitByStrat.get(sid) ?? { cnt: 0, wins: 0 };
+      hs.cnt++;
+      if (ret > 0) hs.wins++;
+      hitByStrat.set(sid, hs);
+
+      const rs = returnsByStrat.get(sid) ?? [];
+      rs.push(ret);
+      returnsByStrat.set(sid, rs);
+    }
+
+    // Sharpe per strategie: gemiddeld per-trade rendement / standaarddeviatie (min. 10 trades)
+    const sharpeByStrat = new Map<number, number>();
+    for (const [sid, rets] of returnsByStrat.entries()) {
+      if (rets.length < SHARPE_MIN_TRADES) continue;
+      const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+      const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length;
+      const std = Math.sqrt(variance);
+      if (std > 0) sharpeByStrat.set(sid, mean / std);
     }
 
     // ── Performance per strategie berekenen ───────────────────────────────────
@@ -212,40 +245,67 @@ Deno.serve(async (req) => {
 
     interface Scored {
       id: number; slug: string; name: string; grp: string;
-      config: Cfg; generation: number; protected: boolean; returnPct: number;
+      config: Cfg; generation: number; protected: boolean;
+      returnPct: number; sharpe: number | null;
+      compositeFitness: number; adjustedFitness: number;
     }
     const scored: Scored[] = [];
     for (const strat of strats) {
       const state = stateMap.get(strat.id as number);
       if (!state) continue;
       const posVal = openVal.get(strat.id as number) ?? 0;
-      const equity = state.cash + posVal;
-      const returnPct = (equity - state.initial) / state.initial * 100;
+      const returnPct = (state.cash + posVal - state.initial) / state.initial * 100;
+      const sharpe = sharpeByStrat.get(strat.id as number) ?? null;
+      // Sharpe-bonus: geclampt op ±24pp om uitschieters te beperken
+      const sharpeBonus = sharpe != null ? Math.max(-24, Math.min(24, sharpe * SHARPE_WEIGHT)) : 0;
+      const compositeFitness = returnPct + sharpeBonus;
       scored.push({
-        id: strat.id as number,
-        slug: strat.slug as string,
-        name: strat.name as string,
-        grp:  strat.grp as string,
-        config: strat.config as Cfg,
-        generation: (strat.generation as number) ?? 1,
-        protected: (strat.protected as boolean) ?? false,
+        id:               strat.id as number,
+        slug:             strat.slug as string,
+        name:             strat.name as string,
+        grp:              strat.grp as string,
+        config:           strat.config as Cfg,
+        generation:       (strat.generation as number) ?? 1,
+        protected:        (strat.protected as boolean) ?? false,
         returnPct,
+        sharpe,
+        compositeFitness,
+        adjustedFitness:  compositeFitness, // niche-penalty wordt hieronder opgeteld
       });
     }
 
+    // ── Niche-diversiteitsdruk ────────────────────────────────────────────────
+    // Tel hoeveel actieve strategieën per niche aanwezig zijn.
+    // Overcrowded niches krijgen een penalty zodat vergelijkbare selectie-aanpakken
+    // worden weggeselecteerd ten gunste van strategieën met een unieke invalshoek.
+    const nicheCounts = new Map<string, number>();
+    for (const s of scored) nicheCounts.set(nicheKey(s.config), (nicheCounts.get(nicheKey(s.config)) ?? 0) + 1);
+
+    for (const s of scored) {
+      const overcrowd = Math.max(0, (nicheCounts.get(nicheKey(s.config)) ?? 1) - NICHE_TARGET);
+      s.adjustedFitness = s.compositeFitness - overcrowd * NICHE_PENALTY;
+    }
+
     // ── Splits: beschermd vs cullable ─────────────────────────────────────────
-    const cullable   = scored.filter(s => !s.protected).sort((a, b) => a.returnPct - b.returnPct);
+    // Sorteer cullable op adjustedFitness oplopend (slechtste eerst)
+    const cullable   = scored.filter(s => !s.protected).sort((a, b) => a.adjustedFitness - b.adjustedFitness);
     const protected_ = scored.filter(s => s.protected);
 
     const numToCull  = Math.max(1, Math.floor(cullable.length * CULL_RATE));
 
-    // Normale cull: slechtste numToCull
-    const normalCull = cullable.slice(0, numToCull);
+    // Elitisme: de top-2 cullable (op returnPct, niet op adjustedFitness) overleven altijd
+    const eliteIds = new Set(
+      [...cullable].sort((a, b) => b.returnPct - a.returnPct).slice(0, ELITE_COUNT).map(s => s.id)
+    );
+
+    // Normale cull: slechtste numToCull op basis van adjustedFitness
+    const normalCull    = cullable.filter(s => !eliteIds.has(s.id)).slice(0, numToCull);
     const normalCullIds = new Set(normalCull.map(s => s.id));
 
-    // Vervroegd pensioen: slechte hitrate (30+ trades, <30% wins), niet al ingepland
+    // Vervroegd pensioen: slechte hitrate — elites zijn uitgezonderd
     const earlyRetire = cullable.filter(s => {
       if (normalCullIds.has(s.id)) return false;
+      if (eliteIds.has(s.id)) return false;
       const hs = hitByStrat.get(s.id);
       return hs != null && hs.cnt >= EARLY_RETIRE_MIN_TRADES && (hs.wins / hs.cnt) < EARLY_RETIRE_MAX_HITRATE;
     });
@@ -258,8 +318,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Donor-pool: top-25% van alle strategieën (voor crossover) ────────────
-    const allSorted  = [...scored].sort((a, b) => b.returnPct - a.returnPct);
+    // ── Donor-pool: top-25% op compositeFitness (Sharpe-gecorrigeerd, zonder niche-penalty) ──
+    const allSorted  = [...scored].sort((a, b) => b.compositeFitness - a.compositeFitness);
     const numDonors  = Math.max(2, Math.ceil(allSorted.length * PARENT_POOL));
     const donors     = allSorted.slice(0, numDonors);
     const donorCfgs  = donors.map(d => d.config);
@@ -340,13 +400,21 @@ Deno.serve(async (req) => {
       await sb.from("xinix_strategy_state").insert(stateRows);
     }
 
+    // ── Niche-verdeling na evolutie ───────────────────────────────────────────
+    const nicheSummary: Record<string, number> = {};
+    for (const [nk, cnt] of nicheCounts.entries()) nicheSummary[nk] = cnt;
+
     // ── Log ───────────────────────────────────────────────────────────────────
     const earlyMsg = earlyRetire.length > 0
       ? ` + ${earlyRetire.length} vervroegd gepensioneerd (slechte hitrate)`
       : "";
+    const sharpeMsg = sharpeByStrat.size > 0
+      ? `, ${sharpeByStrat.size} strategieën met Sharpe-data`
+      : "";
     const logMsg = `Gen-${nextGen}: ${toCull.length} gecullled${earlyMsg} (${toCull.map(s => `${s.slug}(${s.returnPct.toFixed(1)}%)`).join(", ")}), `
-      + `${offspringRows.length} nakomelingen gespawnd via geleide crossover (${donors.length} donors). `
-      + `Beschermd: ${protected_.length} strategieën.`;
+      + `${offspringRows.length} nakomelingen gespawnd via geleide crossover (${donors.length} donors)${sharpeMsg}. `
+      + `Beschermd: ${protected_.length} + ${ELITE_COUNT} elites. `
+      + `Niches: ${Object.keys(nicheSummary).length} uniek.`;
 
     await sb.from("signal_runs").insert({
       job: "xinix-evolve", ok: true, message: logMsg, ran_at: retiredAt,
@@ -354,12 +422,15 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       generation:       nextGen,
-      culled:           toCull.map(s => ({ id: s.id, slug: s.slug, returnPct: +s.returnPct.toFixed(2) })),
+      culled:           toCull.map(s => ({ id: s.id, slug: s.slug, returnPct: +s.returnPct.toFixed(2), adjustedFitness: +s.adjustedFitness.toFixed(2) })),
       early_retired:    earlyRetire.map(s => ({ id: s.id, slug: s.slug, returnPct: +s.returnPct.toFixed(2) })),
+      elite_survivors:  [...eliteIds],
       spawned:          offspringRows.map(o => ({ slug: o.slug, parent_id: o.parent_id })),
       protected_count:  protected_.length,
       cullable_count:   cullable.length,
       donors_used:      donors.length,
+      sharpe_coverage:  sharpeByStrat.size,
+      niche_summary:    nicheSummary,
     }), { status: 200, headers: { ...cors(req), "content-type": "application/json" } });
 
   } catch (e) {
