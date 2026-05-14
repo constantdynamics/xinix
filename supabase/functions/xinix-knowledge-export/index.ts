@@ -35,11 +35,14 @@ function cors(req: Request) {
   };
 }
 
-const NTFY_TOPIC  = Deno.env.get("NTFY_TOPIC")      ?? "";
-const NTFY_BASE   = "https://ntfy.sh";
-const RESEND_KEY  = Deno.env.get("RESEND_API_KEY")  ?? "";
-const RESEND_FROM = "Xinix <noreply@constantdynamics.nl>";
-const NOTIFY_EMAIL = Deno.env.get("NOTIFY_EMAIL")   ?? "";
+const NTFY_TOPIC   = Deno.env.get("NTFY_TOPIC")      ?? "";
+const NTFY_BASE    = "https://ntfy.sh";
+const RESEND_KEY   = Deno.env.get("RESEND_API_KEY")  ?? "";
+const RESEND_FROM  = "Xinix <noreply@constantdynamics.nl>";
+const NOTIFY_EMAIL = Deno.env.get("NOTIFY_EMAIL")    ?? "";
+const GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN")    ?? "";
+const GITHUB_REPO  = "constantdynamics/xinix";
+const GITHUB_BRANCH = "claude/poll-fundamentals-background-5TjhG";
 
 async function sendNtfy(title: string, message: string, clickUrl?: string) {
   if (!NTFY_TOPIC) return;
@@ -59,6 +62,211 @@ async function sendEmail(to: string, subject: string, text: string) {
     headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ from: RESEND_FROM, to, subject, text, html }),
   }).catch(() => {});
+}
+
+// ── GitHub bestand pushen ──────────────────────────────────────────────────────
+
+async function pushToGitHub(path: string, content: string, message: string) {
+  if (!GITHUB_TOKEN) return;
+  const base = `https://api.github.com/repos/${GITHUB_REPO}/contents/${path}`;
+  const headers = {
+    Authorization: `Bearer ${GITHUB_TOKEN}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "xinix-knowledge-export",
+    "Content-Type": "application/json",
+  };
+  // Haal huidige SHA op (nodig voor update)
+  let sha: string | undefined;
+  try {
+    const get = await fetch(`${base}?ref=${GITHUB_BRANCH}`, { headers });
+    if (get.ok) { const j = await get.json(); sha = j.sha; }
+  } catch { /* nieuw bestand */ }
+
+  const body: Record<string, unknown> = {
+    message,
+    content: btoa(unescape(encodeURIComponent(content))),
+    branch: GITHUB_BRANCH,
+  };
+  if (sha) body.sha = sha;
+  await fetch(base, { method: "PUT", headers, body: JSON.stringify(body) }).catch(() => {});
+}
+
+// ── Uitgebreide kennisbasis markdown ──────────────────────────────────────────
+
+function buildKennisbasis(data: Record<string, unknown>, now: Date, exportId: number | null): string {
+  const strategies = data.strategies as Record<string, unknown>;
+  const active = (strategies.active as Array<Record<string, unknown>>) ?? [];
+  const retired = (strategies.retired as unknown[]) ?? [];
+  const evo = strategies.evolution as Record<string, unknown>;
+  const positions = data.positions as Record<string, unknown>;
+  const watchlist = data.watchlist as Record<string, unknown>;
+  const summary = data.summary as Record<string, unknown>;
+  const insights = (data.config_insights as Array<Record<string, unknown>>) ?? [];
+  const closedBySig = (positions.closed_by_signal as Record<string, Record<string, number>>) ?? {};
+  const closedBySector = (positions.closed_by_sector as Record<string, Record<string, number>>) ?? {};
+  const bestTrades = (positions.best_trades as Array<Record<string, unknown>>) ?? [];
+  const worstTrades = (positions.worst_trades as Array<Record<string, unknown>>) ?? [];
+
+  const dateStr = now.toLocaleDateString("nl-NL", { year: "numeric", month: "long", day: "numeric" });
+  const lines: string[] = [];
+
+  lines.push(`# Xinix Kennisbasis — Automatisch gegenereerd`);
+  lines.push(`> Bijgewerkt op **${dateStr}** · Export #${exportId ?? "?"}`);
+  lines.push(`> Dit bestand wordt elke maand automatisch bijgewerkt door \`xinix-knowledge-export\`.`);
+  lines.push(`> Gebruik dit als context voor Claude of als overzicht voor jezelf.`);
+  lines.push("");
+
+  // ── Samenvatting ─────────────────────────────────────────────────────────────
+  lines.push("## Samenvatting");
+  lines.push(`| Metric | Waarde |`);
+  lines.push(`|--------|--------|`);
+  lines.push(`| Actieve strategieën | ${active.length} |`);
+  lines.push(`| Gepensioneerde strategieën | ${retired.length} |`);
+  lines.push(`| Gesloten trades (totaal) | ${(summary.total_closed_trades as number) ?? 0} |`);
+  lines.push(`| Open posities nu | ${(positions.open_count as number) ?? 0} |`);
+  lines.push(`| Strategieën in winst | ${(summary.strategies_in_profit as number) ?? 0} van ${active.length} |`);
+  lines.push(`| Mediaan portefeuille-rendement | ${((summary.median_return_pct as number) ?? 0).toFixed(2)}% |`);
+  lines.push(`| Gemiddeld portefeuille-rendement | ${((summary.avg_portfolio_return as number) ?? 0).toFixed(2)}% |`);
+  lines.push(`| Algehele hitrate | ${Math.round(((summary.overall_win_rate as number) ?? 0) * 100)}% |`);
+  lines.push(`| Evolutie-cycli | ${(evo.cycles as number) ?? 0} · max Gen-${(evo.max_generation as number) ?? 1} |`);
+  lines.push("");
+
+  // ── Top 10 en bottom 10 strategieën ──────────────────────────────────────────
+  const sorted = [...active].sort((a, b) => (b.total_return_pct as number) - (a.total_return_pct as number));
+  lines.push("## Top 10 strategieën");
+  lines.push("| # | Naam | Groep | Rendement | Hitrate | Trades |");
+  lines.push("|---|------|-------|-----------|---------|--------|");
+  for (const s of sorted.slice(0, 10)) {
+    const ret = (s.total_return_pct as number).toFixed(2);
+    const wr = Math.round((s.win_rate as number) * 100);
+    lines.push(`| ${s.rank ?? "?"} | ${s.name} | ${s.grp} | **${ret}%** | ${wr}% | ${s.closed_count} |`);
+  }
+  lines.push("");
+
+  lines.push("## Bottom 10 strategieën");
+  lines.push("| # | Naam | Groep | Rendement | Hitrate | Trades |");
+  lines.push("|---|------|-------|-----------|---------|--------|");
+  for (const s of sorted.slice(-10).reverse()) {
+    const ret = (s.total_return_pct as number).toFixed(2);
+    const wr = Math.round((s.win_rate as number) * 100);
+    lines.push(`| ${s.rank ?? "?"} | ${s.name} | ${s.grp} | **${ret}%** | ${wr}% | ${s.closed_count} |`);
+  }
+  lines.push("");
+
+  // ── Configuratie-inzichten ───────────────────────────────────────────────────
+  lines.push("## Configuratie-inzichten (wat werkt beter?)");
+  if (insights.length === 0) {
+    lines.push("_Nog onvoldoende data (< 3 trades per waarde) voor betrouwbare inzichten._");
+  } else {
+    lines.push("| Dimensie | Beste waarde | Slechtste waarde | Verschil |");
+    lines.push("|----------|-------------|-----------------|---------|");
+    for (const ins of insights) {
+      lines.push(`| ${ins.dimension} | **${ins.best_value}** | ${ins.worst_value} | +${(ins.diff_pct as number).toFixed(1)}% |`);
+    }
+  }
+  lines.push("");
+
+  // ── Signaaltype performance ──────────────────────────────────────────────────
+  lines.push("## Signaaltype performance");
+  const sigRows = Object.entries(closedBySig)
+    .filter(([, v]) => v.count >= 3)
+    .sort((a, b) => b[1].avg_return_pct - a[1].avg_return_pct);
+  if (sigRows.length === 0) {
+    lines.push("_Nog geen data._");
+  } else {
+    lines.push("| Signaaltype | Trades | Hitrate | Gem. rendement |");
+    lines.push("|-------------|--------|---------|----------------|");
+    for (const [sig, v] of sigRows) {
+      const wr = Math.round((v.win_rate ?? 0) * 100);
+      lines.push(`| ${sig} | ${v.count} | ${wr}% | ${(v.avg_return_pct ?? 0).toFixed(2)}% |`);
+    }
+  }
+  lines.push("");
+
+  // ── Sector performance ───────────────────────────────────────────────────────
+  lines.push("## Sector performance");
+  const sectRows = Object.entries(closedBySector)
+    .filter(([, v]) => v.count >= 3)
+    .sort((a, b) => b[1].avg_return_pct - a[1].avg_return_pct);
+  if (sectRows.length === 0) {
+    lines.push("_Nog geen data._");
+  } else {
+    lines.push("| Sector | Trades | Hitrate | Gem. rendement |");
+    lines.push("|--------|--------|---------|----------------|");
+    for (const [sect, v] of sectRows) {
+      const wr = Math.round((v.win_rate ?? 0) * 100);
+      lines.push(`| ${sect} | ${v.count} | ${wr}% | ${(v.avg_return_pct ?? 0).toFixed(2)}% |`);
+    }
+  }
+  lines.push("");
+
+  // ── Beste en slechtste trades ────────────────────────────────────────────────
+  if (bestTrades.length > 0) {
+    lines.push("## Beste trades ooit");
+    lines.push("| Ticker | Rendement | Entry | Exit | Signalen |");
+    lines.push("|--------|-----------|-------|------|---------|");
+    for (const t of bestTrades.slice(0, 5)) {
+      const sigs = ((t.entry_signal_types as string[]) ?? []).join(", ") || "—";
+      lines.push(`| ${t.ticker} | **+${(t.return_pct as number).toFixed(1)}%** | ${(t.entry_date as string)?.slice(0,10)} | ${(t.closed_at as string)?.slice(0,10)} | ${sigs} |`);
+    }
+    lines.push("");
+  }
+
+  if (worstTrades.length > 0) {
+    lines.push("## Slechtste trades ooit");
+    lines.push("| Ticker | Rendement | Entry | Exit | Reden |");
+    lines.push("|--------|-----------|-------|------|-------|");
+    for (const t of worstTrades.slice(0, 5)) {
+      lines.push(`| ${t.ticker} | **${(t.return_pct as number).toFixed(1)}%** | ${(t.entry_date as string)?.slice(0,10)} | ${(t.closed_at as string)?.slice(0,10)} | ${t.closed_reason ?? "—"} |`);
+    }
+    lines.push("");
+  }
+
+  // ── Aanbevelingen voor de volgende periode ───────────────────────────────────
+  lines.push("## Aanbevelingen voor de volgende periode");
+  const recs: string[] = [];
+
+  // Op basis van top config-insight
+  if (insights.length > 0) {
+    const top = insights[0];
+    recs.push(`**${top.dimension}**: Overweeg nieuwe strategieën met waarde "${top.best_value}" — scoort ${(top.diff_pct as number).toFixed(1)}% beter dan "${top.worst_value}".`);
+  }
+
+  // Op basis van beste sector
+  if (sectRows.length > 0 && (sectRows[0][1].avg_return_pct ?? 0) > 5) {
+    recs.push(`**Sector ${sectRows[0][0]}** presteert sterk (gem. ${sectRows[0][1].avg_return_pct.toFixed(1)}%). Overweeg meer gewicht in deze sector.`);
+  }
+  // Op basis van slechtste sector
+  if (sectRows.length > 1 && (sectRows[sectRows.length-1][1].avg_return_pct ?? 0) < -5) {
+    const worst = sectRows[sectRows.length-1];
+    recs.push(`**Sector ${worst[0]}** presteert slecht (gem. ${worst[1].avg_return_pct.toFixed(1)}%). Overweeg exposure te verminderen.`);
+  }
+  // Op basis van top signaal
+  if (sigRows.length > 0 && (sigRows[0][1].avg_return_pct ?? 0) > 10) {
+    recs.push(`**Signaal "${sigRows[0][0]}"** levert sterk rendement (gem. ${sigRows[0][1].avg_return_pct.toFixed(1)}%, ${sigRows[0][1].count} trades). Prioriteer dit signaal.`);
+  }
+
+  if (recs.length === 0) {
+    lines.push("_Onvoldoende data voor aanbevelingen. Wacht op meer gesloten trades._");
+  } else {
+    for (const r of recs) lines.push(`- ${r}`);
+  }
+  lines.push("");
+
+  // ── Watchlist stats ──────────────────────────────────────────────────────────
+  lines.push("## Watchlist");
+  lines.push(`${(watchlist.total as number) ?? 0} tickers · ${(watchlist.active as number) ?? 0} actief · ${(watchlist.benched as number) ?? 0} op de bank · ${(watchlist.with_buy_limit as number) ?? 0} met buy-limit`);
+  const bySect = (watchlist.by_sector as Record<string, number>) ?? {};
+  lines.push("");
+  for (const [sector, count] of Object.entries(bySect).sort((a, b) => b[1] - a[1])) {
+    lines.push(`- **${sector}**: ${count} tickers`);
+  }
+  lines.push("");
+
+  lines.push("---");
+  lines.push(`_Volledig JSON-archief: dashboard → 100 Strategieën → Evolutie → Kennis-export_`);
+
+  return lines.join("\n");
 }
 
 // ── Samenvatting genereren ─────────────────────────────────────────────────────
@@ -519,6 +727,71 @@ Deno.serve(async (req) => {
       job: "xinix-knowledge-export", ok: true,
       message: `Export #${savedId ?? "?"}: ${activeStrategies.length} strategieën, ${totalClosed} gesloten trades, ${tickers.length} tickers`,
     });
+
+    // ── Kennisbasis naar GitHub pushen ────────────────────────────────────────────
+    const kennisbasis = buildKennisbasis(exportData as unknown as Record<string, unknown>, now, savedId);
+    const monthLabel = now.toLocaleDateString("nl-NL", { month: "long", year: "numeric" });
+
+    // docs/kennisbasis.md — uitgebreide versie
+    await pushToGitHub(
+      "docs/kennisbasis.md",
+      kennisbasis,
+      `chore: kennisbasis bijgewerkt ${now.toISOString().slice(0,10)} (export #${savedId ?? "?"})`,
+    );
+
+    // CLAUDE.md — update KENNISBASIS_START...KENNISBASIS_END sectie
+    const claudeSection = [
+      `_Laatste export: **${monthLabel}** (export #${savedId ?? "?"})_`,
+      "",
+      `**Beste strategie**: ${exportData.summary.best_strategy_name} (+${(exportData.summary.best_strategy_return ?? 0).toFixed(2)}%)`,
+      `**Slechtste strategie**: ${exportData.summary.worst_strategy_name} (${(exportData.summary.worst_strategy_return ?? 0).toFixed(2)}%)`,
+      `**Mediaan rendement**: ${((exportData.summary.median_return_pct as number) ?? 0).toFixed(2)}%`,
+      `**Hitrate**: ${Math.round(((exportData.summary.overall_win_rate as number) ?? 0) * 100)}% over ${(exportData.summary.total_closed_trades as number) ?? 0} gesloten trades`,
+      "",
+      ...((() => {
+        const insights = (exportData.config_insights as Array<Record<string, unknown>>) ?? [];
+        if (insights.length === 0) return ["_Nog geen configuratie-inzichten._"];
+        return ["**Top configuratie-inzichten:**", ...insights.slice(0,3).map(i => `- ${i.dimension}: "${i.best_value}" scoort +${(i.diff_pct as number).toFixed(1)}% beter dan "${i.worst_value}"`)];
+      })()),
+      "",
+      `Zie \`docs/kennisbasis.md\` voor de volledige tabel met alle strategieën, signalen en aanbevelingen.`,
+    ].join("\n");
+
+    // Fetch CLAUDE.md, replace sectie tussen markers
+    try {
+      const base = `https://api.github.com/repos/${GITHUB_REPO}/contents/CLAUDE.md`;
+      const headers = {
+        Authorization: `Bearer ${GITHUB_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "xinix-knowledge-export",
+        "Content-Type": "application/json",
+      };
+      if (GITHUB_TOKEN) {
+        const getRes = await fetch(`${base}?ref=${GITHUB_BRANCH}`, { headers });
+        if (getRes.ok) {
+          const j = await getRes.json();
+          const currentContent = new TextDecoder().decode(
+            Uint8Array.from(atob(j.content.replace(/\n/g, "")), c => c.charCodeAt(0))
+          );
+          const marker1 = "<!-- KENNISBASIS_START -->";
+          const marker2 = "<!-- KENNISBASIS_END -->";
+          const i1 = currentContent.indexOf(marker1);
+          const i2 = currentContent.indexOf(marker2);
+          if (i1 >= 0 && i2 > i1) {
+            const updated = currentContent.slice(0, i1 + marker1.length) + "\n" + claudeSection + "\n" + currentContent.slice(i2);
+            await fetch(base, {
+              method: "PUT", headers,
+              body: JSON.stringify({
+                message: `chore: CLAUDE.md kennisbasis bijgewerkt ${now.toISOString().slice(0,10)}`,
+                content: btoa(unescape(encodeURIComponent(updated))),
+                sha: j.sha,
+                branch: GITHUB_BRANCH,
+              }),
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch { /* non-fatal */ }
 
     // ── Notificaties ─────────────────────────────────────────────────────────────
     const best = exportData.summary;
