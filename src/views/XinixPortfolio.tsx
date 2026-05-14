@@ -756,6 +756,76 @@ function SimInsightsSection({ sim }: { sim: SimResults }) {
   );
 }
 
+function CyclePulse({ evo }: { evo: SimEvolution }) {
+  const cycleStart = evo.cycle_start ? new Date(evo.cycle_start) : null;
+  const cycleEnd   = evo.next_approx  ? new Date(evo.next_approx)  : null;
+  if (!cycleStart || !cycleEnd) return null;
+
+  const now         = Date.now();
+  const totalMs     = cycleEnd.getTime() - cycleStart.getTime();
+  const elapsedMs   = Math.max(0, now - cycleStart.getTime());
+  const elapsedDays = Math.floor(elapsedMs / 86400000);
+  const totalDays   = Math.round(totalMs / 86400000);
+  const remainDays  = Math.max(0, totalDays - elapsedDays);
+  const pct         = Math.min(100, Math.round((elapsedMs / totalMs) * 100));
+  const barFull     = pct >= 100;
+
+  // Markeer per 60 dagen (de holdDays van de basisstrategie) — 1 "tactische cyclus"
+  const tacticalMarks = [60, 120];
+
+  return (
+    <div className="mb-4">
+      <div className="flex justify-between text-[11px] text-neutral-400 mb-1.5">
+        <span>
+          Huidige cyclus: <strong className="text-neutral-200">{elapsedDays} van {totalDays} dagen</strong>
+        </span>
+        <span className={barFull ? "text-fog-lime font-semibold" : "text-neutral-400"}>
+          {barFull
+            ? "Klaar voor verversing"
+            : `nog ${remainDays} dag${remainDays === 1 ? "" : "en"}`}
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      <div className="relative h-3 rounded-full bg-ink-3/60 overflow-hidden border border-ink-5">
+        <div
+          className={`h-full rounded-full transition-all ${barFull ? "bg-fog-lime" : "bg-fog-watch/70"}`}
+          style={{ width: `${pct}%` }}
+        />
+        {/* Tactische markeringen bij 60d en 120d */}
+        {tacticalMarks.map((d) => (
+          <div
+            key={d}
+            className="absolute top-0 bottom-0 w-px bg-ink-5/80"
+            style={{ left: `${Math.round((d / totalDays) * 100)}%` }}
+            title={`${d} dagen`}
+          />
+        ))}
+      </div>
+
+      <div className="flex justify-between text-[10px] text-neutral-600 mt-1">
+        <span>{cycleStart.toLocaleDateString("nl-NL", { day: "2-digit", month: "short" })}</span>
+        {tacticalMarks.map((d) => (
+          <span key={d} className="text-neutral-700">60d</span>
+        ))}
+        <span>{cycleEnd.toLocaleDateString("nl-NL", { day: "2-digit", month: "short", year: "numeric" })}</span>
+      </div>
+
+      <div className="flex gap-4 mt-2 text-[11px] flex-wrap">
+        <span className="text-neutral-400">
+          🛡️ <strong className="text-neutral-200">{evo.protected_count}</strong> beschermd (overleven altijd)
+        </span>
+        <span className="text-neutral-400">
+          🌱 <strong className="text-neutral-200">{100 - evo.protected_count}</strong> cullbaar (bottom 10% gaat eruit)
+        </span>
+        <span className="text-neutral-400">
+          ✂️ Verwacht: <strong className="text-neutral-200">~{Math.floor((100 - evo.protected_count) * 0.10)}</strong> strategie{Math.floor((100 - evo.protected_count) * 0.10) === 1 ? "" : "ën"} vervangen
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function EvolutionPanel({ evo, isAdmin }: { evo: SimEvolution; isAdmin: boolean }) {
   const [evolving, setEvolving] = useState(false);
   const [evolveMsg, setEvolveMsg] = useState<string | null>(null);
@@ -790,36 +860,27 @@ function EvolutionPanel({ evo, isAdmin }: { evo: SimEvolution; isAdmin: boolean 
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-1">
-            Evolutie-mechanisme
+            Evolutie-mechanisme · 180-daagse cyclus
           </div>
           <div className="text-sm font-semibold text-neutral-100">
             {evo.cycles === 0 ? "Generatie 1 — nog geen cyclus afgerond" : `Generatie ${evo.max_generation} — ${evo.cycles} ${evo.cycles === 1 ? "cyclus" : "cycli"} voltooid`}
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap text-[11px] text-right shrink-0">
-          <div className="text-center">
-            <div className="text-lg font-bold text-neutral-100">{evo.protected_count}</div>
-            <div className="text-neutral-500">🛡️ beschermd</div>
-          </div>
-          <div className="text-center">
+        {evo.retired.length > 0 && (
+          <div className="text-center text-[11px] shrink-0">
             <div className="text-lg font-bold text-neutral-100">{evo.retired.length}</div>
-            <div className="text-neutral-500">gecullled</div>
+            <div className="text-neutral-500">gepensioneerd</div>
           </div>
-        </div>
+        )}
       </div>
+
+      {/* Afteller met progress bar */}
+      <CyclePulse evo={evo} />
 
       <div className="text-xs text-neutral-400 leading-relaxed mb-3">
-        Na elke <strong className="text-neutral-200">180 dagen</strong> worden de onderste <strong className="text-neutral-200">10%</strong> van de niet-beschermde strategieën (≈8–9) gecullled en vervangen door nakomelingen van de top-15% met 1–3 mutaties.
-        {" "}De <strong className="text-neutral-200">{evo.protected_count} beschermde</strong> strategieën (holdDays ≥ 90 — de "lottery-ticker" categorie) overleven altijd.
+        Na elke <strong className="text-neutral-200">180 dagen</strong> worden de onderste <strong className="text-neutral-200">10%</strong> van de niet-beschermde strategieën (≈8) gecullled en vervangen door nakomelingen van de top-15% met 1–3 mutaties.
+        {" "}De <strong className="text-neutral-200">{evo.protected_count} beschermde</strong> strategieën (holdDays ≥ 90 — de "lottery-ticker" categorie die eens per 5 jaar spiket) overleven altijd.
       </div>
-
-      {nextDate && (
-        <div className={`text-xs mb-3 ${isPast ? "text-fog-lime font-semibold" : "text-neutral-400"}`}>
-          {isPast
-            ? "Evolutie-cyclus is gereed voor uitvoering (180 dagen verstreken)"
-            : `Volgende cyclus verwacht over ~${daysUntil} dagen (${nextDate.toLocaleDateString("nl-NL", { day: "2-digit", month: "long", year: "numeric" })})`}
-        </div>
-      )}
 
       {evo.last_at && (
         <div className="text-[11px] text-neutral-500 mb-3">
@@ -957,26 +1018,38 @@ export function SimulationView() {
       />
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="p-3 text-center">
-          <div className="text-2xl font-bold tabular text-neutral-100">{meta.total}</div>
-          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Actieve strategieën</div>
-        </Card>
-        <Card className="p-3 text-center">
-          <div className="text-2xl font-bold tabular text-fog-lime">
-            {sim.strategies.filter((s) => s.total_return_pct > 0).length}
-          </div>
-          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Positief rendement</div>
-        </Card>
-        <Card className="p-3 text-center">
-          <div className="text-2xl font-bold tabular text-neutral-100">{meta.strategies_with_closed_positions}</div>
-          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Met gesloten trades</div>
-        </Card>
-        <Card className="p-3 text-center">
-          <div className="text-2xl font-bold tabular text-neutral-100">{evolution.max_generation}</div>
-          <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Generatie</div>
-        </Card>
-      </div>
+      {(() => {
+        const waitingCount = sim.strategies.filter(s => s.open_count === 0 && s.closed_count === 0).length;
+        return (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Card className="p-3 text-center">
+                <div className="text-2xl font-bold tabular text-neutral-100">{meta.total}</div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Actieve strategieën</div>
+              </Card>
+              <Card className="p-3 text-center">
+                <div className="text-2xl font-bold tabular text-fog-lime">
+                  {sim.strategies.filter((s) => s.total_return_pct > 0).length}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Positief rendement</div>
+              </Card>
+              <Card className="p-3 text-center">
+                <div className="text-2xl font-bold tabular text-neutral-100">{meta.strategies_with_closed_positions}</div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Met gesloten trades</div>
+              </Card>
+              <Card className="p-3 text-center">
+                <div className="text-2xl font-bold tabular text-neutral-400">{waitingCount}</div>
+                <div className="text-[10px] uppercase tracking-wider text-neutral-500 mt-0.5">Wachten op entry</div>
+              </Card>
+            </div>
+            {waitingCount > 0 && (
+              <p className="text-[11px] text-neutral-500 -mt-1">
+                💰 {waitingCount} strategie{waitingCount === 1 ? "" : "ën"} houd{waitingCount === 1 ? "t" : "en"} volledig cash — hun criteria (hoge score-drempel, medaille-eis of sector-focus) zijn nog niet getriggerd. Dit is normaal: sommige zijn bewust selectief en wachten op het juiste moment.
+              </p>
+            )}
+          </>
+        );
+      })()}
 
       {/* Top 3 podium */}
       {sim.strategies.length >= 3 && (

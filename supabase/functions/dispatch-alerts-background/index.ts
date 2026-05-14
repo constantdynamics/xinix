@@ -52,7 +52,24 @@ function shouldNotify(signalType: string, action: string | null | undefined, gol
 }
 
 function inQuietHours(s: Settings): boolean { if (s.quiet_hours_start == null || s.quiet_hours_end == null) return false; const h = new Date().getUTCHours(); const start = s.quiet_hours_start; const end = s.quiet_hours_end; if (start === end) return false; if (start < end) return h >= start && h < end; return h >= start || h < end; }
-async function sendEmail(to: string, subject: string, text: string): Promise<{ ok: boolean; error?: string }> { const key = Deno.env.get("RESEND_API_KEY"); const from = Deno.env.get("RESEND_FROM") ?? "Xinix Signal <onboarding@resend.dev>"; if (!key) return { ok: false, error: "RESEND_API_KEY missing" }; const res = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to, subject, text }) }); if (!res.ok) { const body = await res.text(); return { ok: false, error: `Resend ${res.status}: ${body}` }; } return { ok: true }; }
+async function sendEmail(to: string, subject: string, text: string): Promise<{ ok: boolean; error?: string }> {
+  const key = Deno.env.get("RESEND_API_KEY");
+  const from = Deno.env.get("RESEND_FROM") ?? "Xinix Signal <onboarding@resend.dev>";
+  if (!key) return { ok: false, error: "RESEND_API_KEY missing" };
+  // Bouw HTML: escape entities, vervang https-URLs door klikbare <a> tags,
+  // bewaar newlines als <br> zodat de opmaak van de plain-text body bewaard blijft.
+  function esc(s: string) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  const html = `<!DOCTYPE html><html><body style="font-family:monospace;font-size:13px;white-space:pre-wrap;max-width:680px">${
+    esc(text).replace(/https?:\/\/[^\s<"]+/g, u => `<a href="${u}" style="color:#3b82f6">${u}</a>`)
+  }</body></html>`;
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to, subject, text, html }),
+  });
+  if (!res.ok) { const body = await res.text(); return { ok: false, error: `Resend ${res.status}: ${body}` }; }
+  return { ok: true };
+}
 
 // Plak een zero-width space tussen ticker base en suffix zodat
 // notification clients .TO / .V / .AX niet als TLD herkennen en
@@ -63,7 +80,12 @@ function safeTickerDisplay(ticker: string): string {
 
 async function sendNtfy(server: string, topic: string, title: string, body: string, priority: number, tags: string[], clickUrl: string | null): Promise<{ ok: boolean; error?: string }> {
   const payload: Record<string, unknown> = { topic, title, message: body, priority, tags };
-  if (clickUrl) payload.click = clickUrl;
+  if (clickUrl) {
+    payload.click = clickUrl;
+    // Expliciete actie-button "Open Google Finance" zodat het linkje altijd zichtbaar is,
+    // ook als de notification-body te lang is voor een preview.
+    payload.actions = [{ action: "view", label: "Open Google Finance", url: clickUrl, clear: false }];
+  }
   const res = await fetch(server.replace(/\/$/, ""), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -141,6 +163,9 @@ function formatAlert(
   const title = titleParts.join(" · ").slice(0, 120);
 
   const lines: string[] = [];
+  // Google Finance URL staat BOVENAAN zodat ie altijd zichtbaar is in de preview,
+  // ook als de rest van het bericht afgekapt wordt.
+  lines.push(`🔗 ${gfUrl}`);
   lines.push(`${tickerDisp}${company ? ` (${company})` : ""}`);
   if (showAction && score) lines.push(`Actie: ${score.action} · score ${score.final_score.toFixed(2)}`);
   const ml = medalLine(medals);

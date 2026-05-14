@@ -429,6 +429,7 @@ export interface SimEvolution {
   max_generation: number;
   protected_count: number;
   last_at: string | null;
+  cycle_start: string | null;
   next_approx: string | null;
   retired: SimRetired[];
   run_log: { at: string; message: string }[];

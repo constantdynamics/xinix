@@ -223,6 +223,7 @@ Deno.serve(async (req) => {
         max_generation:    maxGeneration,
         protected_count:   protectedCount,
         last_at:           lastEvolveAt,
+        cycle_start:       base,
         next_approx:       nextEvolveApprox,
         retired:           (retiredRes.data ?? []).map(r => ({
           id:          r.id,
