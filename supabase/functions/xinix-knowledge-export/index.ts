@@ -414,6 +414,13 @@ Deno.serve(async (req) => {
     // POST: maak nieuwe export
     if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
 
+    // Mini-modus: alleen config + CLAUDE.md bijwerken, geen volledige DB snapshot
+    let isMini = false;
+    try {
+      const body = await req.json().catch(() => ({}));
+      isMini = body?.mini === true;
+    } catch { /* geen body */ }
+
     const now = new Date();
 
     // ── Parallel queries ────────────────────────────────────────────────────────
@@ -596,7 +603,7 @@ Deno.serve(async (req) => {
       watchlistBySector[s] = (watchlistBySector[s] ?? 0) + 1;
     }
 
-    // ── Config insights ─────────────────────────────────────────────────────────
+    // ── Config insights ──────────────────────────────────────────────────────────
     const cfgInsights = [
       dimensionInsight(activeStrategies, "Score-drempel",     cfg => cfg.minScore != null ? `≥${cfg.minScore}` : null),
       dimensionInsight(activeStrategies, "Tijdvenster (hold)", cfg => cfg.holdDays != null ? `${cfg.holdDays}d` : null),
@@ -609,6 +616,42 @@ Deno.serve(async (req) => {
       dimensionInsight(activeStrategies, "Limiet-buffer",       cfg => cfg.limitBuf != null ? `+${(Number(cfg.limitBuf)*100).toFixed(0)}%` : "geen limiet"),
       dimensionInsight(activeStrategies, "Min goud-medailles",  cfg => cfg.minGold != null ? `≥${cfg.minGold} goud` : null),
     ].filter(Boolean);
+
+    // ── Paper portfolio config bijwerken op basis van top-strategie inzichten ────
+    // Alleen als er voldoende data is (≥ 5 actieve strategieën met gesloten trades).
+    const configUpdateLog = await (async () => {
+      if (activeStrategies.length < 5) return "te weinig strategieën";
+      const updates: Record<string, unknown> = { updated_at: now.toISOString(), updated_by: "knowledge-export" };
+      const changes: string[] = [];
+
+      for (const ins of (cfgInsights as Array<Record<string, unknown>>)) {
+        if ((ins.diff_pct as number) < 5) continue; // alleen bij >5% verschil
+        const best = ins.best_value as string;
+
+        if (ins.dimension === "Score-drempel") {
+          const m = best.match(/≥(\d+)/);
+          if (m) { const v = parseInt(m[1]); if (v >= 50 && v <= 80) { updates.entry_min_score = v; changes.push(`entry_min_score≥${v}`); } }
+        }
+        if (ins.dimension === "Tijdvenster (hold)") {
+          const m = best.match(/(\d+)d/);
+          if (m) { const v = parseInt(m[1]); if (v >= 20 && v <= 180) { updates.hold_days = v; changes.push(`hold_days=${v}d`); } }
+        }
+        if (ins.dimension === "Limiet-buffer") {
+          const m = best.match(/\+(\d+)%/);
+          if (m) { const v = parseFloat(m[1]) / 100; if (v >= 0 && v <= 0.25) { updates.entry_limit_buffer = v; changes.push(`entry_limit_buffer=+${m[1]}%`); } }
+        }
+        if (ins.dimension === "Stop-loss") {
+          const m = best.match(/-(\d+(?:\.\d+)?)%/);
+          if (m) { const v = parseFloat(m[1]) / 100; if (v >= 0.05 && v <= 0.30) { updates.stop_loss = v; changes.push(`stop_loss=-${m[1]}%`); } }
+        }
+      }
+
+      if (changes.length > 0) {
+        await db.from("xinix_paper_config").update(updates).eq("id", 1);
+        return `Paper config bijgewerkt: ${changes.join(", ")}`;
+      }
+      return "Paper config ongewijzigd";
+    })();
 
     // ── Evolutie ─────────────────────────────────────────────────────────────────
     const evolveRuns = evolveRes.data ?? [];
@@ -698,6 +741,53 @@ Deno.serve(async (req) => {
     // ── Markdown samenvatting ────────────────────────────────────────────────────
     const summaryText = buildSummary(exportData as unknown as Record<string, unknown>, now);
 
+    // ── Mini-modus: sla DB-insert en email over ───────────────────────────────────
+    if (isMini) {
+      const kennisbasisMini = buildKennisbasis(exportData as unknown as Record<string, unknown>, now, null);
+      await pushToGitHub(
+        "docs/kennisbasis.md",
+        kennisbasisMini,
+        `chore: kennisbasis wekelijks bijgewerkt ${now.toISOString().slice(0,10)}`,
+      );
+      // CLAUDE.md update
+      const miniClaudeSection = [
+        `_Wekelijkse update: **${now.toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" })}**_`,
+        "",
+        `**Beste strategie**: ${exportData.summary.best_strategy_name} (+${(exportData.summary.best_strategy_return ?? 0).toFixed(2)}%)`,
+        `**Mediaan rendement**: ${((exportData.summary.median_return_pct as number) ?? 0).toFixed(2)}%`,
+        `**Hitrate**: ${Math.round(((exportData.summary.overall_win_rate as number) ?? 0) * 100)}% over ${(exportData.summary.total_closed_trades as number) ?? 0} gesloten trades`,
+        `**Paper config**: ${configUpdateLog}`,
+        "",
+        ...((() => {
+          const ins = (exportData.config_insights as Array<Record<string, unknown>>) ?? [];
+          if (ins.length === 0) return ["_Nog geen configuratie-inzichten._"];
+          return ["**Top configuratie-inzichten:**", ...ins.slice(0,3).map(i => `- ${i.dimension}: "${i.best_value}" scoort +${(i.diff_pct as number).toFixed(1)}% beter dan "${i.worst_value}"`)];
+        })()),
+        "",
+        `Zie \`docs/kennisbasis.md\` voor de volledige tabel met alle strategieën, signalen en aanbevelingen.`,
+      ].join("\n");
+      try {
+        const base = `https://api.github.com/repos/${GITHUB_REPO}/contents/CLAUDE.md`;
+        const headers = { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: "application/vnd.github+json", "User-Agent": "xinix-knowledge-export", "Content-Type": "application/json" };
+        if (GITHUB_TOKEN) {
+          const getRes = await fetch(`${base}?ref=${GITHUB_BRANCH}`, { headers });
+          if (getRes.ok) {
+            const j = await getRes.json();
+            const currentContent = new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\n/g, "")), c => c.charCodeAt(0)));
+            const m1 = "<!-- KENNISBASIS_START -->"; const m2 = "<!-- KENNISBASIS_END -->";
+            const i1 = currentContent.indexOf(m1); const i2 = currentContent.indexOf(m2);
+            if (i1 >= 0 && i2 > i1) {
+              const updated = currentContent.slice(0, i1 + m1.length) + "\n" + miniClaudeSection + "\n" + currentContent.slice(i2);
+              await fetch(base, { method: "PUT", headers, body: JSON.stringify({ message: `chore: CLAUDE.md wekelijks bijgewerkt ${now.toISOString().slice(0,10)}`, content: btoa(unescape(encodeURIComponent(updated))), sha: j.sha, branch: GITHUB_BRANCH }) }).catch(() => {});
+            }
+          }
+        }
+      } catch { /* non-fatal */ }
+
+      await db.from("signal_runs").insert({ job: "xinix-knowledge-export", ok: true, message: `Mini-export: ${activeStrategies.length} strategieën, ${configUpdateLog}` });
+      return new Response(JSON.stringify({ ok: true, mini: true, config_update: configUpdateLog, strategy_count: activeStrategies.length }), { status: 200, headers: { ...cors(req), "content-type": "application/json" } });
+    }
+
     // ── Opslaan in DB ─────────────────────────────────────────────────────────────
     const { data: savedRow, error: saveErr } = await db.from("xinix_knowledge_exports").insert({
       exported_at: now.toISOString(),
@@ -744,6 +834,7 @@ Deno.serve(async (req) => {
       `_Laatste export: **${monthLabel}** (export #${savedId ?? "?"})_`,
       "",
       `**Beste strategie**: ${exportData.summary.best_strategy_name} (+${(exportData.summary.best_strategy_return ?? 0).toFixed(2)}%)`,
+      `**Paper config update**: ${configUpdateLog}`,
       `**Slechtste strategie**: ${exportData.summary.worst_strategy_name} (${(exportData.summary.worst_strategy_return ?? 0).toFixed(2)}%)`,
       `**Mediaan rendement**: ${((exportData.summary.median_return_pct as number) ?? 0).toFixed(2)}%`,
       `**Hitrate**: ${Math.round(((exportData.summary.overall_win_rate as number) ?? 0) * 100)}% over ${(exportData.summary.total_closed_trades as number) ?? 0} gesloten trades`,
@@ -795,7 +886,7 @@ Deno.serve(async (req) => {
 
     // ── Notificaties ─────────────────────────────────────────────────────────────
     const best = exportData.summary;
-    const notifMsg = `${activeStrategies.length} strategieën · ${totalClosed} gesloten trades · beste: ${best.best_strategy_name} +${(best.best_strategy_return ?? 0).toFixed(1)}% · mediaan: ${median.toFixed(1)}%`;
+    const notifMsg = `${activeStrategies.length} strategieën · ${totalClosed} gesloten trades · beste: ${best.best_strategy_name} +${(best.best_strategy_return ?? 0).toFixed(1)}% · mediaan: ${median.toFixed(1)}% · ${configUpdateLog}`;
     await Promise.all([
       sendNtfy("📊 Xinix maandelijkse kennisexport", notifMsg),
       sendEmail(NOTIFY_EMAIL, `📊 Xinix kennisexport — ${now.toLocaleDateString("nl-NL", { month: "long", year: "numeric" })}`, summaryText),

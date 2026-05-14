@@ -43,19 +43,9 @@ function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r
 function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
 function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
 
-// ── Strategie-config ──────────────────────────────────────────────────────────
-const TARGET_POSITIONS = 8;
-const POSITION_SIZE_USD = 1200;
-const CASH_RESERVE_USD = 200;
-const HOLD_DAYS = 60;
-const STOP_LOSS = 0.15;           // trailing stop fractie (ratchets mee omhoog)
-const PARTIAL_TP_PCT = 0.25;      // verkoop helft bij +25% winst (deelwinst)
-const ENTRY_MIN_SCORE = 65;
-const ENTRY_LIMIT_BUFFER = 0.10;
-const RED_SEVERITY_QUALIFIES = true;
+// TX_COST en RED_SEVERITY_QUALIFIES zijn niet instelbaar via de DB — zij blijven constant.
 const TX_COST = 0.001;            // 0,1% per transactie (marktconforme papierkosten)
-const SIGNAL_DECAY_LOSS_PCT = -3; // signaalverval-exit bij ≥ 3% verlies na signaalexpiratie
-const SIGNAL_DECAY_MIN_DAYS = 20; // minimaal 20 dagen gehouden voor signaalverval-check
+const RED_SEVERITY_QUALIFIES = true;
 
 const POSITIVE_SIGNAL_TYPES = new Set([
   "fda_approval", "topline_positive", "phase_success", "breakthrough_designation",
@@ -100,7 +90,21 @@ async function run(): Promise<RunResult> {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
 
-  // 1) State + open posities + marktdata ophalen.
+  // 1a) Laad dynamische config (met fallback naar vaste defaults als tabel ontbreekt).
+  const { data: cfgRow } = await sb.from("xinix_paper_config").select("*").eq("id", 1).maybeSingle();
+  const _cfg = (cfgRow ?? {}) as Record<string, unknown>;
+  const TARGET_POSITIONS      = Number(_cfg.target_positions     ?? 8);
+  const POSITION_SIZE_USD     = Number(_cfg.position_size_usd    ?? 1200);
+  const CASH_RESERVE_USD      = Number(_cfg.cash_reserve_usd     ?? 200);
+  const HOLD_DAYS             = Number(_cfg.hold_days            ?? 60);
+  const STOP_LOSS             = Number(_cfg.stop_loss            ?? 0.15);
+  const PARTIAL_TP_PCT        = Number(_cfg.partial_tp_pct       ?? 0.25);
+  const ENTRY_MIN_SCORE       = Number(_cfg.entry_min_score      ?? 65);
+  const ENTRY_LIMIT_BUFFER    = Number(_cfg.entry_limit_buffer   ?? 0.10);
+  const SIGNAL_DECAY_LOSS_PCT = Number(_cfg.signal_decay_loss_pct ?? -3);
+  const SIGNAL_DECAY_MIN_DAYS = Number(_cfg.signal_decay_min_days ?? 20);
+
+  // 1b) State + open posities + marktdata ophalen.
   const [stateRes, posRes, summaryRes, tickersRes, signalsRes] = await Promise.all([
     sb.from("xinix_paper_state").select("*").eq("id", 1).single(),
     sb.from("xinix_paper_positions")
