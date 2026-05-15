@@ -15,6 +15,7 @@ on:
     branches:
       - main
       - claude/biotech-signal-detector-3ajql
+      - claude/poll-fundamentals-background-5TjhG
   workflow_dispatch:
 
 permissions:
