@@ -564,6 +564,11 @@ function GenBadge({ gen, protected: prot }: { gen: number; protected: boolean })
 // ── Per-strategie uitleg helpers ─────────────────────────────────────────────
 
 function stratDescBullets(s: SimStrategy): [string, string, string] {
+  if (!s.config) return [
+    "Configuratie nog niet beschikbaar.",
+    "Deze strategie is gegenereerd door het evolutieproces.",
+    "Meer details beschikbaar na de volgende simulatierun.",
+  ];
   const cfg = s.config;
   const sectorDesc = cfg.sector === "biotech" ? "biotechbedrijven"
     : cfg.sector === "mining" ? "mijnbouwbedrijven"
@@ -600,7 +605,7 @@ function stratDescBullets(s: SimStrategy): [string, string, string] {
 }
 
 function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string, string] {
-  if (all.length < 2) return [
+  if (all.length < 2 || !s.config) return [
     "Originele configuratie — eerste generatie.",
     "Parameters zorgvuldig gekozen voor maximale diversiteit.",
     `Behoort tot groep "${groupLabel(s.grp)}".`,
@@ -612,10 +617,11 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
   }
 
   const cfg = s.config;
+  const valid = all.filter(x => x.config != null);
   const candidates: Array<{ score: number; text: string }> = [];
 
   // holdDays
-  const medHold = med(all.map(x => x.config.holdDays));
+  const medHold = med(valid.map(x => x.config.holdDays));
   const zHold = Math.abs(cfg.holdDays - medHold) / (medHold || 1);
   if (zHold > 0.25) {
     candidates.push({ score: zHold, text: cfg.holdDays > medHold
@@ -624,7 +630,7 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
   }
 
   // minScore
-  const medScore = med(all.map(x => x.config.minScore));
+  const medScore = med(valid.map(x => x.config.minScore));
   const zScr = Math.abs(cfg.minScore - medScore) / (medScore || 1);
   if (zScr > 0.04) {
     candidates.push({ score: zScr * 2.5, text: cfg.minScore > medScore
@@ -634,17 +640,17 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
 
   // sector
   if (cfg.sector !== "all") {
-    const pct = Math.round(all.filter(x => x.config.sector === cfg.sector).length / all.length * 100);
+    const pct = Math.round(valid.filter(x => x.config.sector === cfg.sector).length / valid.length * 100);
     candidates.push({ score: 2.5, text: `Pure ${cfg.sector === "biotech" ? "biotech" : "mijnbouw"}-specialist (${pct}% van strategieën richt zich op dezelfde sector) — diep gespecialiseerd in één markt.` });
   }
 
   // stop
-  const stopCount = all.filter(x => x.config.stop != null).length;
-  const stopPct = Math.round(stopCount / all.length * 100);
+  const stopCount = valid.filter(x => x.config.stop != null).length;
+  const stopPct = Math.round(stopCount / valid.length * 100);
   if (cfg.stop == null && stopPct > 55) {
     candidates.push({ score: 1.5, text: `Geen stop-loss (${100 - stopPct}% van strategieën ook niet) — accepteert grotere interimdaling, laat het tijdvenster als enige exitregel werken.` });
   } else if (cfg.stop != null) {
-    const allStops = all.filter(x => x.config.stop != null).map(x => Math.abs(x.config.stop!));
+    const allStops = valid.filter(x => x.config.stop != null).map(x => Math.abs(x.config.stop!));
     if (allStops.length > 1) {
       const medStop = med(allStops);
       const thisStop = Math.abs(cfg.stop);
@@ -656,8 +662,8 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
   }
 
   // TP
-  const tpCount = all.filter(x => x.config.tp != null).length;
-  const tpPct = Math.round(tpCount / all.length * 100);
+  const tpCount = valid.filter(x => x.config.tp != null).length;
+  const tpPct = Math.round(tpCount / valid.length * 100);
   if (cfg.tp != null && tpPct < 40) {
     candidates.push({ score: 1.6, text: `Take-profit op +${Math.round(cfg.tp * 100)}% (slechts ${tpPct}% van strategieën hanteert een TP) — neemt winst definitief mee, voorkomt terugval.` });
   } else if (cfg.tp == null && tpPct > 55) {
@@ -665,7 +671,7 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
   }
 
   // maxPos
-  const medMaxPos = med(all.map(x => x.config.maxPos));
+  const medMaxPos = med(valid.map(x => x.config.maxPos));
   const zPos = Math.abs(cfg.maxPos - medMaxPos) / (medMaxPos || 1);
   if (zPos > 0.25) {
     candidates.push({ score: zPos + 0.5, text: cfg.maxPos < medMaxPos
@@ -677,21 +683,21 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
   if (cfg.minGold >= 2) {
     candidates.push({ score: 2.0, text: `Vereist minimaal ${cfg.minGold} goud-medailles — de strengste medaille-eis in het veld, enkel de meest beproefde signaalcombinaties passeren.` });
   } else if (cfg.minGold === 1) {
-    candidates.push({ score: 1.3, text: `Eén goud-medaille als minimumeis (${Math.round(all.filter(x => x.config.minGold >= 1).length / all.length * 100)}% ook) — extra kwaliteitsfilter bovenop de score.` });
+    candidates.push({ score: 1.3, text: `Eén goud-medaille als minimumeis (${Math.round(valid.filter(x => x.config.minGold >= 1).length / valid.length * 100)}% ook) — extra kwaliteitsfilter bovenop de score.` });
   }
 
   // redReq
   if (cfg.redReq) {
-    candidates.push({ score: 1.4, text: `Rood-signaal verplicht bij entry (${Math.round(all.filter(x => x.config.redReq).length / all.length * 100)}% van strategieën) — vereist bewijs van kortetermijndruk als bevestiging.` });
+    candidates.push({ score: 1.4, text: `Rood-signaal verplicht bij entry (${Math.round(valid.filter(x => x.config.redReq).length / valid.length * 100)}% van strategieën) — vereist bewijs van kortetermijndruk als bevestiging.` });
   }
 
   // limitBuf
   if (cfg.limitBuf != null) {
-    candidates.push({ score: 1.3, text: `Koopt via limietorder ${Math.round(cfg.limitBuf * 100)}% boven actuele koers (${Math.round(all.filter(x => x.config.limitBuf != null).length / all.length * 100)}% van strategieën) — disciplines entry-prijs.` });
+    candidates.push({ score: 1.3, text: `Koopt via limietorder ${Math.round(cfg.limitBuf * 100)}% boven actuele koers (${Math.round(valid.filter(x => x.config.limitBuf != null).length / valid.length * 100)}% van strategieën) — disciplines entry-prijs.` });
   }
 
   // posSize
-  const medSize = med(all.map(x => x.config.posSize));
+  const medSize = med(valid.map(x => x.config.posSize));
   const zSize = Math.abs(cfg.posSize - medSize) / (medSize || 1);
   if (zSize > 0.2) {
     candidates.push({ score: zSize + 0.4, text: cfg.posSize > medSize
@@ -728,6 +734,7 @@ const GRP_LABELS_EXTRA: Record<string, string[]> = {
 };
 
 function stratLabels(s: SimStrategy): string[] {
+  if (!s.config) return ["Algoritmisch", "Kwantitatief", "Paper portefeuille", "Evolutie-generatie"];
   const c = s.config;
   const labels: string[] = [];
 
