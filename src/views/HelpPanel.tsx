@@ -454,9 +454,9 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     blocks: [
       {
         id: "xi-tabs",
-        title: "Tab-switcher — 📈 Basisportefeuille · 🔬 100 Strategieën",
+        title: "Tab-switcher — 📈 Basisportefeuille · 🔬 200 Strategieën",
         body:
-          "Basisportefeuille = de gecureerde enkelvoudige portefeuille: max 8 posities, ~$1200 per positie, 60 dagen holdperiode, trailing stop -15%, deelwinst bij +25%. Doel: één duidelijk referentiepunt.\n100 Strategieën = 106 parallelle papieren portefeuilles die elk een andere parameter-combinatie testen. Doel: ontdekken welke instelling-mix het beste werkt. Na verloop van tijd 'evolueren' de zwakste strategieën weg.",
+          "Basisportefeuille = de gecureerde enkelvoudige portefeuille: max 8 posities, ~$1200 per positie, 60 dagen holdperiode, trailing stop -15%, deelwinst bij +25%. Doel: één duidelijk referentiepunt.\n200 Strategieën = 200 parallelle papieren portefeuilles die elk een andere parameter-combinatie testen (groepen A t/m W). Doel: ontdekken welke instelling-mix het beste werkt. Na verloop van tijd 'evolueren' de zwakste strategieën weg.",
       },
       {
         id: "xi-kpis",
@@ -496,9 +496,9 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         id: "xi-sim",
-        title: "100 Strategieën — ranglijst, groepen, parameters",
+        title: "200 Strategieën — ranglijst, groepen, parameters",
         body:
-          "De 106 strategieën zijn verdeeld in groepen (A t/m N): elke groep test één dimensie — score-drempel, holdperiode, stop-loss %, take-profit, sector-focus, positiegrootte, signaaltype, medaille-filter, limiet-buffer, enz. De ranglijst sorteert op samengestelde fitness (rendement + Sharpe-ratio − drawdown-straf). Strategie-kaartjes tonen de huidige return, het aantal open posities en de drawdown.",
+          "De 200 strategieën zijn verdeeld in groepen (A t/m W): elke groep test één dimensie — score-drempel, holdperiode, stop-loss %, take-profit, sector-focus, positiegrootte, signaaltype, medaille-filter, limiet-buffer, enz. De ranglijst sorteert op samengestelde fitness (rendement + Sharpe-ratio − drawdown-straf). Klik op een rij om uit te klappen: je ziet dan de parameters, wat de strategie uniek maakt t.o.v. de andere 199, en welke aandelen er nu in zitten met de koopredenen.",
       },
       {
         id: "xi-evolve",

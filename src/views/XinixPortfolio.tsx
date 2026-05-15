@@ -106,7 +106,7 @@ export function XinixPortfolioView() {
     <div className="space-y-6">
       {/* Tab-switcher: Portfolio vs Simulatie */}
       <div className="flex gap-0 border-b border-ink-5">
-        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 100 Strategieën"]] as const).map(([key, label]) => (
+        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMainTab(key)}
@@ -1639,7 +1639,7 @@ export function SimulationView() {
   return (
     <section className="space-y-4">
       <SectionHeader
-        title="100 Strategieën — simulatie-ranglijst"
+        title="200 Strategieën — simulatie-ranglijst"
         subtitle={
           meta.last_run_at
             ? `Laatste run: ${new Date(meta.last_run_at).toLocaleString("nl-NL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
