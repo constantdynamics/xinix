@@ -28,6 +28,7 @@ const LIMIT_EVENT_TYPES = new Set<string>([
   "buy_limit_hit",
   "buy_limit_close",
   "buy_limit_warmup",
+  "phoenix_near_limit",
 ]);
 const BULLISH_CATALYST_TYPES = new Set<string>([
   "bonanza_au", "bonanza_ag", "bonanza_cu",
@@ -43,6 +44,8 @@ const POSITIVE_ACTIONS = new Set<string>(["BUY", "STRONG_BUY"]);
 //  - Vereist altijd: ≥2 goud OF ≥3 zilver (anders te veel ruis).
 //  - Daarna: buy_limit events altijd; bullish catalysts alleen bij BUY/STRONG_BUY.
 function shouldNotify(signalType: string, action: string | null | undefined, medals: Medals | null): boolean {
+  // Phoenix alerts bypass de medal-eis — is_phoenix zelf is het kwaliteitssignaal
+  if (signalType === "phoenix_near_limit") return true;
   const g = medals?.gold ?? 0;
   const si = medals?.silver ?? 0;
   if (g < 2 && si < 3) return false;
@@ -156,9 +159,10 @@ function formatAlert(
   const cat = showAction ? (score?.components?.nearest_catalyst ?? null) : null;
   const ts = showAction ? (score?.trade_setup ?? null) : null;
 
-  const emoji = isLimit ? "📉" : showAction ? "\u{1F680}" : "\u{1F4CC}";
-  const priority = isLimit ? 5 : showAction && action === "STRONG_BUY" ? 5 : 4;
-  const tags = isLimit ? ["chart_with_downwards_trend"] : ["rocket"];
+  const isPhoenixAlert = sig.signal_type === "phoenix_near_limit";
+  const emoji = isPhoenixAlert ? "🦅" : isLimit ? "📉" : showAction ? "\u{1F680}" : "\u{1F4CC}";
+  const priority = isPhoenixAlert ? 5 : isLimit ? 5 : showAction && action === "STRONG_BUY" ? 5 : 4;
+  const tags = isPhoenixAlert ? ["eagle", "chart_with_downwards_trend"] : isLimit ? ["chart_with_downwards_trend"] : ["rocket"];
 
   // Verwijder leading ticker uit de signaaltitel om dubbele ticker in header te voorkomen
   const cleanSigTitle = safeTitleBase
@@ -224,9 +228,66 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
   if (!settings) return { ok: false, message: "settings row missing" };
   const s = settings as Settings;
   if (inQuietHours(s)) return { ok: true, message: "quiet hours; skipping" };
+
+  // Genereer phoenix_near_limit events voor feniks-aandelen die op/onder aankooplimiet staan.
+  // Deduplicatie: max 1 event per ticker per 7 dagen.
+  const PHOENIX_THRESHOLD_PCT = 5; // notificeer wanneer ≤5% boven buy_limit (of eronder)
+  const PHOENIX_DEDUP_DAYS = 7;
+  let phoenixGenerated = 0;
+  {
+    const { data: phoenixTickers } = await sb
+      .from("signal_tickers")
+      .select("ticker, company, buy_limit, exchange")
+      .eq("is_phoenix", true)
+      .eq("active", true)
+      .not("buy_limit", "is", null);
+
+    if (phoenixTickers?.length) {
+      const ptickers = phoenixTickers.map((p) => p.ticker as string);
+      const { data: prices } = await sb
+        .from("signal_price_summary")
+        .select("ticker, last_close")
+        .in("ticker", ptickers);
+      const priceMap = new Map((prices ?? []).map((p) => [p.ticker as string, p.last_close as number]));
+
+      const dedupSince = new Date(Date.now() - PHOENIX_DEDUP_DAYS * 24 * 3600 * 1000).toISOString();
+      const { data: existing } = await sb
+        .from("signal_events")
+        .select("ticker")
+        .eq("signal_type", "phoenix_near_limit")
+        .gte("detected_at", dedupSince)
+        .in("ticker", ptickers);
+      const alreadyNotified = new Set((existing ?? []).map((e) => e.ticker as string));
+
+      for (const p of phoenixTickers) {
+        if (alreadyNotified.has(p.ticker as string)) continue;
+        const lastClose = priceMap.get(p.ticker as string) ?? null;
+        const buyLimit = p.buy_limit as number | null;
+        if (lastClose == null || !buyLimit) continue;
+        const abovePct = ((lastClose - buyLimit) / buyLimit) * 100;
+        if (abovePct > PHOENIX_THRESHOLD_PCT) continue;
+
+        const direction = abovePct <= 0 ? "onder" : "dicht bij";
+        const pctStr = abovePct <= 0
+          ? `${abovePct.toFixed(1)}%`
+          : `+${abovePct.toFixed(1)}%`;
+        const priceStr = `$${lastClose.toFixed(lastClose < 5 ? 3 : 2)}`;
+        const limitStr = `$${buyLimit.toFixed(buyLimit < 5 ? 3 : 2)}`;
+        await sb.from("signal_events").insert({
+          ticker: p.ticker,
+          signal_type: "phoenix_near_limit",
+          severity: "orange",
+          title: `${p.ticker} · Feniks ${direction} aankooplimiet · ${pctStr}`,
+          detail: `Koers: ${priceStr} · Aankooplimiet: ${limitStr} · Dit aandeel heeft ooit ≥50× gestegen.`,
+        });
+        phoenixGenerated++;
+      }
+    }
+  }
+
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { data: signals } = await sb.from("signal_events").select("*").eq("alerted", false).gte("detected_at", since).order("detected_at", { ascending: true });
-  if (!signals || signals.length === 0) return { ok: true, message: "no new signals" };
+  if (!signals || signals.length === 0) return { ok: true, message: phoenixGenerated > 0 ? `phoenix_generated: ${phoenixGenerated}, no pending signals` : "no new signals", metrics: { phoenix_generated: phoenixGenerated } };
   const tickers = Array.from(new Set(signals.map((x) => x.ticker as string)));
   const scoreByTicker = new Map<string, ScoreSnapshot>();
   if (tickers.length) {
@@ -276,5 +337,5 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     }
     await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
   }
-  return { ok: errors.length === 0, message: `email: ${sentEmail}, ntfy: ${sentNtfy}, suppressed: ${suppressed}` + (errors.length ? `; errors: ${errors.slice(0, 3).join("; ")}` : ""), metrics: { email: sentEmail, ntfy: sentNtfy, suppressed, errors: errors.length, total_signals: signals.length } };
+  return { ok: errors.length === 0, message: `email: ${sentEmail}, ntfy: ${sentNtfy}, suppressed: ${suppressed}, phoenix_generated: ${phoenixGenerated}` + (errors.length ? `; errors: ${errors.slice(0, 3).join("; ")}` : ""), metrics: { email: sentEmail, ntfy: sentNtfy, suppressed, errors: errors.length, total_signals: signals.length, phoenix_generated: phoenixGenerated } };
 }));
