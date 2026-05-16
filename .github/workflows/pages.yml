@@ -1,12 +1,9 @@
 # Build de React app en publiceer naar GitHub Pages.
 # Site komt op: https://constantdynamics.github.io/xinix/
 #
-# Vereiste secrets/vars in GitHub repo settings:
-#   Variables → VITE_API_BASE_URL = https://<jouw-netlify-site>.netlify.app
-#
-# De Pages job hoeft NIET op de branch claude/biotech-... te draaien;
-# we triggeren op main + push naar de claude branch zodat je kunt
-# previewen vanaf elke branch via workflow_dispatch.
+# Deploy-bron: alleen claude/biotech-signal-detector-3ajql (de branch die
+# GitHub Pages environment-rechten heeft). Pushes naar de feature branch
+# worden automatisch doorgezet via sync-to-deploy.yml.
 
 name: Deploy to GitHub Pages
 
@@ -15,7 +12,6 @@ on:
     branches:
       - main
       - claude/biotech-signal-detector-3ajql
-      - claude/poll-fundamentals-background-5TjhG
   workflow_dispatch:
 
 permissions:
@@ -25,7 +21,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:

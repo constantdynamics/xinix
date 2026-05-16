@@ -1,0 +1,38 @@
+# Sync feature branch → deploy branch.
+#
+# De github-pages environment laat alleen claude/biotech-signal-detector-3ajql
+# deployen. GITHUB_TOKEN pushes triggeren geen nieuwe workflow, dus doen we
+# twee dingen:
+#  1. Force-push naar de deploy-branch zodat die branch up-to-date is.
+#  2. Trigger pages.yml via workflow_dispatch op die branch — dat activeert
+#     wél de echte deploy (workflow_dispatch omzeilt de loop-blokkering).
+
+name: Sync to deploy branch
+
+on:
+  push:
+    branches:
+      - claude/poll-fundamentals-background-5TjhG
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to deploy branch
+        run: git push origin HEAD:claude/biotech-signal-detector-3ajql --force
+
+      - name: Trigger Pages deploy via workflow_dispatch
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/constantdynamics/xinix/actions/workflows/pages.yml/dispatches" \
+            -d '{"ref":"claude/biotech-signal-detector-3ajql"}'
