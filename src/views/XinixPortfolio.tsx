@@ -79,7 +79,7 @@ function fmtDate(s: string): string {
 }
 
 export function XinixPortfolioView() {
-  const [mainTab, setMainTab] = useState<"portfolio" | "sim" | "phoenix">("portfolio");
+  const [mainTab, setMainTab] = useState<"portfolio" | "sim">("portfolio");
   const [data, setData] = useState<XinixPortfolio | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +108,7 @@ export function XinixPortfolioView() {
     <div className="space-y-6">
       {/* Tab-switcher: Portfolio vs Simulatie */}
       <div className="flex gap-0 border-b border-ink-5">
-        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"], ["phoenix", "🦅 Feniks"]] as const).map(([key, label]) => (
+        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMainTab(key)}
@@ -124,7 +124,6 @@ export function XinixPortfolioView() {
       </div>
 
       {mainTab === "sim" && <SimulationView />}
-      {mainTab === "phoenix" && <PhoenixView />}
       {mainTab === "portfolio" && <div className="space-y-8">
 
       {/* Intro */}
@@ -1748,7 +1747,7 @@ export function SimulationView() {
 
 // ── PhoenixView ───────────────────────────────────────────────────────────────
 
-function PhoenixView() {
+export function PhoenixView() {
   const [ranking, setRanking] = useState<PhoenixRankEntry[]>([]);
   const [phoenixCount, setPhoenixCount] = useState(0);
   const [unscanned, setUnscanned] = useState(0);
