@@ -68,6 +68,9 @@ const TV_EXCHANGE_TO_YAHOO_SUFFIX: Record<string, string> = {
 };
 
 // ───────────────────────── helpers ─────────────────────────
+const ETP_RE = /\b(leverage\s*shares|direxion|wisdomtree|proshares|invesco|graniteshares|boost\s*etp|roundhill)\b|\b[2-9]x\s+(long|short|bull|bear)\b|\betp\b|\betf\b/i;
+function isEtp(name: string): boolean { return ETP_RE.test(name); }
+
 const MINING_RE = /\b(mining|miner|mines|metals?|minerals?|resources?|exploration|drill(?:ing)?|royalt(?:y|ies)|streaming|gold|silver|copper|lithium|uranium|nickel|cobalt|graphite|zinc|platinum|palladium|tin|tungsten|molybdenum|rare\s*earth|potash|iron\s*ore|coal)\b/i;
 const BIOTECH_RE = /\b(pharma(?:ceuticals?)?|biopharma|therapeutics|bio(?:science|tech(?:nology)?|logics|pharm)?|genomics?|gene(?:tic|ric)?|oncolog(?:y|ic)|immuno(?:logy|therap)|cell\s*(?:therap|technolog)|gene\s*therap|medicines?|medical|laboratories|labs|sciences|clinical|antibody|antibodies|vaccines?|RNA|DNA|protein)\b/i;
 function inferSector(name: string | null | undefined): "biotech" | "mining" | "other" {
@@ -116,6 +119,7 @@ async function fetchMarketLosers(market: string): Promise<LoserRow[]> {
     const changePct = typeof d[2] === "number" ? (d[2] as number) : null;
     const close = typeof d[3] === "number" ? (d[3] as number) : null;
     if (changePct != null && changePct >= 0) continue; // alleen dalers
+    if (isEtp(name)) continue; // geen ETPs/ETFs
     out.push({ yahoo, name, changePct, close, exch });
   }
   return out;
