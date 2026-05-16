@@ -174,12 +174,28 @@ function countMedals(barsArr: Bar[]): { gold: number; silver: number; bronze: nu
   return { gold: g, silver: s, bronze: b };
 }
 
-async function sendNtfy(server: string, topic: string, title: string, body: string): Promise<boolean> {
+const SUFFIX_TO_EXCHANGE: Record<string, string> = {
+  TO: "TSE", V: "CVE", CN: "CNSX", NE: "NEO",
+  L: "LON", AX: "ASX", NZ: "NZE",
+};
+function googleFinanceUrl(yahoo: string): string {
+  const t = yahoo.trim().toUpperCase();
+  const dot = t.indexOf(".");
+  if (dot === -1) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}:NASDAQ`;
+  const base = t.slice(0, dot);
+  const exch = SUFFIX_TO_EXCHANGE[t.slice(dot + 1)];
+  if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
+  return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`;
+}
+
+async function sendNtfy(server: string, topic: string, title: string, body: string, clickUrl?: string): Promise<boolean> {
   try {
+    const payload: Record<string, unknown> = { topic, title, message: body, priority: 4, tags: ["medal"] };
+    if (clickUrl) payload.click = clickUrl;
     const res = await fetch((server || "https://ntfy.sh").replace(/\/$/, ""), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, title, message: body, priority: 4, tags: ["medal"] }),
+      body: JSON.stringify(payload),
     });
     return res.ok;
   } catch {
@@ -284,14 +300,17 @@ Deno.serve(runBackground("scan-losers", async () => {
     const { data: settings } = await sb.from("signal_settings").select("ntfy_topic, ntfy_server").eq("id", 1).single();
     const topic = settings?.ntfy_topic as string | null | undefined;
     if (topic) {
-      const lines = gems
-        .sort((a, b) => b.gold - a.gold || b.silver - a.silver)
-        .map((g) => `🏆${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}`);
+      const sorted = gems.sort((a, b) => b.gold - a.gold || b.silver - a.silver);
+      const lines = sorted.map((g) => {
+        const url = googleFinanceUrl(g.yahoo);
+        return `🏆${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}\n${url}`;
+      });
       await sendNtfy(
         (settings?.ntfy_server as string) ?? "https://ntfy.sh",
         topic,
         `🏆 ${gems.length} grote daler${gems.length > 1 ? "s" : ""} met medaille-track-record toegevoegd`,
-        lines.join("\n") + "\n\nUit de TradingView 'biggest losers' van vandaag; nu in je watchlist.",
+        lines.join("\n\n") + "\n\nUit de TradingView 'biggest losers' van vandaag; nu in je watchlist.",
+        googleFinanceUrl(sorted[0].yahoo),
       );
     }
   }
