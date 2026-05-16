@@ -1,5 +1,5 @@
 // scan-results — leesbare uitvoer van scan-losers en scan-bottoms.
-// Geeft: auto-toegevoegde tickers + feniks-ranking (top 25) + scan-history.
+// Geeft: auto-toegevoegde tickers + feniks-ranking + hikkertjes-ranking (top 25) + scan-history.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
   try {
     const sb = getServiceClient();
 
-    const [tickersResult, runsResult, summariesResult, phoenixResult, phoenixCountResult, unscannedCountResult] = await Promise.all([
+    const [tickersResult, runsResult, summariesResult, phoenixResult, phoenixCountResult, unscannedCountResult, hikkertjeResult, hikkertjeCountResult, hikkertjeUnscannedResult] = await Promise.all([
       // Alle auto-toegevoegde tickers, nieuwste eerst
       sb
         .from("signal_tickers")
@@ -63,11 +63,29 @@ Deno.serve(async (req) => {
         .select("*", { count: "exact", head: true })
         .eq("is_phoenix", true)
         .eq("active", true),
-      // Nog te scannen
+      // Nog te scannen (feniks)
       sb
         .from("signal_tickers")
         .select("*", { count: "exact", head: true })
         .is("is_phoenix", null)
+        .eq("active", true),
+      // Alle hikkertje-aandelen (voor ranking)
+      sb
+        .from("signal_tickers")
+        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, buy_limit, exchange, hikkertje_spikes")
+        .eq("is_hikkertje", true)
+        .eq("active", true),
+      // Totaal hikkertjes
+      sb
+        .from("signal_tickers")
+        .select("*", { count: "exact", head: true })
+        .eq("is_hikkertje", true)
+        .eq("active", true),
+      // Nog te scannen (hikkertjes)
+      sb
+        .from("signal_tickers")
+        .select("*", { count: "exact", head: true })
+        .is("is_hikkertje", null)
         .eq("active", true),
     ]);
 
@@ -130,6 +148,40 @@ Deno.serve(async (req) => {
 
     const phoenixRanking = phoenixWithPrice.slice(0, 25);
 
+    // Hikkertje ranking: meeste spikes bovenaan, daarna dichtstbij buy_limit
+    const hikkertjeTickers = (hikkertjeResult.data ?? []) as Array<{
+      ticker: string;
+      company: string | null;
+      sector: string | null;
+      medal_gold: number | null;
+      medal_silver: number | null;
+      medal_bronze: number | null;
+      buy_limit: number | null;
+      exchange: string | null;
+      hikkertje_spikes: number | null;
+    }>;
+
+    const hikkertjeWithPrice = hikkertjeTickers.map((h) => {
+      const lastClose = closeByTicker.get(h.ticker) ?? null;
+      const aboveLimitPct = h.buy_limit && h.buy_limit > 0 && lastClose != null
+        ? ((lastClose - h.buy_limit) / h.buy_limit) * 100
+        : null;
+      return { ...h, last_close: lastClose, above_limit_pct: aboveLimitPct };
+    });
+
+    hikkertjeWithPrice.sort((a, b) => {
+      // Primair: meeste spikes bovenaan
+      const spikeDiff = (b.hikkertje_spikes ?? 0) - (a.hikkertje_spikes ?? 0);
+      if (spikeDiff !== 0) return spikeDiff;
+      // Secundair: dichtstbij buy_limit
+      if (a.above_limit_pct == null && b.above_limit_pct == null) return 0;
+      if (a.above_limit_pct == null) return 1;
+      if (b.above_limit_pct == null) return -1;
+      return a.above_limit_pct - b.above_limit_pct;
+    });
+
+    const hikkertjeRanking = hikkertjeWithPrice.slice(0, 25);
+
     // Runs per job groeperen (max 20 per job)
     const byJob: Record<string, typeof runsResult.data> = { "scan-losers": [], "scan-bottoms": [] };
     for (const r of (runsResult.data ?? [])) {
@@ -144,6 +196,9 @@ Deno.serve(async (req) => {
         phoenix_ranking: phoenixRanking,
         phoenix_count: phoenixCountResult.count ?? 0,
         phoenix_unscanned: unscannedCountResult.count ?? 0,
+        hikkertje_ranking: hikkertjeRanking,
+        hikkertje_count: hikkertjeCountResult.count ?? 0,
+        hikkertje_unscanned: hikkertjeUnscannedResult.count ?? 0,
       }),
       { status: 200, headers: { ...cors(req), "content-type": "application/json" } }
     );

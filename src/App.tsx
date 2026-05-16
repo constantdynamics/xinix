@@ -9,6 +9,7 @@ import { TrackRecordView } from "./views/TrackRecord";
 import { SignalLogView } from "./views/SignalLog";
 import { ScansView } from "./views/Scans";
 import { XinixPortfolioView, PhoenixView } from "./views/XinixPortfolio";
+import { HikkertjesView } from "./views/Hikkertjes";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, getToken, setToken } from "./api";
@@ -26,6 +27,7 @@ type Tab =
   | "scans"
   | "xinix"
   | "feniks"
+  | "hikkertjes"
   | "status"
   | "settings";
 
@@ -45,6 +47,7 @@ const TABS: TabDef[] = [
   { key: "scans", label: "Scans" },
   { key: "xinix", label: "Xinix" },
   { key: "feniks", label: "🦅 Feniks" },
+  { key: "hikkertjes", label: "⚡ Hikkertjes" },
   { key: "status", label: "Status" },
   { key: "settings", label: "Instellingen" },
 ];
@@ -61,6 +64,7 @@ const HELP_PAGE: Record<Tab, string> = {
   scans: "scans",
   xinix: "xinix",
   feniks: "feniks",
+  hikkertjes: "hikkertjes",
   status: "status",
   settings: "settings",
 };
@@ -275,6 +279,7 @@ export function App() {
         {tab === "scans" && <ScansView />}
         {tab === "xinix" && <XinixPortfolioView />}
         {tab === "feniks" && <PhoenixView />}
+        {tab === "hikkertjes" && <HikkertjesView />}
         {tab === "status" && <HealthView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>
