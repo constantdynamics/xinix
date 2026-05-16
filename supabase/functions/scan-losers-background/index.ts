@@ -127,8 +127,8 @@ async function fetchMarketLosers(market: string): Promise<LoserRow[]> {
 }
 
 interface Bar { date: string; close: number; }
-async function fetchYahoo5y(ticker: string): Promise<Bar[]> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5y&interval=1wk`;
+async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=10y&interval=1wk`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; SignalLosersBot/1.0; +https://github.com)" } });
   if (!res.ok) throw new Error(`Yahoo ${ticker} HTTP ${res.status}`);
   const json = (await res.json()) as { chart: { result?: Array<{ timestamp: number[]; indicators: { adjclose?: Array<{ adjclose?: (number | null)[] }>; quote: Array<{ close: (number | null)[] }> }; }>; error?: { description?: string } | null; }; };
@@ -138,6 +138,15 @@ async function fetchYahoo5y(ticker: string): Promise<Bar[]> {
   const adj = r.indicators.adjclose?.[0]?.adjclose;
   const closes = adj ?? r.indicators.quote[0]?.close ?? [];
   return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
+}
+
+function hasPhoenixRun(bars: Bar[], mult: number): boolean {
+  let minSoFar = Infinity;
+  for (const b of bars) {
+    if (b.close < minSoFar) { minSoFar = b.close; }
+    else if (minSoFar > 0 && b.close >= minSoFar * mult) { return true; }
+  }
+  return false;
 }
 
 // === Medailleklassement — identiek aan compute-extremes-background ===
@@ -241,26 +250,29 @@ Deno.serve(runBackground("scan-losers", async () => {
   const candidates = uniqueLosers.filter((l) => !existing.has(l.yahoo)).slice(0, MAX_CANDIDATES);
 
   // 3) Per kandidaat: 5y koers ophalen, medailles tellen.
-  const gems: Array<{ yahoo: string; name: string; sector: string; gold: number; silver: number; bronze: number; changePct: number | null; exch: string; low5y: number | null }> = [];
+  const gems: Array<{ yahoo: string; name: string; sector: string; gold: number; silver: number; bronze: number; changePct: number | null; exch: string; low5y: number | null; isPhoenix: boolean }> = [];
   let checked = 0;
   const yahooErrors: string[] = [];
   for (const c of candidates) {
     if (Date.now() - startMs > BUDGET_MS) break;
     checked++;
     try {
-      const bars = await fetchYahoo5y(c.yahoo);
+      const bars = await fetchYahoo10y(c.yahoo);
       if (bars.length < 3) continue;
-      const medals = countMedals(bars);
+      const bars5y = bars.slice(-260); // laatste ~5 jaar voor medaille-checks
+      const medals = countMedals(bars5y);
       const lastClose = bars[bars.length - 1]?.close ?? 0;
       const medals1y = countMedals(bars.slice(-52));
       const bronze1yOk = medals1y.bronze >= MIN_BRONZE_1Y && lastClose >= 0.05;
+      const phoenixOk = hasPhoenixRun(bars, 50);
       const ok = (medals.gold >= MIN_GOLD && medals.silver >= MIN_SILVER)
               || medals.gold >= MIN_GOLD_ALT
               || medals.silver >= MIN_SILVER_ALT
-              || bronze1yOk;
+              || bronze1yOk
+              || phoenixOk;
       if (ok) {
-        const low5y = bars.length ? Math.min(...bars.map((b) => b.close)) : null;
-        gems.push({ yahoo: c.yahoo, name: c.name, sector: inferSector(c.name), ...medals, changePct: c.changePct, exch: c.exch, low5y });
+        const low5y = bars5y.length ? Math.min(...bars5y.map((b) => b.close)) : null;
+        gems.push({ yahoo: c.yahoo, name: c.name, sector: inferSector(c.name), ...medals, changePct: c.changePct, exch: c.exch, low5y, isPhoenix: phoenixOk });
       }
     } catch (e) {
       if (yahooErrors.length < 5) yahooErrors.push(`${c.yahoo}: ${e instanceof Error ? e.message : String(e)}`);
@@ -286,6 +298,7 @@ Deno.serve(runBackground("scan-losers", async () => {
         medal_gold: g.gold, medal_silver: g.silver, medal_bronze: g.bronze, medals_computed_at: nowIso,
         exchange,
         buy_limit: smartLimit,
+        is_phoenix: g.isPhoenix,
         notes: `Auto-toegevoegd: biggest-loser-van-de-dag met ${g.gold}× goud + ${g.silver}× zilver (5y koers-runs)${g.changePct != null ? ` — dag ${g.changePct.toFixed(1)}%` : ""}.`,
       };
     });

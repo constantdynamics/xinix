@@ -1,6 +1,5 @@
 // scan-results — leesbare uitvoer van scan-losers en scan-bottoms.
-// Geeft: auto-toegevoegde tickers (notes startend met "Auto-toegevoegd")
-// + laatste 20 runs per job voor de scan-history. Geen auth nodig.
+// Geeft: auto-toegevoegde tickers + feniks-ranking (top 25) + scan-history.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -33,11 +32,11 @@ Deno.serve(async (req) => {
   try {
     const sb = getServiceClient();
 
-    const [tickersResult, runsResult, summariesResult] = await Promise.all([
+    const [tickersResult, runsResult, summariesResult, phoenixResult, phoenixCountResult, unscannedCountResult] = await Promise.all([
       // Alle auto-toegevoegde tickers, nieuwste eerst
       sb
         .from("signal_tickers")
-        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, notes, created_at, exchange, active, buy_limit")
+        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, notes, created_at, exchange, active, buy_limit, is_phoenix")
         .ilike("notes", "Auto-toegevoegd%")
         .order("created_at", { ascending: false })
         .limit(500),
@@ -48,10 +47,28 @@ Deno.serve(async (req) => {
         .in("job", ["scan-losers", "scan-bottoms"])
         .order("started_at", { ascending: false })
         .limit(60),
-      // Laatste-koers lookup (subset gegevens uit price summary)
+      // Laatste-koers lookup
       sb
         .from("signal_price_summary")
         .select("ticker, last_close"),
+      // Alle feniks-aandelen (voor ranking)
+      sb
+        .from("signal_tickers")
+        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, buy_limit, exchange, is_phoenix")
+        .eq("is_phoenix", true)
+        .eq("active", true),
+      // Totaal feniks-aandelen
+      sb
+        .from("signal_tickers")
+        .select("*", { count: "exact", head: true })
+        .eq("is_phoenix", true)
+        .eq("active", true),
+      // Nog te scannen
+      sb
+        .from("signal_tickers")
+        .select("*", { count: "exact", head: true })
+        .is("is_phoenix", null)
+        .eq("active", true),
     ]);
 
     const tickers = (tickersResult.data ?? []) as Array<{
@@ -66,6 +83,7 @@ Deno.serve(async (req) => {
       exchange: string | null;
       active: boolean | null;
       buy_limit: number | null;
+      is_phoenix: boolean | null;
     }>;
 
     const closeByTicker = new Map<string, number | null>();
@@ -82,6 +100,36 @@ Deno.serve(async (req) => {
             : "unknown",
     }));
 
+    // Phoenix ranking: join met koersen, bereken above_limit_pct, sorteer
+    const phoenixTickers = (phoenixResult.data ?? []) as Array<{
+      ticker: string;
+      company: string | null;
+      sector: string | null;
+      medal_gold: number | null;
+      medal_silver: number | null;
+      medal_bronze: number | null;
+      buy_limit: number | null;
+      exchange: string | null;
+    }>;
+
+    const phoenixWithPrice = phoenixTickers.map((p) => {
+      const lastClose = closeByTicker.get(p.ticker) ?? null;
+      const aboveLimitPct = p.buy_limit && p.buy_limit > 0 && lastClose != null
+        ? ((lastClose - p.buy_limit) / p.buy_limit) * 100
+        : null;
+      return { ...p, last_close: lastClose, above_limit_pct: aboveLimitPct };
+    });
+
+    // Sorteer: dichtstbij of al onder de limiet bovenaan; zonder limiet achteraan
+    phoenixWithPrice.sort((a, b) => {
+      if (a.above_limit_pct == null && b.above_limit_pct == null) return 0;
+      if (a.above_limit_pct == null) return 1;
+      if (b.above_limit_pct == null) return -1;
+      return a.above_limit_pct - b.above_limit_pct;
+    });
+
+    const phoenixRanking = phoenixWithPrice.slice(0, 25);
+
     // Runs per job groeperen (max 20 per job)
     const byJob: Record<string, typeof runsResult.data> = { "scan-losers": [], "scan-bottoms": [] };
     for (const r of (runsResult.data ?? [])) {
@@ -90,7 +138,13 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ tickers: enriched, runs: byJob }),
+      JSON.stringify({
+        tickers: enriched,
+        runs: byJob,
+        phoenix_ranking: phoenixRanking,
+        phoenix_count: phoenixCountResult.count ?? 0,
+        phoenix_unscanned: unscannedCountResult.count ?? 0,
+      }),
       { status: 200, headers: { ...cors(req), "content-type": "application/json" } }
     );
   } catch (e) {

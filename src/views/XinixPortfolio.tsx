@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   fetchXinixPortfolio,
   fetchSimResults,
+  fetchScanResults,
   fetchKnowledgeExports,
   triggerJob,
   triggerEvolve,
@@ -17,6 +18,7 @@ import {
   type SimPosDetail,
   type SimStrategyConfig,
   type KnowledgeExportSummary,
+  type PhoenixRankEntry,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
@@ -77,7 +79,7 @@ function fmtDate(s: string): string {
 }
 
 export function XinixPortfolioView() {
-  const [mainTab, setMainTab] = useState<"portfolio" | "sim">("portfolio");
+  const [mainTab, setMainTab] = useState<"portfolio" | "sim" | "phoenix">("portfolio");
   const [data, setData] = useState<XinixPortfolio | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,7 +108,7 @@ export function XinixPortfolioView() {
     <div className="space-y-6">
       {/* Tab-switcher: Portfolio vs Simulatie */}
       <div className="flex gap-0 border-b border-ink-5">
-        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"]] as const).map(([key, label]) => (
+        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"], ["phoenix", "🦅 Feniks"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMainTab(key)}
@@ -122,6 +124,7 @@ export function XinixPortfolioView() {
       </div>
 
       {mainTab === "sim" && <SimulationView />}
+      {mainTab === "phoenix" && <PhoenixView />}
       {mainTab === "portfolio" && <div className="space-y-8">
 
       {/* Intro */}
@@ -1740,5 +1743,162 @@ export function SimulationView() {
         </div>
       )}
     </section>
+  );
+}
+
+// ── PhoenixView ───────────────────────────────────────────────────────────────
+
+function PhoenixView() {
+  const [ranking, setRanking] = useState<PhoenixRankEntry[]>([]);
+  const [phoenixCount, setPhoenixCount] = useState(0);
+  const [unscanned, setUnscanned] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const isAdmin = !!getToken();
+
+  useEffect(() => {
+    fetchScanResults()
+      .then((r) => {
+        setRanking(r.phoenix_ranking ?? []);
+        setPhoenixCount(r.phoenix_count ?? 0);
+        setUnscanned(r.phoenix_unscanned ?? 0);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function runScan() {
+    setScanning(true);
+    setScanMsg(null);
+    try {
+      await triggerJob("compute-phoenix-background");
+      setScanMsg("Scan gestart — resultaten verschijnen na de volgende herlaad (~2-3 minuten).");
+    } catch (e) {
+      setScanMsg(`Fout: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  if (loading) return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
+  if (error) return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
+
+  return (
+    <div className="space-y-6">
+      {/* Uitlegkaart */}
+      <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.03]">
+        <div className="flex items-start gap-3">
+          <Dot tone="watch" />
+          <div className="flex-1">
+            <div className="font-bold text-neutral-100">Feniks-aandelen</div>
+            <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
+              Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">50×</strong> zijn gegaan en nu laag staan.
+              Ze hoeven niet per se via de scanners te zijn gevonden — ook bestaande watchlist-aandelen worden gecheckt.
+              Gesorteerd op hoe dicht de koers bij de aankooplimiet zit; stocks al onder de limiet staan bovenaan.
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Stats + trigger */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
+        <Stat
+          label="Feniks-aandelen"
+          value={phoenixCount}
+          hint="is_phoenix = true in watchlist"
+        />
+        <Stat
+          label="Nog te scannen"
+          value={unscanned}
+          hint={unscanned > 0 ? "watchlist-aandelen zonder feniks-check" : "volledig gescand"}
+        />
+        {isAdmin && (
+          <div className="space-y-2">
+            <Button size="sm" variant="secondary" disabled={scanning} onClick={runScan}>
+              {scanning ? "Scannen…" : "🔍 Scan watchlist"}
+            </Button>
+            {scanMsg && <div className="text-[11px] text-neutral-400 leading-snug">{scanMsg}</div>}
+          </div>
+        )}
+      </div>
+
+      {/* Top 25 ranking */}
+      {ranking.length === 0 ? (
+        <Card className="p-10 text-center space-y-3">
+          <div className="text-4xl">🦅</div>
+          <div className="text-sm font-semibold text-neutral-300">Nog geen feniks-aandelen gevonden</div>
+          <div className="text-xs text-neutral-500 max-w-sm mx-auto leading-relaxed">
+            {unscanned > 0
+              ? `Er zijn nog ${unscanned} watchlist-aandelen die niet gescand zijn. Klik "Scan watchlist" om te beginnen (verwerkt ~100 per keer).`
+              : "De dagelijkse scanners (scan-bottoms, scan-losers) voegen automatisch nieuwe feniks-aandelen toe zodra ze worden gevonden."}
+          </div>
+        </Card>
+      ) : (
+        <Card className="p-0 overflow-hidden">
+          <div className="p-3 flex items-center justify-between border-b border-ink-5">
+            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+              Top {ranking.length} — dichtstbij aankooplimiet
+            </div>
+            <div className="text-[11px] text-neutral-500">{phoenixCount} feniks-aandelen in watchlist</div>
+          </div>
+          <div className="divide-y divide-ink-5/40">
+            {ranking.map((p, i) => {
+              const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
+              const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
+              return (
+                <div
+                  key={p.ticker}
+                  className={`p-3 flex items-center gap-3 ${atOrBelow ? "bg-fog-lime/[0.05]" : ""}`}
+                >
+                  <div className="w-6 text-center text-[11px] text-neutral-500 font-mono tabular-nums">
+                    {i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <a
+                        href={googleFinanceUrl(p.ticker, p.exchange)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono text-sm font-semibold text-fog-lime hover:underline"
+                      >
+                        {p.ticker}
+                      </a>
+                      {p.company && (
+                        <span className="text-xs text-neutral-400 truncate max-w-[160px]">{p.company}</span>
+                      )}
+                      {p.sector && (
+                        <Pill>{p.sector}</Pill>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-neutral-500">
+                      🥇{p.medal_gold ?? 0} 🥈{p.medal_silver ?? 0} 🥉{p.medal_bronze ?? 0}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 space-y-0.5">
+                    {p.last_close != null && (
+                      <div className="text-sm font-mono text-neutral-200">{fmtPrice(p.last_close)}</div>
+                    )}
+                    {p.buy_limit != null && (
+                      <div className="text-[11px] font-mono text-neutral-500">
+                        lim {fmtPrice(p.buy_limit)}
+                      </div>
+                    )}
+                    {p.above_limit_pct != null ? (
+                      <div className={`text-[11px] font-mono font-semibold ${atOrBelow ? "text-fog-lime" : near ? "text-fog-warn" : "text-neutral-400"}`}>
+                        {atOrBelow ? "✓ onder limiet" : `+${p.above_limit_pct.toFixed(1)}%`}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-neutral-600">geen limiet</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }

@@ -244,7 +244,21 @@ export interface ScanTicker {
   active: boolean | null;
   buy_limit: number | null;
   last_close: number | null;
+  is_phoenix: boolean | null;
   source: "losers" | "bottoms" | "unknown";
+}
+
+export interface PhoenixRankEntry {
+  ticker: string;
+  company: string | null;
+  sector: string | null;
+  medal_gold: number | null;
+  medal_silver: number | null;
+  medal_bronze: number | null;
+  buy_limit: number | null;
+  last_close: number | null;
+  exchange: string | null;
+  above_limit_pct: number | null;
 }
 
 export interface ScanRun {
@@ -259,6 +273,9 @@ export interface ScanRun {
 export interface ScanResults {
   tickers: ScanTicker[];
   runs: { "scan-losers": ScanRun[]; "scan-bottoms": ScanRun[] };
+  phoenix_ranking: PhoenixRankEntry[];
+  phoenix_count: number;
+  phoenix_unscanned: number;
 }
 
 export async function fetchScanResults(): Promise<ScanResults> {

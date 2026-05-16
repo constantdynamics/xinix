@@ -18,6 +18,7 @@ const JOBS = [
   "dispatch-alerts-background",
   "forward-returns-background",
   "backtest-background",
+  "compute-phoenix-background",
 ];
 
 Deno.serve(async (req) => {
