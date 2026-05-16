@@ -44,6 +44,7 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
 
 const PHOENIX_MULT = 50;
 const BATCH_SIZE = 100;
+const RESCAN_DAYS = 90;
 const BUDGET_MS = 128_000;
 const SLEEP_MS = 280;
 
@@ -61,25 +62,32 @@ async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
   return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
 }
 
-function hasPhoenixRun(bars: Bar[], mult: number): boolean {
+// Vind de datum van de laatste 50× run. Het algoritme houdt de loop-minimum bij
+// en markeert iedere bar waar close ≥ minSoFar × mult. Een latere crash naar
+// een nieuwe low staat een nieuwe 50× run toe vanaf die low. We bewaren de
+// meest recente match — null als er geen 50× run gevonden is.
+function findLastPhoenixDate(bars: Bar[], mult: number): string | null {
   let minSoFar = Infinity;
+  let lastDate: string | null = null;
   for (const b of bars) {
     if (b.close < minSoFar) { minSoFar = b.close; }
-    else if (minSoFar > 0 && b.close >= minSoFar * mult) { return true; }
+    else if (minSoFar > 0 && b.close >= minSoFar * mult) { lastDate = b.date; }
   }
-  return false;
+  return lastDate;
 }
 
 Deno.serve(runBackground("compute-phoenix", async () => {
   const sb = getServiceClient();
   const startMs = Date.now();
 
+  // Selectie: nooit-gescand of >RESCAN_DAYS oud (nieuwe tickers eerst)
+  const cutoff = new Date(Date.now() - RESCAN_DAYS * 24 * 3600 * 1000).toISOString();
   const { data: tickers, error: fetchError } = await sb
     .from("signal_tickers")
     .select("ticker")
-    .is("is_phoenix", null)
     .eq("active", true)
-    .order("created_at", { ascending: true })
+    .or(`is_phoenix_at.is.null,is_phoenix_at.lt.${cutoff}`)
+    .order("is_phoenix_at", { ascending: true, nullsFirst: true })
     .limit(BATCH_SIZE);
 
   if (fetchError) throw new Error(fetchError.message);
@@ -92,16 +100,26 @@ Deno.serve(runBackground("compute-phoenix", async () => {
     if (Date.now() - startMs > BUDGET_MS) break;
     checked++;
     let isPhoenix = false;
+    let last50xDate: string | null = null;
     try {
       const bars = await fetchYahoo10y(row.ticker);
-      isPhoenix = bars.length >= 10 && hasPhoenixRun(bars, PHOENIX_MULT);
-      if (isPhoenix) phoenixFound++;
+      if (bars.length >= 10) {
+        last50xDate = findLastPhoenixDate(bars, PHOENIX_MULT);
+        isPhoenix = last50xDate != null;
+        if (isPhoenix) phoenixFound++;
+      }
     } catch (e) {
       errors++;
       if (errMsgs.length < 5) errMsgs.push(`${row.ticker}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    // Altijd opslaan (ook false bij fout), zodat we niet steeds dezelfde fout-tickers verwerken
-    await sb.from("signal_tickers").update({ is_phoenix: isPhoenix }).eq("ticker", row.ticker);
+    // Altijd opslaan (ook false bij fout). is_phoenix_at = nu → pas over RESCAN_DAYS weer aan de beurt
+    await sb.from("signal_tickers")
+      .update({
+        is_phoenix: isPhoenix,
+        is_phoenix_at: new Date().toISOString(),
+        phoenix_50x_date: last50xDate,
+      })
+      .eq("ticker", row.ticker);
     await new Promise((r) => setTimeout(r, SLEEP_MS));
   }
 

@@ -1747,6 +1747,9 @@ export function SimulationView() {
 
 // ── PhoenixView ───────────────────────────────────────────────────────────────
 
+type PhoenixSort = "near_limit" | "newest_50x" | "oldest_50x";
+type PhoenixDateFilter = "all" | "1y" | "3y" | "5y" | "older";
+
 export function PhoenixView() {
   const [ranking, setRanking] = useState<PhoenixRankEntry[]>([]);
   const [phoenixCount, setPhoenixCount] = useState(0);
@@ -1755,6 +1758,8 @@ export function PhoenixView() {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<PhoenixSort>("near_limit");
+  const [dateFilter, setDateFilter] = useState<PhoenixDateFilter>("all");
   const isAdmin = !!getToken();
 
   useEffect(() => {
@@ -1781,6 +1786,53 @@ export function PhoenixView() {
     }
   }
 
+  // Gefilterde + gesorteerde ranking voor de UI. Server stuurt de volledige
+  // lijst — alle filtering/sortering gebeurt client-side.
+  const filteredRanking = useMemo(() => {
+    const now = Date.now();
+    const ms = 24 * 3600 * 1000;
+    const cutoffMs: Record<PhoenixDateFilter, number | null> = {
+      all: null,
+      "1y": now - 365 * ms,
+      "3y": now - 3 * 365 * ms,
+      "5y": now - 5 * 365 * ms,
+      older: 0,
+    };
+
+    let filtered = ranking;
+    if (dateFilter !== "all") {
+      filtered = ranking.filter((p) => {
+        if (!p.phoenix_50x_date) return false;
+        const t = new Date(p.phoenix_50x_date).getTime();
+        if (dateFilter === "older") {
+          const fiveYearsAgo = now - 5 * 365 * ms;
+          return t < fiveYearsAgo;
+        }
+        const cutoff = cutoffMs[dateFilter];
+        return cutoff != null && t >= cutoff;
+      });
+    }
+
+    const sorted = [...filtered];
+    if (sortBy === "newest_50x") {
+      sorted.sort((a, b) => {
+        if (!a.phoenix_50x_date && !b.phoenix_50x_date) return 0;
+        if (!a.phoenix_50x_date) return 1;
+        if (!b.phoenix_50x_date) return -1;
+        return b.phoenix_50x_date.localeCompare(a.phoenix_50x_date);
+      });
+    } else if (sortBy === "oldest_50x") {
+      sorted.sort((a, b) => {
+        if (!a.phoenix_50x_date && !b.phoenix_50x_date) return 0;
+        if (!a.phoenix_50x_date) return 1;
+        if (!b.phoenix_50x_date) return -1;
+        return a.phoenix_50x_date.localeCompare(b.phoenix_50x_date);
+      });
+    }
+    // "near_limit" is al server-side gesorteerd
+    return sorted.slice(0, 50);
+  }, [ranking, sortBy, dateFilter]);
+
   if (loading) return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
   if (error) return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
 
@@ -1795,7 +1847,7 @@ export function PhoenixView() {
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">50×</strong> zijn gegaan en nu laag staan.
               Ze hoeven niet per se via de scanners te zijn gevonden — ook bestaande watchlist-aandelen worden gecheckt.
-              Gesorteerd op hoe dicht de koers bij de aankooplimiet zit; stocks al onder de limiet staan bovenaan.
+              Sorteer en filter op het laatste moment dat het aandeel 50× ging.
             </div>
           </div>
         </div>
@@ -1823,7 +1875,42 @@ export function PhoenixView() {
         )}
       </div>
 
-      {/* Top 25 ranking */}
+      {/* Sort + filter controls */}
+      {ranking.length > 0 && (
+        <Card className="p-3 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-neutral-500 font-bold uppercase tracking-wide text-[10px]">Sorteer</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as PhoenixSort)}
+              className="bg-ink-3 border border-ink-5 rounded px-2 py-1 text-xs text-neutral-200"
+            >
+              <option value="near_limit">Dicht bij aankooplimiet</option>
+              <option value="newest_50x">Recentste 50× eerst</option>
+              <option value="oldest_50x">Oudste 50× eerst</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-neutral-500 font-bold uppercase tracking-wide text-[10px]">50× datum</span>
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value as PhoenixDateFilter)}
+              className="bg-ink-3 border border-ink-5 rounded px-2 py-1 text-xs text-neutral-200"
+            >
+              <option value="all">Alle</option>
+              <option value="1y">Laatste jaar</option>
+              <option value="3y">Laatste 3 jaar</option>
+              <option value="5y">Laatste 5 jaar</option>
+              <option value="older">Ouder dan 5 jaar</option>
+            </select>
+          </div>
+          <div className="ml-auto text-[11px] text-neutral-500">
+            {filteredRanking.length} van {ranking.length} getoond
+          </div>
+        </Card>
+      )}
+
+      {/* Ranking */}
       {ranking.length === 0 ? (
         <Card className="p-10 text-center space-y-3">
           <div className="text-4xl">🦅</div>
@@ -1838,12 +1925,12 @@ export function PhoenixView() {
         <Card className="p-0 overflow-hidden">
           <div className="p-3 flex items-center justify-between border-b border-ink-5">
             <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
-              Top {ranking.length} — dichtstbij aankooplimiet
+              {filteredRanking.length} aandelen — {sortBy === "near_limit" ? "dichtstbij aankooplimiet" : sortBy === "newest_50x" ? "recentste 50× eerst" : "oudste 50× eerst"}
             </div>
             <div className="text-[11px] text-neutral-500">{phoenixCount} feniks-aandelen in watchlist</div>
           </div>
           <div className="divide-y divide-ink-5/40">
-            {ranking.map((p, i) => {
+            {filteredRanking.map((p, i) => {
               const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
               const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
               return (
@@ -1871,8 +1958,13 @@ export function PhoenixView() {
                         <Pill>{p.sector}</Pill>
                       )}
                     </div>
-                    <div className="mt-0.5 text-[11px] text-neutral-500">
-                      🥇{p.medal_gold ?? 0} 🥈{p.medal_silver ?? 0} 🥉{p.medal_bronze ?? 0}
+                    <div className="mt-0.5 text-[11px] text-neutral-500 flex items-center gap-2 flex-wrap">
+                      <span>🥇{p.medal_gold ?? 0} 🥈{p.medal_silver ?? 0} 🥉{p.medal_bronze ?? 0}</span>
+                      {p.phoenix_50x_date && (
+                        <span className="text-fog-pink/80 font-mono">
+                          50× {fmtDate(p.phoenix_50x_date)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right shrink-0 space-y-0.5">

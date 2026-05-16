@@ -47,6 +47,7 @@ const MIN_GAIN_PCT = 0.50;   // ≥50% single-day stijging
 const MIN_HOLD_DAYS = 3;     // stijging minimaal 3 handelsdagen vasthouden
 const MIN_SPIKES = 2;        // minimaal 2 keer in het afgelopen jaar
 const BATCH_SIZE = 80;       // dagelijkse data is zwaarder, iets kleiner batch
+const RESCAN_DAYS = 90;      // herscan iedere 90 dagen
 const BUDGET_MS = 120_000;
 const SLEEP_MS = 300;
 
@@ -111,12 +112,15 @@ Deno.serve(runBackground("compute-hikkertjes", async () => {
   const sb = getServiceClient();
   const startMs = Date.now();
 
+  // Selectie: nooit-gescand (is_hikkertje_at IS NULL) of >RESCAN_DAYS oud.
+  // Volgorde: oudste eerst (NULLs eerst), zodat nieuwe tickers prioriteit hebben.
+  const cutoff = new Date(Date.now() - RESCAN_DAYS * 24 * 3600 * 1000).toISOString();
   const { data: tickers, error: fetchError } = await sb
     .from("signal_tickers")
     .select("ticker")
-    .is("is_hikkertje", null)
     .eq("active", true)
-    .order("created_at", { ascending: true })
+    .or(`is_hikkertje_at.is.null,is_hikkertje_at.lt.${cutoff}`)
+    .order("is_hikkertje_at", { ascending: true, nullsFirst: true })
     .limit(BATCH_SIZE);
 
   if (fetchError) throw new Error(fetchError.message);
@@ -142,8 +146,13 @@ Deno.serve(runBackground("compute-hikkertjes", async () => {
       if (errMsgs.length < 5) errMsgs.push(`${row.ticker}: ${e instanceof Error ? e.message : String(e)}`);
     }
     // Altijd opslaan zodat falende tickers niet steeds opnieuw worden geprobeerd
+    // is_hikkertje_at = nu → pas over RESCAN_DAYS weer aan de beurt
     await sb.from("signal_tickers")
-      .update({ is_hikkertje: isHikkertje, hikkertje_spikes: spikes > 0 ? spikes : null })
+      .update({
+        is_hikkertje: isHikkertje,
+        hikkertje_spikes: spikes > 0 ? spikes : null,
+        is_hikkertje_at: new Date().toISOString(),
+      })
       .eq("ticker", row.ticker);
     await new Promise((r) => setTimeout(r, SLEEP_MS));
   }

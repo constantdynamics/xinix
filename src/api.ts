@@ -259,6 +259,7 @@ export interface PhoenixRankEntry {
   last_close: number | null;
   exchange: string | null;
   above_limit_pct: number | null;
+  phoenix_50x_date: string | null;
 }
 
 export interface ScanRun {

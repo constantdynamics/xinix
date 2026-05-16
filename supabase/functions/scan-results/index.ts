@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       // Alle feniks-aandelen (voor ranking)
       sb
         .from("signal_tickers")
-        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, buy_limit, exchange, is_phoenix")
+        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, buy_limit, exchange, is_phoenix, phoenix_50x_date")
         .eq("is_phoenix", true)
         .eq("active", true),
       // Totaal feniks-aandelen
@@ -128,6 +128,7 @@ Deno.serve(async (req) => {
       medal_bronze: number | null;
       buy_limit: number | null;
       exchange: string | null;
+      phoenix_50x_date: string | null;
     }>;
 
     const phoenixWithPrice = phoenixTickers.map((p) => {
@@ -138,7 +139,8 @@ Deno.serve(async (req) => {
       return { ...p, last_close: lastClose, above_limit_pct: aboveLimitPct };
     });
 
-    // Sorteer: dichtstbij of al onder de limiet bovenaan; zonder limiet achteraan
+    // Standaard-sortering server-side: dichtstbij of onder de limiet bovenaan.
+    // De UI kan client-side hersorteren/filteren (bv. op phoenix_50x_date).
     phoenixWithPrice.sort((a, b) => {
       if (a.above_limit_pct == null && b.above_limit_pct == null) return 0;
       if (a.above_limit_pct == null) return 1;
@@ -146,7 +148,8 @@ Deno.serve(async (req) => {
       return a.above_limit_pct - b.above_limit_pct;
     });
 
-    const phoenixRanking = phoenixWithPrice.slice(0, 25);
+    // Stuur alle phoenix-aandelen mee (niet top 25), zodat de UI kan filteren.
+    const phoenixRanking = phoenixWithPrice;
 
     // Hikkertje ranking: meeste spikes bovenaan, daarna dichtstbij buy_limit
     const hikkertjeTickers = (hikkertjeResult.data ?? []) as Array<{
