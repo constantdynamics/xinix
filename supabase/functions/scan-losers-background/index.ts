@@ -251,11 +251,17 @@ Deno.serve(runBackground("scan-losers", async () => {
       const bars = await fetchYahoo5y(c.yahoo);
       if (bars.length < 3) continue;
       const medals = countMedals(bars);
-      const medals1y = countMedals(bars.slice(-52));
+      const bars1y = bars.slice(-52);
+      const medals1y = countMedals(bars1y);
+      const high1y = bars1y.length ? Math.max(...bars1y.map(b => b.close)) : 0;
+      const lastClose = bars[bars.length - 1]?.close ?? 0;
+      const bronze1yOk = medals1y.bronze >= MIN_BRONZE_1Y
+        && lastClose >= 0.05
+        && high1y > 0 && lastClose >= high1y * 0.15;
       const ok = (medals.gold >= MIN_GOLD && medals.silver >= MIN_SILVER)
               || medals.gold >= MIN_GOLD_ALT
               || medals.silver >= MIN_SILVER_ALT
-              || medals1y.bronze >= MIN_BRONZE_1Y;
+              || bronze1yOk;
       if (ok) {
         const low5y = bars.length ? Math.min(...bars.map((b) => b.close)) : null;
         gems.push({ yahoo: c.yahoo, name: c.name, sector: inferSector(c.name), ...medals, changePct: c.changePct, exch: c.exch, low5y });
