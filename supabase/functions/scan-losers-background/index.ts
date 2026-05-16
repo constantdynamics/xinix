@@ -55,6 +55,7 @@ const MIN_GOLD = 1;
 const MIN_SILVER = 1;
 const MIN_GOLD_ALT = 2; // OR ≥2× goud
 const MIN_SILVER_ALT = 3; // OR ≥3× zilver
+const MIN_BRONZE_1Y = 4; // OR ≥4× brons in het afgelopen jaar
 const BUDGET_MS = 130_000;
 const SLEEP_MS = 250; // langzaam langs Yahoo
 
@@ -250,9 +251,11 @@ Deno.serve(runBackground("scan-losers", async () => {
       const bars = await fetchYahoo5y(c.yahoo);
       if (bars.length < 3) continue;
       const medals = countMedals(bars);
+      const medals1y = countMedals(bars.slice(-52));
       const ok = (medals.gold >= MIN_GOLD && medals.silver >= MIN_SILVER)
               || medals.gold >= MIN_GOLD_ALT
-              || medals.silver >= MIN_SILVER_ALT;
+              || medals.silver >= MIN_SILVER_ALT
+              || medals1y.bronze >= MIN_BRONZE_1Y;
       if (ok) {
         const low5y = bars.length ? Math.min(...bars.map((b) => b.close)) : null;
         gems.push({ yahoo: c.yahoo, name: c.name, sector: inferSector(c.name), ...medals, changePct: c.changePct, exch: c.exch, low5y });
