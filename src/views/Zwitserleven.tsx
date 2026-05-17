@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addZwitserlevenManual,
   fetchZwitserlevenResults,
+  removeZwitserlevenStock,
   triggerJob,
   type ZwitserlevenStock,
 } from "../api";
@@ -81,17 +82,18 @@ type SortKey =
   | "risk_label";
 
 type ColKey =
-  | "idx" | "ticker" | "exchange" | "sector" | "price"
+  | "idx" | "ticker" | "company" | "exchange" | "sector" | "price"
   | "yield" | "tax" | "net_yield"
   | "under5y" | "max_gain" | "growth_years"
   | "year1" | "year2" | "year3" | "year4" | "year5"
-  | "payout" | "cuts" | "risk" | "meets";
+  | "payout" | "cuts" | "risk" | "meets" | "actions";
 
 interface ColDef { key: ColKey; label: string; defaultVisible: boolean; sortable?: SortKey; align?: "left" | "right" | "center"; }
 
 const COLUMNS_BASE: ColDef[] = [
   { key: "idx",          label: "#",              defaultVisible: true,  align: "left" },
-  { key: "ticker",       label: "Ticker / Naam",  defaultVisible: true,  align: "left" },
+  { key: "ticker",       label: "Ticker",         defaultVisible: true,  align: "left" },
+  { key: "company",      label: "Naam",           defaultVisible: true,  align: "left" },
   { key: "exchange",     label: "Beurs / Land",   defaultVisible: true,  align: "left" },
   { key: "sector",       label: "Sector",         defaultVisible: true,  align: "left" },
   { key: "price",        label: "Koers",          defaultVisible: true,  align: "right" },
@@ -110,9 +112,10 @@ const COLUMNS_BASE: ColDef[] = [
   { key: "cuts",         label: "Cuts",           defaultVisible: true,  align: "left",  sortable: "dividend_cuts_5y" },
   { key: "risk",         label: "Risico",         defaultVisible: true,  align: "left",  sortable: "risk_label" },
   { key: "meets",        label: "✓",              defaultVisible: true,  align: "center" },
+  { key: "actions",      label: "Acties",         defaultVisible: true,  align: "center" },
 ];
 
-const COLS_KEY = "xinix_zwitserleven_cols_v1";
+const COLS_KEY = "xinix_zwitserleven_cols_v2";
 function loadVisibleCols(): Set<ColKey> {
   try {
     const raw = localStorage.getItem(COLS_KEY);
@@ -144,6 +147,7 @@ export function ZwitserlevenView() {
   const [manualInput, setManualInput] = useState("");
   const [manualMsg, setManualMsg] = useState<string | null>(null);
   const [manualBusy, setManualBusy] = useState(false);
+  const [deletingTicker, setDeletingTicker] = useState<string | null>(null);
 
   // Auto-scan state
   const [autoRun, setAutoRun] = useState(false);
@@ -214,6 +218,21 @@ export function ZwitserlevenView() {
 
   function stopAutoScan() {
     stopRef.current = true;
+  }
+
+  async function deleteRow(ticker: string, company: string | null) {
+    const label = company ? `${ticker} (${company})` : ticker;
+    if (!confirm(`Weet je zeker dat je ${label} uit de Zwitserleven-tabel wilt verwijderen?`)) return;
+    setDeletingTicker(ticker);
+    try {
+      const r = await removeZwitserlevenStock(ticker);
+      setManualMsg(`${ticker}: ${r.message ?? "verwijderd"}`);
+      await refresh();
+    } catch (err) {
+      setManualMsg(`Fout bij verwijderen ${ticker}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDeletingTicker(null);
+    }
   }
 
   async function submitManual(e: React.FormEvent) {
@@ -329,8 +348,9 @@ export function ZwitserlevenView() {
               Geen dividend-traps: het gaat om echte kwaliteit die tijdelijk uit de gratie is.
             </p>
             <p className="text-xs text-neutral-500 mt-2">
-              Universum: <strong>NASDAQ-100 + DJIA + AEX + FTSE 100 + CAC 40 + SMI</strong>
-              {data?.universe_size ? ` (${data.universe_size} large-caps)` : ""} · Herscan elke 90 dagen per ticker · Handmatige toevoegingen kunnen elke beurs zijn.
+              Universum: <strong>NASDAQ-100 + DJIA + AEX + FTSE 100 + CAC 40 + SMI</strong> (large-caps)
+              + <strong>S&amp;P MidCap 400 + AMX + FTSE 250 + CAC Mid 60 + SMIM</strong> (midcaps)
+              {data?.universe_size ? ` — ${data.universe_size} aandelen` : ""} · Herscan elke 90 dagen per ticker · Handmatige toevoegingen mogen elke beurs zijn.
             </p>
           </div>
         </div>
@@ -478,7 +498,8 @@ export function ZwitserlevenView() {
               <thead className="border-b border-ink-5 bg-ink-2/40">
                 <tr>
                   {isVis("idx") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>}
-                  {isVis("ticker") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Ticker / Naam</th>}
+                  {isVis("ticker") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Ticker</th>}
+                  {isVis("company") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Naam</th>}
                   {isVis("exchange") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Beurs / Land</th>}
                   {isVis("sector") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Sector</th>}
                   {isVis("price") && <th className="px-3 py-2 text-right text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Koers</th>}
@@ -499,6 +520,7 @@ export function ZwitserlevenView() {
                   <SortHeader col="dividend_cuts_5y" label="Cuts" hidden={!isVis("cuts")} />
                   <SortHeader col="risk_label" label="Risico" hidden={!isVis("risk")} />
                   {isVis("meets") && <th className="px-3 py-2 text-center text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">✓</th>}
+                  {isVis("actions") && <th className="px-3 py-2 text-center text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Acties</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-5">
@@ -536,7 +558,14 @@ export function ZwitserlevenView() {
                               <span title="Handmatig toegevoegd" className="text-[9px] uppercase font-semibold text-amber-400 bg-amber-400/15 px-1 rounded">handm.</span>
                             )}
                           </div>
-                          <div className="text-[11px] text-neutral-400 truncate max-w-[160px]">{s.company ?? "—"}</div>
+                        </td>
+                      )}
+
+                      {isVis("company") && (
+                        <td className="px-3 py-2.5">
+                          <div className="text-xs text-neutral-200 truncate max-w-[220px]" title={s.company ?? undefined}>
+                            {s.company ?? <span className="text-neutral-600">—</span>}
+                          </div>
                         </td>
                       )}
 
@@ -669,6 +698,19 @@ export function ZwitserlevenView() {
                           {s.meets_criteria
                             ? <span className="text-emerald-400 text-sm">✓</span>
                             : <span className="text-neutral-700 text-xs">·</span>}
+                        </td>
+                      )}
+
+                      {isVis("actions") && (
+                        <td className="px-3 py-2.5 text-center">
+                          <button
+                            onClick={() => deleteRow(s.ticker, s.company)}
+                            disabled={deletingTicker === s.ticker}
+                            title="Verwijder uit Zwitserleven-tabel"
+                            className="text-neutral-500 hover:text-red-400 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-red-400/10"
+                          >
+                            {deletingTicker === s.ticker ? "…" : "🗑"}
+                          </button>
                         </td>
                       )}
                     </tr>
