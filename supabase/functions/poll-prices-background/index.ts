@@ -64,12 +64,71 @@ async function fetchYahoo(ticker: string): Promise<YahooFetch> {
 }
 function pct(a: number, b: number): number { if (!b) return 0; return ((a - b) / b) * 100; }
 
+// ── Exchange-aware polling: alleen polls als de beurs van een ticker NU open is.
+// Gebruikt ruime vensters (incl. pre/post-market buffer + DST-tolerantie) zodat
+// we ook ~1u voor en na regulier handelen polls doen (relevante bewegingen).
+// Mon-Fri in UTC, behalve ASX die over middernacht loopt.
+function openExchangesNow(now: Date): string[] {
+  const day = now.getUTCDay();   // 0=Sun ... 6=Sat
+  const hour = now.getUTCHours();
+  const open: string[] = [];
+  const isWeekday = day >= 1 && day <= 5;
+
+  // Noord-Amerika: regulier 13:30-21:00 UTC. Met pre/post-market buffer 12-23 UTC. Ma-vr.
+  if (isWeekday && hour >= 12 && hour < 23) {
+    open.push(
+      "NasdaqCM","NasdaqGS","NasdaqGM","NYSE","NYSE American","NYSEArca","Cboe US",
+      "Toronto","TSXV","Canadian Sec",
+      "OTC Markets OTCQB","OTC Markets OTCPK","OTC Markets OTCID","OTC Markets OTCQX",
+    );
+  }
+  // Europa: regulier 07:00-16:30 UTC. Met buffer 06-17 UTC. Ma-vr.
+  if (isWeekday && hour >= 6 && hour < 17) {
+    open.push("LSE","Amsterdam","Paris","Frankfurt","XETRA","Milan");
+  }
+  // Azië (excl. ASX): 00-11 UTC dekt Tokyo (00-06), HK (01:30-08), Shanghai/Shenzhen,
+  // Singapore, Jakarta, KL, India. Ma-vr.
+  if (isWeekday && hour < 11) {
+    open.push("HKSE","Tokyo","SES","Shanghai","Shenzhen","Jakarta","Kuala Lumpur","NSE","BSE");
+  }
+  // ASX (Sydney): Mon-Fri lokaal = Zon 22:00 UTC tot Vrij 07:00 UTC (UTC+10/11).
+  // Sluit Sat helemaal, Zon vóór 22 UTC, Vrij na 07 UTC.
+  const asxOpen =
+    !(day === 6) &&
+    !(day === 0 && hour < 22) &&
+    !(day === 5 && hour >= 7);
+  if (asxOpen) open.push("ASX");
+
+  return open;
+}
+
 Deno.serve(runBackground("poll-prices", async () => {
   const sb = getServiceClient();
   const startMs = Date.now();
-  const { data: queue, error: qErr } = await sb.from("signal_tickers").select("ticker, buy_limit, price_fail_count").eq("active", true).eq("price_benched", false).order("price_polled_at", { ascending: true, nullsFirst: true }).limit(BATCH_SIZE);
+
+  // Bepaal welke beurzen NU open zijn. Tickers van gesloten beurzen pollen we niet —
+  // koersen bewegen toch niet en we belasten Yahoo nodeloos.
+  const openExchanges = openExchangesNow(new Date());
+  if (openExchanges.length === 0) {
+    return { ok: true, message: "alle markten gesloten — geen polls", metrics: { skipped: "all-markets-closed" } };
+  }
+
+  // Filter: open beurzen OF onbekende beurs (null) — laatste polls als fallback.
+  // Bouw OR-clause met eq per beurs (veiliger dan in.() bij PostgREST-parsing met spaties).
+  const orClause = [
+    ...openExchanges.map((e) => `exchange.eq.${e}`),
+    "exchange.is.null",
+  ].join(",");
+  const { data: queue, error: qErr } = await sb
+    .from("signal_tickers")
+    .select("ticker, buy_limit, price_fail_count, exchange")
+    .eq("active", true)
+    .eq("price_benched", false)
+    .or(orClause)
+    .order("price_polled_at", { ascending: true, nullsFirst: true })
+    .limit(BATCH_SIZE);
   if (qErr) throw qErr;
-  if (!queue || queue.length === 0) return { ok: true, message: "queue leeg" };
+  if (!queue || queue.length === 0) return { ok: true, message: "queue leeg (open markten: " + openExchanges.length + ")" };
   const { data: extremes } = await sb.from("signal_price_summary").select("ticker, high_1y");
   const high1yByTicker = new Map<string, number | null>();
   for (const r of extremes ?? []) high1yByTicker.set(r.ticker as string, ((r as { high_1y?: number | null }).high_1y) ?? null);
