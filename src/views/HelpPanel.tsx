@@ -568,7 +568,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         id: "zw-universum",
         title: "Universum — waar wordt naar gezocht?",
         body:
-          "Bewust GEEN biotech/mining watchlist. De scan loopt over de hoogste indices van zes grote markten:\n● 🇺🇸 NASDAQ-100 — top 100 niet-financiële NASDAQ noteringen (AAPL, MSFT, ASML, etc.)\n● 🇺🇸 Dow Jones Industrial Average — 30 grote US bedrijven (KO, JNJ, MMM, etc.)\n● 🇳🇱 AEX — 25 hoofdfondsen Amsterdam (ASML, Shell, ING, etc.)\n● 🇬🇧 FTSE 100 — top 100 Londen (HSBC, Shell, AstraZeneca, etc.)\n● 🇫🇷 CAC 40 — 40 hoofdfondsen Parijs (LVMH, TotalEnergies, Sanofi, etc.)\n● 🇨🇭 SMI — 20 hoofdfondsen Zwitserland (Nestlé, Roche, Novartis, etc.)\nNa dedupliceren ≈ 300 large-caps. Dit is bewust een ander universum dan de Xinix-watchlist (die focust op catalyst-driven biotech/mining).\nHandmatige toevoegingen mogen elke beurs zijn (bv. WHA.AS voor Wereldhave).",
+          "Bewust GEEN biotech/mining watchlist. De scan loopt over de bluechip- én midcap-indices van zes grote markten:\n\nLarge-caps:\n● 🇺🇸 NASDAQ-100 — top 100 niet-financiële NASDAQ noteringen (AAPL, MSFT, ASML, etc.)\n● 🇺🇸 Dow Jones Industrial Average — 30 grote US bedrijven (KO, JNJ, MMM, etc.)\n● 🇳🇱 AEX — 25 hoofdfondsen Amsterdam (ASML, Shell, ING, etc.)\n● 🇬🇧 FTSE 100 — top 100 Londen (HSBC, Shell, AstraZeneca, etc.)\n● 🇫🇷 CAC 40 — 40 hoofdfondsen Parijs (LVMH, TotalEnergies, Sanofi, etc.)\n● 🇨🇭 SMI — 20 hoofdfondsen Zwitserland (Nestlé, Roche, Novartis, etc.)\n\nMidcaps (vaak rijker aan hoge yields):\n● 🇺🇸 S&P MidCap 400 — gekozen subset van dividend-rijke US midcaps\n● 🇳🇱 AMX (Amsterdam Midkap) — 24 fondsen incl. Wereldhave, PostNL, SBM Offshore\n● 🇬🇧 FTSE 250 — subset van UK midcaps\n● 🇫🇷 CAC Mid 60 — Parijse midcaps\n● 🇨🇭 SMIM 30 — Zwitserse midcaps (Julius Bär, Lindt, Sonova, etc.)\n\nDit is bewust een ander universum dan de Xinix-watchlist (die focust op catalyst-driven biotech/mining).\nHandmatige toevoegingen mogen elke beurs zijn (bv. WHA.AS voor Wereldhave).",
       },
       {
         id: "zw-criteria",
@@ -633,6 +633,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         title: "Handmatig toevoegen — wat doet dat precies?",
         body:
           "Vul een ticker in (bv. 'KO' voor Coca-Cola, of 'WHA.AS' voor Wereldhave) en druk op '+ Toevoegen & scannen'. Het systeem:\n1. Doet direct een force-scan op die ene ticker via Yahoo Finance (bypass de 90-dagen herscan-regel).\n2. Markeert hem als 'handmatig' (badge 'handm.' bij de ticker).\nHandmatig-toegevoegde aandelen blijven zichtbaar onder het filter 'Voldoet aan criteria + handmatig', ook als ze niet aan de Zwitserleven-criteria voldoen. Zo kun je een eigen lijstje bouwen om te tracken.\nFormat: gebruik altijd de Yahoo Finance ticker (US zonder suffix; .AS Amsterdam, .L Londen, .PA Parijs, .SW Zwitserland, .DE Duitsland, etc.).\nVereist admin-token.",
+      },
+      {
+        id: "zw-verwijderen",
+        title: "Verwijderen — fout toegevoegd of niet meer interessant?",
+        body:
+          "In de laatste tabelkolom (Acties) staat per rij een 🗑-knop. Klik om die ticker uit de Zwitserleven-tabel te halen. Je krijgt een bevestigingspopup met de naam erbij om typo's te voorkomen.\nLet op: een index-ticker (uit NASDAQ-100, AEX, etc.) wordt bij de volgende auto-scan vanzelf weer opnieuw gescand. Voor permanent uitsluiten moet je hem uit de INDEX_UNIVERSE in de backend halen. Voor handmatige toevoegingen is de verwijdering permanent (tot je hem opnieuw handmatig toevoegt).\nVereist admin-token.",
       },
       {
         id: "zw-kolommen-verbergen",

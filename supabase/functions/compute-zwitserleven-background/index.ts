@@ -132,8 +132,88 @@ const SMI: string[] = [
   "PGHN.SW","ROG.SW","SCMN.SW","SGSN.SW","SIKA.SW","SLHN.SW","SOON.SW","SREN.SW","UBSG.SW","ZURN.SW",
 ];
 
+// ── MIDCAP / SECUNDAIRE INDICES ──────────────────────────────────────────────
+// Per land één index-niveau onder de bluechip-index. Veel dividend-rijke namen
+// zitten juist in deze midcap-sets. Total ~360 extra unieke tickers.
+
+// S&P MidCap 400 — gekozen subset van dividend-georiënteerde midcaps (US, no suffix).
+const SP_MIDCAP_400: string[] = [
+  "AAP","ACA","ACIW","ADC","AFG","AGCO","AGI","ALE","ALV","AM","AMED","AMG","AN","AOS","APAM","APG","APH",
+  "ARMK","ARW","ASB","ASGN","ASH","ATKR","ATR","AVA","AVNT","AVT","AWI","AYI","BANF","BC","BCO","BCPC","BDC",
+  "BERY","BFAM","BHE","BHF","BIO","BJ","BKH","BLD","BLKB","BMI","BOH","BRBR","BRC","BRX","BWXT","BYD",
+  "CABO","CAR","CASY","CBSH","CBT","CC","CCK","CCS","CFR","CHE","CHX","CLF","CLH","CMA","CMC","CNX","COKE",
+  "COLB","COLM","CR","CRI","CRL","CROX","CRUS","CSL","CUBE","CUZ","CW","CWAN","DAR","DCI","DCO","DKL",
+  "DKS","DLB","DLX","DNB","DOOO","DOX","DTM","DV","DVA","EAT","EBC","ECPG","EE","EHC","ELS","EME","EMN",
+  "ENR","ENS","ENSG","EPAM","EPC","EPR","ERIE","ESI","ETD","EVR","EVTC","EXLS","EXP","EXPO","FAF","FBP",
+  "FCFS","FDS","FELE","FFIN","FHB","FHN","FIVE","FIX","FL","FLO","FLR","FN","FNB","FR","G","GATX","GBCI",
+  "GEF","GGG","GHC","GMS","GNTX","GPI","GTLS","GVA","H","HAS","HE","HELE","HFWA","HGV","HIW","HMN","HOG",
+  "HOMB","HQY","HRB","HSII","HSIC","HUBB","HUBG","HVT","HXL","IDA","IDCC","IDXX","IEX","IFF","IIIV","INSM",
+  "IOSP","IP","IPGP","ITRI","J","JACK","JBL","JBLU","JEF","JOE","JWN","KBH","KBR","KEX","KFY","KMPR","KMX",
+  "KNF","KSS","LAD","LAMR","LANC","LEG","LEN","LFUS","LH","LHX","LITE","LIVN","LM","LNTH","LOPE","LPLA",
+  "LPX","M","MAC","MAN","MANH","MAS","MASI","MAT","MATX","MBC","MCRI","MCS","MD","MDC","MDU","MEDP","MGEE",
+  "MGM","MHK","MIDD","MKC","MKL","MKSI","MKTX","MLI","MMS","MOG-A","MORN","MOS","MPW","MPWR","MRCY","MSA",
+  "MSCI","MSGS","MSI","MSM","MTDR","MTH","MTN","MTRN","MTSI","MTZ","MUR","MUSA","NAVI","NBR","NCLH","NDSN",
+  "NEU","NFG","NJR","NLY","NNN","NOG","NOV","NPK","NRG","NSP","NTAP","NTR","NUS","NVST","NWE","NXST","NXT",
+  "NYT","ODP","OEC","OFC","OGE","OGS","OHI","OI","OII","OLED","OLLI","OLN","OMC","OMCL","OMI","ONB","ONTO",
+  "ORI","OSIS","OSK","OUT","OZK","PAG","PARR","PB","PBF","PBH","PCH","PCTY","PDCO","PDM","PEB","PFGC","PFSI",
+  "PI","PII","PINC","PNFP","PNM","PNW","POOL","POR","POST","POWI","POWL","PPC","PRGS","PRI","PRIM","PSN",
+  "PSTG","PTC","PVH","PWR","R","RBA","RCM","RDN","REG","REVG","REXR","REYN","RGA","RGEN","RGLD","RH","RHI",
+  "RHP","RJF","RLI","RNR","ROCK","ROL","ROST","RPM","RRC","RRX","RSG","RUSHA","RYAAY","RYN","SAH","SAIA",
+  "SAIC","SAM","SANM","SBAC","SBRA","SCCO","SCI","SDGR","SEAS","SEE","SEIC","SEM","SF","SFM","SGRY","SIG",
+  "SIGI","SITE","SJM","SJW","SKT","SKYW","SLG","SLM","SM","SMG","SMP","SNDR","SNX","SON","SPB","SPSC","SPXC",
+  "SR","SRC","SRPT","SSB","SSD","SSNC","STAG","STC","STE","STN","STRA","STRL","SWX","SXI","SXT","SYNA","TAP",
+  "TCBI","TDS","TDY","TECH","TEX","TFII","TFSL","TFX","TGNA","THC","THG","THO","THS","TKR","TMHC","TMP",
+  "TNDM","TNET","TNL","TOL","TOWN","TPB","TPH","TPL","TPR","TR","TRC","TREE","TREX","TRMB","TRMK","TRN",
+  "TRNO","TROW","TRS","TRUP","TSE","TTC","TTEK","TTMI","TXRH","U","UCB","UCBI","UDR","UE","UFCS","UFI",
+  "UFPI","UFPT","UGI","UHAL","UHS","UHT","UMBF","UNF","UNFI","UNIT","UNM","USFD","USLM","USPH","UVE","UVSP",
+  "UVV","VAC","VAL","VC","VCEL","VECO","VEEV","VFC","VG","VIRT","VITL","VLY","VNDA","VOC","VPG","VRRM",
+  "VRSK","VRT","VRTV","VSAT","VSCO","VSEC","VSH","VVI","VVV","W","WAFD","WAL","WBS","WBT","WCC","WD","WDFC",
+  "WEN","WERN","WEX","WGO","WH","WHD","WHR","WIRE","WLK","WLY","WMS","WNS","WOR","WSC","WSFS","WSM","WSO",
+  "WST","WTFC","WTRG","WTS","WTW","WU","WWD","WWW","WYNN","X","XENE","XHR","XPER","XPO","XRX","YELP","YETI",
+  "ZD","ZION",
+];
+
+// AMX (Amsterdam Midkap Index, 25 fondsen) — Yahoo suffix .AS
+const AMX: string[] = [
+  "AALB.AS","ALFEN.AS","ALLFG.AS","AMG.AS","APAM.AS","ARCAD.AS","AZRN.AS","BFIT.AS","BRNL.AS","CMCOM.AS",
+  "CTPNV.AS","ECMPA.AS","FAGR.AS","FUR.AS","INPST.AS","JDEP.AS","LIGHT.AS","OCI.AS","PHARM.AS","PNL.AS",
+  "SBMO.AS","TKWY.AS","VPK.AS","WHA.AS",
+];
+
+// FTSE 250 — gekozen subset van dividend-georiënteerde UK midcaps (Yahoo suffix .L)
+const FTSE_250: string[] = [
+  "AAF.L","AGR.L","AJB.L","ANE.L","AO.L","APAX.L","AT.L","ATG.L","AUB.L","BAB.L","BAG.L","BAKK.L","BBOX.L",
+  "BBY.L","BCG.L","BGS.L","BME.L","BNKR.L","BOY.L","BWY.L","BYG.L","CARD.L","CCR.L","CINE.L","CLDN.L",
+  "COA.L","CTY.L","CWK.L","DRX.L","ECM.L","ELM.L","EMG.L","ESP.L","ETO.L","FCF.L","FEET.L","FGT.L","FOXT.L",
+  "FXPO.L","GAW.L","GENL.L","GLO.L","GNK.L","GRG.L","GROW.L","HARL.L","HFEL.L","HMSO.L","HOC.L","HSV.L",
+  "HVPE.L","IGG.L","IGR.L","INCH.L","IPO.L","IPX.L","IWG.L","JLEN.L","KIE.L","LRE.L","MGGT.L","MGNS.L",
+  "MNKS.L","MONY.L","MRC.L","NCC.L","OCDO.L","OSB.L","PAGE.L","PCT.L","PCTN.L","PFC.L","PHP.L","PNN.L",
+  "POLR.L","PSDL.L","PZC.L","QQ.L","RAT.L","RDW.L","RSW.L","SAFE.L","SDR.L","SDY.L","SMP.L","SMRT.L","SNN.L",
+  "SPI.L","SRP.L","SXS.L","SYNC.L","TATE.L","TBCG.L","TCAP.L","TEM.L","THRG.L","TPK.L","TPX.L","TRY.L",
+  "TUI.L","TUNE.L","VANQ.L","VICO.L","VTY.L","WG.L","WIZZ.L","WKP.L","WMH.L","WTAN.L",
+];
+
+// CAC Mid 60 (Paris midcap, ≈60 fondsen) — Yahoo suffix .PA
+const CAC_MID_60: string[] = [
+  "ALD.PA","AKE.PA","AM.PA","ATO.PA","BB.PA","BIM.PA","BOL.PA","BVI.PA","CGG.PA","CO.PA","COFA.PA","COV.PA",
+  "DBG.PA","ELIOR.PA","ELIS.PA","EO.PA","EOSI.PA","ETL.PA","EXN.PA","FDJ.PA","FGR.PA","FNAC.PA","FORE.PA",
+  "FR.PA","GET.PA","GFC.PA","GTT.PA","ICAD.PA","ILD.PA","IPN.PA","IPS.PA","JCQ.PA","LI.PA","LOIM.PA",
+  "MAU.PA","MERY.PA","MF.PA","NK.PA","ORP.PA","PIG.PA","PLX.PA","RCO.PA","RUI.PA","RXL.PA","SCR.PA","SK.PA",
+  "SOI.PA","SOP.PA","SOPRA.PA","SPIE.PA","SW.PA","TFI.PA","TKO.PA","TKTT.PA","TRI.PA","TTE.PA","UBI.PA",
+  "VIL.PA","VK.PA","VLA.PA","WLN.PA",
+];
+
+// SMIM 30 (Swiss Market Index Mid, 30 fondsen) — Yahoo suffix .SW
+const SMIM_30: string[] = [
+  "ADEN.SW","AMS.SW","AVOL.SW","BAER.SW","BALN.SW","BARN.SW","BCGE.SW","BCVN.SW","BEAN.SW","BKW.SW",
+  "CFR.SW","CMBN.SW","DKSH.SW","DOKA.SW","EMSN.SW","FHZN.SW","GALE.SW","HELN.SW","KOMN.SW","LISN.SW",
+  "PSPN.SW","SCHN.SW","SCHP.SW","SFSN.SW","SFZN.SW","SGSN.SW","STMN.SW","SUN.SW","SYBN.SW","TEMN.SW",
+  "TKBP.SW","VACN.SW","VATN.SW","VONN.SW","ZEHN.SW",
+];
+
 const INDEX_UNIVERSE: string[] = [...new Set([
   ...DJIA, ...NASDAQ_100, ...AEX, ...FTSE_100, ...CAC_40, ...SMI,
+  ...SP_MIDCAP_400, ...AMX, ...FTSE_250, ...CAC_MID_60, ...SMIM_30,
 ])];
 
 interface Bar { date: string; close: number; }
@@ -309,9 +389,21 @@ Deno.serve(runBackground("compute-zwitserleven", async (req) => {
   //   ?ticker=XYZ          → scan alleen deze ene ticker (bypass 90d cutoff)
   //   ?ticker=XYZ&manual=1 → idem, en markeer als handmatig toegevoegd
   //                          (gaat NIET via signal_tickers — direct in zwitserleven_stocks)
+  //   ?ticker=XYZ&delete=1 → verwijder deze ticker uit zwitserleven_stocks
   const url = new URL(req.url);
   const forceTicker = (url.searchParams.get("ticker") ?? "").trim().toUpperCase();
   const isManualAdd = url.searchParams.get("manual") === "1";
+  const isDelete = url.searchParams.get("delete") === "1";
+
+  if (isDelete) {
+    if (!forceTicker) return { ok: false, message: "ticker vereist bij delete=1" };
+    const { error, count } = await sb
+      .from("zwitserleven_stocks")
+      .delete({ count: "exact" })
+      .eq("ticker", forceTicker);
+    if (error) return { ok: false, message: `delete ${forceTicker}: ${error.message}` };
+    return { ok: true, message: `${forceTicker} verwijderd (${count ?? 0} rij(en))`, metrics: { deleted: count ?? 0, ticker: forceTicker } };
+  }
 
   let batch: { ticker: string; company: string | null; exchange: string | null; sector: string | null }[];
   if (forceTicker) {

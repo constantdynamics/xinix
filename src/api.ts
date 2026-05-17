@@ -359,6 +359,20 @@ export async function addZwitserlevenManual(ticker: string): Promise<{ ok: boole
   return { ok: json.ok === true, message: json.message };
 }
 
+// Verwijder een Zwitserleven-rij uit de tabel (handig voor foutieve handmatige toevoegingen).
+// Vereist admin-token.
+export async function removeZwitserlevenStock(ticker: string): Promise<{ ok: boolean; message?: string }> {
+  const t = ticker.trim().toUpperCase();
+  if (!t) throw new Error("Ticker vereist");
+  const res = await fetch(
+    apiUrl(`/api/compute-zwitserleven-background?ticker=${encodeURIComponent(t)}&delete=1`),
+    { method: "POST", headers: authHeaders() }
+  );
+  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+  if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
+  return { ok: json.ok === true, message: json.message };
+}
+
 // ── Xinix paper portfolio ──
 export interface XinixOpenPosition {
   id: number;
