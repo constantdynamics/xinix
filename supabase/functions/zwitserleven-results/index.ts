@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
       // Alle gescande stocks (max 500), gesorteerd op yield
       sb
         .from("zwitserleven_stocks")
-        .select("ticker,company,exchange,country,sector,last_close,currency,dividend_yield_pct,annual_dividend,high_5y,pct_under_5y_high,max_annual_gain_5y,years_5pct_growth_5y,payout_ratio,dividend_cuts_5y,risk_label,meets_criteria,scanned_at,div_yield_y1,div_yield_y2,div_yield_y3,div_yield_y4,div_yield_y5")
+        .select("ticker,company,exchange,country,sector,last_close,currency,dividend_yield_pct,annual_dividend,high_5y,pct_under_5y_high,max_annual_gain_5y,years_5pct_growth_5y,payout_ratio,dividend_cuts_5y,risk_label,meets_criteria,scanned_at,div_yield_y1,div_yield_y2,div_yield_y3,div_yield_y4,div_yield_y5,is_manual")
         .order("dividend_yield_pct", { ascending: false, nullsLast: true })
         .limit(500),
       // Totaal gescand
@@ -75,15 +75,18 @@ Deno.serve(async (req) => {
       div_yield_y3: number | null;
       div_yield_y4: number | null;
       div_yield_y5: number | null;
+      is_manual: boolean | null;
     }>;
 
     const meetsCriteriaCount = stocks.filter((s) => s.meets_criteria).length;
+    const manualCount = stocks.filter((s) => s.is_manual === true).length;
 
     return new Response(
       JSON.stringify({
         stocks,
         total_scanned: totalResult.count ?? 0,
         meets_criteria_count: meetsCriteriaCount,
+        manual_count: manualCount,
         unscanned_count: unscannedResult.count ?? 0,
       }),
       { status: 200, headers: { ...cors(req), "content-type": "application/json" } }

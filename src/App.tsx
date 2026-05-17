@@ -50,7 +50,7 @@ const TABS: TabDef[] = [
   { key: "xinix", label: "Xinix" },
   { key: "feniks", label: "🦅 Feniks" },
   { key: "hikkertjes", label: "⚡ Hikkertjes" },
-  { key: "zwitserleven", label: "🏦 Zwitserleven" },
+  { key: "zwitserleven", label: "🌴 Zwitserleven" },
   { key: "status", label: "Status" },
   { key: "settings", label: "Instellingen" },
 ];

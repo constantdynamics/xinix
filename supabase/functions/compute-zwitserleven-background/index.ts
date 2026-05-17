@@ -30,12 +30,12 @@ async function logRun(job: string, fn: () => Promise<RunResult>): Promise<RunRes
 function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r) return false; return (req.headers.get("authorization") ?? "") === `Bearer ${r}`; }
 function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
 function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
-function runBackground(job: string, fn: () => Promise<RunResult>) {
+function runBackground(job: string, fn: (req: Request) => Promise<RunResult>) {
   return async (req: Request) => {
     if (req.method === "OPTIONS") return new Response(null, { status: 204 });
     if (!checkAdminOrCron(req)) return new Response("Unauthorized", { status: 401 });
     try {
-      const r = await logRun(job, fn);
+      const r = await logRun(job, () => fn(req));
       return new Response(JSON.stringify({ ok: r.ok, ...r }), { status: r.ok ? 200 : 500, headers: { "content-type": "application/json" } });
     } catch (e) {
       return new Response(JSON.stringify({ ok: false, message: e instanceof Error ? e.message : String(e) }), { status: 500, headers: { "content-type": "application/json" } });
@@ -203,21 +203,51 @@ function checkMeetsCriteria(m: Metrics): boolean {
   return true;
 }
 
-Deno.serve(runBackground("compute-zwitserleven", async () => {
+Deno.serve(runBackground("compute-zwitserleven", async (req) => {
   const sb = getServiceClient();
   const startMs = Date.now();
 
-  const cutoff = new Date(Date.now() - RESCAN_DAYS * 24 * 3600 * 1000).toISOString();
-  const { data: tickers, error: fetchError } = await sb
-    .from("signal_tickers")
-    .select("ticker, company, exchange, sector")
-    .eq("active", true)
-    .or(`zwitserleven_at.is.null,zwitserleven_at.lt.${cutoff}`)
-    .order("zwitserleven_at", { ascending: true, nullsFirst: true })
-    .limit(BATCH_SIZE);
+  // Force-scan modes:
+  //   ?ticker=XYZ        → scan alleen deze ene ticker (bypass 90d cutoff)
+  //   ?ticker=XYZ&manual=1 → idem, en markeer als handmatig toegevoegd
+  //                          (auto-toevoegen aan signal_tickers als nieuw)
+  const url = new URL(req.url);
+  const forceTicker = (url.searchParams.get("ticker") ?? "").trim().toUpperCase();
+  const isManualAdd = url.searchParams.get("manual") === "1";
 
-  if (fetchError) throw new Error(fetchError.message);
-  const batch = (tickers ?? []) as { ticker: string; company: string | null; exchange: string | null; sector: string | null }[];
+  let batch: { ticker: string; company: string | null; exchange: string | null; sector: string | null }[];
+  if (forceTicker) {
+    // Eén ticker: haal eerst meta op uit signal_tickers, voeg toe als handmatig en niet bestaand
+    const { data: existing } = await sb
+      .from("signal_tickers")
+      .select("ticker, company, exchange, sector, active")
+      .eq("ticker", forceTicker)
+      .maybeSingle();
+    if (existing) {
+      if (existing.active === false) {
+        return { ok: false, message: `${forceTicker} bestaat maar staat op niet-actief in de watchlist.` };
+      }
+      batch = [{ ticker: existing.ticker as string, company: (existing.company as string | null) ?? null, exchange: (existing.exchange as string | null) ?? null, sector: (existing.sector as string | null) ?? null }];
+    } else if (isManualAdd) {
+      // Voeg automatisch toe aan watchlist zodat dagelijkse pollers het ook oppakken
+      const { error: insErr } = await sb.from("signal_tickers").insert({ ticker: forceTicker, active: true });
+      if (insErr) return { ok: false, message: `Kon ${forceTicker} niet toevoegen aan watchlist: ${insErr.message}` };
+      batch = [{ ticker: forceTicker, company: null, exchange: null, sector: null }];
+    } else {
+      return { ok: false, message: `Ticker ${forceTicker} niet in watchlist. Gebruik manual=1 om hem toe te voegen.` };
+    }
+  } else {
+    const cutoff = new Date(Date.now() - RESCAN_DAYS * 24 * 3600 * 1000).toISOString();
+    const { data: tickers, error: fetchError } = await sb
+      .from("signal_tickers")
+      .select("ticker, company, exchange, sector")
+      .eq("active", true)
+      .or(`zwitserleven_at.is.null,zwitserleven_at.lt.${cutoff}`)
+      .order("zwitserleven_at", { ascending: true, nullsFirst: true })
+      .limit(BATCH_SIZE);
+    if (fetchError) throw new Error(fetchError.message);
+    batch = (tickers ?? []) as { ticker: string; company: string | null; exchange: string | null; sector: string | null }[];
+  }
 
   let checked = 0, foundCount = 0, errors = 0;
   const errMsgs: string[] = [];
@@ -236,6 +266,7 @@ Deno.serve(runBackground("compute-zwitserleven", async () => {
         await sb.from("zwitserleven_stocks").upsert({
           ticker: row.ticker, company: row.company, exchange: row.exchange, sector: row.sector,
           meets_criteria: false, error_msg: "te weinig data", scanned_at: now,
+          ...(isManualAdd ? { is_manual: true } : {}),
         }, { onConflict: "ticker" });
       } else {
         const meets = checkMeetsCriteria(m);
@@ -280,6 +311,7 @@ Deno.serve(runBackground("compute-zwitserleven", async () => {
           div_yield_y3: m.divYieldByYear[2] ?? null,
           div_yield_y4: m.divYieldByYear[3] ?? null,
           div_yield_y5: m.divYieldByYear[4] ?? null,
+          ...(isManualAdd ? { is_manual: true } : {}),
         }, { onConflict: "ticker" });
 
         // Notificatie voor nieuw gevonden Laag-risico aandeel — 🌴
@@ -290,7 +322,7 @@ Deno.serve(runBackground("compute-zwitserleven", async () => {
             ticker: row.ticker,
             signal_type: "zwitserleven_laag",
             severity: "yellow",
-            title: `${row.ticker} · Zwitserleven Laag risico · dividend ${yieldStr}`,
+            title: `🌴 ${row.ticker} · Zwitserleven Laag risico · dividend ${yieldStr}`,
             detail: `${row.company ?? row.ticker} · Dividend ${yieldStr} TTM · ${underStr} onder 5j-hoog · Laag dividendrisico. Voldoet aan alle Zwitserleven-criteria.`,
           });
         }
@@ -302,6 +334,7 @@ Deno.serve(runBackground("compute-zwitserleven", async () => {
       await sb.from("zwitserleven_stocks").upsert({
         ticker: row.ticker, company: row.company, exchange: row.exchange, sector: row.sector,
         meets_criteria: false, error_msg: msg.slice(0, 200), scanned_at: now,
+        ...(isManualAdd ? { is_manual: true } : {}),
       }, { onConflict: "ticker" });
     }
     // Altijd zwitserleven_at bijwerken zodat de ticker pas na RESCAN_DAYS opnieuw aan de beurt is
