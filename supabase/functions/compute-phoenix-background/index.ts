@@ -57,8 +57,10 @@ async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
   const r = json.chart.result?.[0];
   if (!r) throw new Error(`Yahoo ${ticker}: ${json.chart.error?.description ?? "no result"}`);
   const ts = r.timestamp ?? [];
-  const adj = r.indicators.adjclose?.[0]?.adjclose;
-  const closes = adj ?? r.indicators.quote[0]?.close ?? [];
+  // Gebruik raw close prices (NIET adjclose) — dividend-aanpassing vertekent sterk
+  // bij hoog-dividend fondsen/REITs en geeft valse 50×-signalen. Feniks-patroon
+  // meet werkelijke koersbeweging, niet totaal-rendement inclusief herbelegd dividend.
+  const closes = r.indicators.quote[0]?.close ?? [];
   return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
 }
 

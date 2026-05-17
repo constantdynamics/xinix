@@ -321,6 +321,11 @@ export interface ZwitserlevenStock {
   risk_label: string | null;
   meets_criteria: boolean | null;
   scanned_at: string | null;
+  div_yield_y1: number | null;
+  div_yield_y2: number | null;
+  div_yield_y3: number | null;
+  div_yield_y4: number | null;
+  div_yield_y5: number | null;
 }
 
 export interface ZwitserlevenResults {

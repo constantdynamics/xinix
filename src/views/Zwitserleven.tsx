@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   fetchZwitserlevenResults,
   triggerJob,
-  getToken,
   type ZwitserlevenStock,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
@@ -112,7 +111,9 @@ export function ZwitserlevenView() {
     return list;
   }, [data, showFilter, sortKey, sortAsc]);
 
-  const isAdmin = !!getToken();
+  const currentYear = new Date().getFullYear();
+  const yearLabels = [1, 2, 3, 4, 5].map((offset) => String(currentYear - offset));
+  const yearKeys = ["div_yield_y1", "div_yield_y2", "div_yield_y3", "div_yield_y4", "div_yield_y5"] as const;
 
   if (loading) return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
   if (error) return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
@@ -153,14 +154,12 @@ export function ZwitserlevenView() {
         <Stat label="Voldoen aan criteria" value={data?.meets_criteria_count ?? 0} />
         <Stat label="Totaal gescand" value={data?.total_scanned ?? 0} />
         <Stat label="Nog te scannen" value={data?.unscanned_count ?? 0} />
-        {isAdmin && (
-          <div className="flex items-center gap-2 ml-auto">
-            {scanMsg && <span className="text-xs text-neutral-400">{scanMsg}</span>}
-            <Button size="sm" variant="secondary" onClick={runScan} disabled={scanning}>
-              {scanning ? "…" : "🏦 Scan starten"}
-            </Button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 ml-auto">
+          {scanMsg && <span className="text-xs text-neutral-400">{scanMsg}</span>}
+          <Button size="sm" variant="secondary" onClick={runScan} disabled={scanning}>
+            {scanning ? "…" : "🏦 Scan starten"}
+          </Button>
+        </div>
       </div>
 
       {/* Filter knoppen */}
@@ -217,7 +216,7 @@ export function ZwitserlevenView() {
             <div className="text-xs text-neutral-500">klik kolomkop om te sorteren</div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[860px]">
+            <table className="w-full text-sm min-w-[1200px]">
               <thead className="border-b border-ink-5 bg-ink-2/40">
                 <tr>
                   <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>
@@ -229,6 +228,11 @@ export function ZwitserlevenView() {
                   <SortHeader col="pct_under_5y_high" label="Val v 5j%" />
                   <SortHeader col="max_annual_gain_5y" label="Max jaar +" />
                   <SortHeader col="years_5pct_growth_5y" label="Groeijr" />
+                  {yearLabels.map((y) => (
+                    <th key={y} className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide whitespace-nowrap">
+                      Div {y}
+                    </th>
+                  ))}
                   <SortHeader col="payout_ratio" label="Payout" />
                   <SortHeader col="dividend_cuts_5y" label="Cuts" />
                   <SortHeader col="risk_label" label="Risico" />
@@ -303,6 +307,16 @@ export function ZwitserlevenView() {
                           {s.years_5pct_growth_5y ?? "—"}
                         </span>
                       </td>
+
+                      {/* Per-jaar dividendrendement */}
+                      {yearKeys.map((key) => {
+                        const val = s[key];
+                        return (
+                          <td key={key} className="px-3 py-2.5 text-left tabular text-xs text-neutral-300">
+                            {val != null ? `${val.toFixed(1)}%` : <span className="text-neutral-600">—</span>}
+                          </td>
+                        );
+                      })}
 
                       {/* Payout ratio */}
                       <td className="px-3 py-2.5 text-left tabular text-xs">

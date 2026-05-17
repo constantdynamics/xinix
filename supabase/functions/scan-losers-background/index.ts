@@ -48,16 +48,24 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
 
 // ───────────────────────── config ─────────────────────────
 const MARKETS = ["america", "canada", "australia", "uk"]; // TradingView scanner regio's
-const LOSERS_PER_MARKET = 40; // top-N grootste dalers per markt bekijken
-const MAX_CANDIDATES = 140; // harde cap op aantal Yahoo-checks per run
-// Toevoegcriteria — OR-conditie: één van deze drie volstaat.
+const LOSERS_PER_MARKET = 200; // top-N grootste dalers per markt — ruim genoeg voor drukke dagen (100+ aandelen >10%)
+const MAX_CANDIDATES = 280; // harde cap op Yahoo-checks per run (280 × ~450ms ≈ 126s ≤ budget)
+const MIN_DAILY_DROP_PCT = -10; // alleen dalers van ≥10% op de dag — filtert ruis eruit
+
+// Toevoegcriteria voor watchlist — OR-conditie: één volstaat.
 const MIN_GOLD = 1;
 const MIN_SILVER = 1;
 const MIN_GOLD_ALT = 2; // OR ≥2× goud
 const MIN_SILVER_ALT = 3; // OR ≥3× zilver
 const MIN_BRONZE_1Y = 4; // OR ≥4× brons in het afgelopen jaar
 const BUDGET_MS = 130_000;
-const SLEEP_MS = 250; // langzaam langs Yahoo
+const SLEEP_MS = 250;
+
+// Notificatiedrempel — strengere eis voor ntfy/email (niet voor watchlist-toevoeging).
+// Aandelen die alleen via phoenix of bronze1y kwalificeren gaan stil de watchlist in.
+const NOTIFY_MIN_GOLD = 2;   // ≥2 goud
+const NOTIFY_MIN_SILVER = 3; // of ≥3 zilver
+const NOTIFY_MIN_BRONZE_1Y = 4; // of ≥4 brons in het afgelopen jaar
 
 // TradingView exchange-prefix -> Yahoo suffix ("" = US, geen suffix).
 // Bewust GEEN OTC/PINK: dat zijn de gemanipuleerde pink-sheet shells.
@@ -66,6 +74,20 @@ const TV_EXCHANGE_TO_YAHOO_SUFFIX: Record<string, string> = {
   TSX: ".TO", TSXV: ".V", CSE: ".CN", NEO: ".NE",
   ASX: ".AX",
   LSE: ".L", AQSE: ".L",
+};
+
+// TradingView exchange prefix -> Google Finance exchange code (US tickers).
+const TV_EXCHANGE_TO_GF: Record<string, string> = {
+  NASDAQ: "NASDAQ",
+  NYSE: "NYSE",
+  AMEX: "NYSEAMERICAN",
+  BATS: "BATS",
+};
+
+// Yahoo suffix -> Google Finance exchange code (niet-US tickers).
+const SUFFIX_TO_GF: Record<string, string> = {
+  TO: "TSE", V: "CVE", CN: "CNSX", NE: "NEO",
+  L: "LON", AX: "ASX", NZ: "NZE",
 };
 
 // ───────────────────────── helpers ─────────────────────────
@@ -81,11 +103,19 @@ function inferSector(name: string | null | undefined): "biotech" | "mining" | "o
   return "other";
 }
 
-interface LoserRow { yahoo: string; name: string; changePct: number | null; close: number | null; exch: string }
+interface LoserRow {
+  yahoo: string;    // Yahoo Finance ticker (hyphens voor dots in base, plus suffix)
+  gfBase: string;   // Google Finance ticker base (originele TradingView-symbool, dots behouden)
+  tvExch: string;   // TradingView exchange prefix (NASDAQ, NYSE, TSX, etc.)
+  name: string;
+  changePct: number | null;
+  close: number | null;
+}
+
 async function fetchMarketLosers(market: string): Promise<LoserRow[]> {
   const body = {
     filter: [
-      { left: "type", operation: "equal", right: "stock" }, // alleen gewone aandelen, geen ETF/ETN/ETP/fund
+      { left: "type", operation: "equal", right: "stock" },
       { left: "change", operation: "nempty" },
       { left: "close", operation: "in_range", right: [0.05, 100000] },
       { left: "volume", operation: "egreater", right: 10000 },
@@ -106,24 +136,42 @@ async function fetchMarketLosers(market: string): Promise<LoserRow[]> {
   const out: LoserRow[] = [];
   for (const row of json.data ?? []) {
     const s = String(row.s ?? "");
-    const dot = s.indexOf(":");
-    if (dot === -1) continue;
-    const exch = s.slice(0, dot).toUpperCase();
-    let sym = s.slice(dot + 1).toUpperCase();
-    // TradingView gebruikt "." soms voor share classes (BRK.B); Yahoo wil "-".
-    sym = sym.replace(/\./g, "-");
-    const suffix = TV_EXCHANGE_TO_YAHOO_SUFFIX[exch];
+    const colon = s.indexOf(":");
+    if (colon === -1) continue;
+    const tvExch = s.slice(0, colon).toUpperCase();
+    const tvSym = s.slice(colon + 1).toUpperCase(); // origineel TradingView-symbool (met dots)
+    // Yahoo Finance wil "-" ipv "." voor share classes (BRK.B → BRK-B)
+    const yahoBase = tvSym.replace(/\./g, "-");
+    const suffix = TV_EXCHANGE_TO_YAHOO_SUFFIX[tvExch];
     if (suffix === undefined) continue; // onbekende beurs -> overslaan
-    const yahoo = `${sym}${suffix}`;
+    const yahoo = `${yahoBase}${suffix}`;
     const d = (row.d ?? []) as unknown[];
-    const name = (d[1] as string) || (d[0] as string) || sym;
+    const name = (d[1] as string) || (d[0] as string) || tvSym;
     const changePct = typeof d[2] === "number" ? (d[2] as number) : null;
     const close = typeof d[3] === "number" ? (d[3] as number) : null;
     if (changePct != null && changePct >= 0) continue; // alleen dalers
-    if (isEtp(name)) continue; // geen ETPs/ETFs
-    out.push({ yahoo, name, changePct, close, exch });
+    if (changePct != null && changePct > MIN_DAILY_DROP_PCT) continue; // minimaal 10% daling
+    if (isEtp(name)) continue;
+    out.push({ yahoo, gfBase: tvSym, tvExch, name, changePct, close });
   }
   return out;
+}
+
+// Google Finance URL — gebruikt het originele TradingView-symbool (met dots, niet hyphens)
+// zodat share classes correct worden weergegeven, en het juiste exchange-code.
+function googleFinanceUrl(yahoo: string, gfBase: string, tvExch: string): string {
+  const t = yahoo.trim().toUpperCase();
+  const dot = t.indexOf(".");
+  if (dot === -1) {
+    // US ticker: gebruik TradingView exchange prefix → Google Finance code
+    const gfExch = TV_EXCHANGE_TO_GF[tvExch] ?? "NASDAQ";
+    return `https://www.google.com/finance/quote/${encodeURIComponent(gfBase)}:${gfExch}`;
+  }
+  const suffix = t.slice(dot + 1);
+  const gfExch = SUFFIX_TO_GF[suffix];
+  if (!gfExch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
+  // gfBase = originele TradingView-base (bv. "PEZM.H" in plaats van "PEZM-H")
+  return `https://www.google.com/finance/quote/${encodeURIComponent(gfBase)}:${gfExch}`;
 }
 
 interface Bar { date: string; close: number; }
@@ -135,8 +183,10 @@ async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
   const r = json.chart.result?.[0];
   if (!r) throw new Error(`Yahoo ${ticker}: ${json.chart.error?.description ?? "no result"}`);
   const ts = r.timestamp ?? [];
-  const adj = r.indicators.adjclose?.[0]?.adjclose;
-  const closes = adj ?? r.indicators.quote[0]?.close ?? [];
+  // Gebruik raw close prices (NIET adjclose) voor phoenix-detectie — dividend-aanpassing kan
+  // sterk vertekenen bij fondsen en infrastructuuraandelen (zoals AERS.L) en
+  // leidt tot valse 50×-signalen. Werkelijke koersbeweging is wat we meten willen.
+  const closes = r.indicators.quote[0]?.close ?? [];
   return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
 }
 
@@ -188,24 +238,9 @@ function countMedals(barsArr: Bar[]): { gold: number; silver: number; bronze: nu
   return { gold: g, silver: s, bronze: b };
 }
 
-const SUFFIX_TO_EXCHANGE: Record<string, string> = {
-  TO: "TSE", V: "CVE", CN: "CNSX", NE: "NEO",
-  L: "LON", AX: "ASX", NZ: "NZE",
-};
-function googleFinanceUrl(yahoo: string): string {
-  const t = yahoo.trim().toUpperCase();
-  const dot = t.indexOf(".");
-  if (dot === -1) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}:NASDAQ`;
-  const base = t.slice(0, dot);
-  const exch = SUFFIX_TO_EXCHANGE[t.slice(dot + 1)];
-  if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
-  return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`;
-}
-
-async function sendNtfy(server: string, topic: string, title: string, body: string, clickUrl?: string): Promise<boolean> {
+async function sendNtfy(server: string, topic: string, title: string, body: string, clickUrl: string): Promise<boolean> {
   try {
-    const payload: Record<string, unknown> = { topic, title, message: body, priority: 4, tags: ["medal"] };
-    if (clickUrl) payload.click = clickUrl;
+    const payload: Record<string, unknown> = { topic, title, message: body, priority: 4, tags: ["medal"], click: clickUrl };
     const res = await fetch((server || "https://ntfy.sh").replace(/\/$/, ""), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -241,7 +276,6 @@ Deno.serve(runBackground("scan-losers", async () => {
   const allSymbols = uniqueLosers.map((l) => l.yahoo);
   const existing = new Set<string>();
   if (allSymbols.length) {
-    // in() in chunks van 200 ivm URL-lengte
     for (let i = 0; i < allSymbols.length; i += 200) {
       const { data } = await sb.from("signal_tickers").select("ticker").in("ticker", allSymbols.slice(i, i + 200));
       for (const r of data ?? []) existing.add(r.ticker as string);
@@ -249,8 +283,13 @@ Deno.serve(runBackground("scan-losers", async () => {
   }
   const candidates = uniqueLosers.filter((l) => !existing.has(l.yahoo)).slice(0, MAX_CANDIDATES);
 
-  // 3) Per kandidaat: 5y koers ophalen, medailles tellen.
-  const gems: Array<{ yahoo: string; name: string; sector: string; gold: number; silver: number; bronze: number; changePct: number | null; exch: string; low5y: number | null; isPhoenix: boolean }> = [];
+  // 3) Per kandidaat: koers ophalen, medailles tellen.
+  const gems: Array<{
+    yahoo: string; gfBase: string; tvExch: string; name: string; sector: string;
+    gold: number; silver: number; bronze: number; bronze1y: number;
+    changePct: number | null; low5y: number | null; isPhoenix: boolean;
+    isHighQuality: boolean; // voldoet aan notificatiedrempel (≥2g of ≥3s of ≥4b1y)
+  }> = [];
   let checked = 0;
   const yahooErrors: string[] = [];
   for (const c of candidates) {
@@ -265,14 +304,22 @@ Deno.serve(runBackground("scan-losers", async () => {
       const medals1y = countMedals(bars.slice(-52));
       const bronze1yOk = medals1y.bronze >= MIN_BRONZE_1Y && lastClose >= 0.05;
       const phoenixOk = hasPhoenixRun(bars, 50);
-      const ok = (medals.gold >= MIN_GOLD && medals.silver >= MIN_SILVER)
+      const qualifiesForWatchlist = (medals.gold >= MIN_GOLD && medals.silver >= MIN_SILVER)
               || medals.gold >= MIN_GOLD_ALT
               || medals.silver >= MIN_SILVER_ALT
               || bronze1yOk
               || phoenixOk;
-      if (ok) {
+      if (qualifiesForWatchlist) {
         const low5y = bars5y.length ? Math.min(...bars5y.map((b) => b.close)) : null;
-        gems.push({ yahoo: c.yahoo, name: c.name, sector: inferSector(c.name), ...medals, changePct: c.changePct, exch: c.exch, low5y, isPhoenix: phoenixOk });
+        // Notificatiedrempel: alleen hoge kwaliteit (≥2g OF ≥3s OF ≥4b1y)
+        const isHighQuality = medals.gold >= NOTIFY_MIN_GOLD
+          || medals.silver >= NOTIFY_MIN_SILVER
+          || medals1y.bronze >= NOTIFY_MIN_BRONZE_1Y;
+        gems.push({
+          yahoo: c.yahoo, gfBase: c.gfBase, tvExch: c.tvExch, name: c.name,
+          sector: inferSector(c.name), ...medals, bronze1y: medals1y.bronze,
+          changePct: c.changePct, low5y, isPhoenix: phoenixOk, isHighQuality,
+        });
       }
     } catch (e) {
       if (yahooErrors.length < 5) yahooErrors.push(`${c.yahoo}: ${e instanceof Error ? e.message : String(e)}`);
@@ -285,14 +332,10 @@ Deno.serve(runBackground("scan-losers", async () => {
   if (gems.length) {
     const nowIso = new Date().toISOString();
     const rows = gems.map((g) => {
-      // Slimme initiële buy_limit: 10% boven 5y-low (zelfde formule als
-      // backfill voor handmatige tickers). Voor US-tickers slaan we de TV
-      // exchange-prefix op zodat Google-Finance links direct werken;
-      // suffix-tickers regelt googleFinanceUrl zelf via SUFFIX_TO_EXCHANGE.
       const smartLimit = g.low5y != null && g.low5y > 0
         ? Number((g.low5y * 1.10).toFixed(g.low5y < 1 ? 4 : g.low5y < 10 ? 3 : 2))
         : null;
-      const exchange = g.yahoo.includes(".") ? null : g.exch;
+      const exchange = g.yahoo.includes(".") ? null : g.tvExch;
       return {
         ticker: g.yahoo, company: g.name, sector: g.sector, active: true,
         medal_gold: g.gold, medal_silver: g.silver, medal_bronze: g.bronze, medals_computed_at: nowIso,
@@ -310,37 +353,44 @@ Deno.serve(runBackground("scan-losers", async () => {
       await sb.from("signal_events").insert({
         ticker: g.yahoo, signal_type: "loser_gem", severity: "yellow",
         title: `${g.yahoo} — grote daler · 🏆${g.gold} \u{1F948}${g.silver} (5y koers-runs)`,
-        detail: `${g.name}${g.changePct != null ? ` · vandaag ${g.changePct.toFixed(1)}%` : ""}. Auto-toegevoegd aan de watchlist (≥1g+1s OF ≥${MIN_GOLD_ALT}g OF ≥${MIN_SILVER_ALT}s).`,
+        detail: `${g.name}${g.changePct != null ? ` · vandaag ${g.changePct.toFixed(1)}%` : ""}. Auto-toegevoegd aan de watchlist.`,
         payload: { source: "tradingview_losers", gold: g.gold, silver: g.silver, bronze: g.bronze, change_pct: g.changePct },
-        // markeer meteen als alerted: de notificatie gaat hieronder rechtstreeks, niet via dispatch-alerts
-        alerted: true,
+        alerted: true, // notificatie gaat hieronder rechtstreeks, niet via dispatch-alerts
         expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
       });
     }
 
-    // ntfy
-    const { data: settings } = await sb.from("signal_settings").select("ntfy_topic, ntfy_server").eq("id", 1).single();
-    const topic = settings?.ntfy_topic as string | null | undefined;
-    if (topic) {
-      const sorted = gems.sort((a, b) => b.gold - a.gold || b.silver - a.silver);
-      const lines = sorted.map((g) => {
-        const url = googleFinanceUrl(g.yahoo);
-        return `🏆${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}\n${url}`;
-      });
-      await sendNtfy(
-        (settings?.ntfy_server as string) ?? "https://ntfy.sh",
-        topic,
-        `🏆 ${gems.length} grote daler${gems.length > 1 ? "s" : ""} met medaille-track-record toegevoegd`,
-        lines.join("\n\n") + "\n\nUit de TradingView 'biggest losers' van vandaag; nu in je watchlist.",
-        googleFinanceUrl(sorted[0].yahoo),
-      );
+    // ntfy — alleen hoge kwaliteit (≥2g of ≥3s of ≥4b1y), geen ruis
+    const notifyGems = gems.filter((g) => g.isHighQuality);
+    if (notifyGems.length) {
+      const { data: settings } = await sb.from("signal_settings").select("ntfy_topic, ntfy_server").eq("id", 1).single();
+      const topic = settings?.ntfy_topic as string | null | undefined;
+      if (topic) {
+        const server = (settings?.ntfy_server as string) ?? "https://ntfy.sh";
+        const sorted = notifyGems.sort((a, b) => b.gold - a.gold || b.silver - a.silver);
+        const lines = sorted.map((g) => {
+          const url = googleFinanceUrl(g.yahoo, g.gfBase, g.tvExch);
+          return `🏆${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}\n${url}`;
+        });
+        // Bij meerdere aandelen: open de ntfy-app ipv Google Finance (meer context)
+        const clickUrl = sorted.length === 1
+          ? googleFinanceUrl(sorted[0].yahoo, sorted[0].gfBase, sorted[0].tvExch)
+          : `${server.replace(/\/$/, "")}/${topic}`;
+        await sendNtfy(
+          server,
+          topic,
+          `🏆 ${notifyGems.length} grote daler${notifyGems.length > 1 ? "s" : ""} met medaille-track-record toegevoegd`,
+          lines.join("\n\n") + "\n\nUit de TradingView 'biggest losers' van vandaag; nu in je watchlist.",
+          clickUrl,
+        );
+      }
     }
   }
 
   const errs = [...marketErrors, ...yahooErrors];
   return {
-    ok: marketErrors.length < MARKETS.length, // alleen fout als ALLE markten faalden
-    message: `${uniqueLosers.length} dalers, ${candidates.length} nieuw, ${checked} gecheckt, ${gems.length} met ≥1g+1s OF ≥2g OF ≥3s, ${added} toegevoegd` + (errs.length ? `; ${errs.slice(0, 3).join("; ")}` : ""),
-    metrics: { losers: uniqueLosers.length, candidates: candidates.length, checked, gems: gems.length, added, market_errors: marketErrors.length },
+    ok: marketErrors.length < MARKETS.length,
+    message: `${uniqueLosers.length} dalers (≥10%), ${candidates.length} nieuw, ${checked} gecheckt, ${gems.length} kwalif., ${gems.filter(g=>g.isHighQuality).length} notificeerbaar, ${added} toegevoegd` + (errs.length ? `; ${errs.slice(0, 3).join("; ")}` : ""),
+    metrics: { losers: uniqueLosers.length, candidates: candidates.length, checked, gems: gems.length, notified: gems.filter(g=>g.isHighQuality).length, added, market_errors: marketErrors.length },
   };
 }));

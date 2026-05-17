@@ -123,6 +123,7 @@ interface Metrics {
   dividendCuts5y: number;
   maxAnnualGain5y: number | null;
   years5pctGrowth: number;
+  divYieldByYear: (number | null)[]; // [y1, y2, y3, y4, y5] = [vorig jaar … 5 jaar geleden]
 }
 
 function computeMetrics(bars: Bar[], divs: DivEvent[]): Metrics | null {
@@ -169,7 +170,22 @@ function computeMetrics(bars: Bar[], divs: DivEvent[]): Metrics | null {
     if (divByYear[divYears[i]] < divByYear[divYears[i - 1]] * 0.9) dividendCuts5y++;
   }
 
-  return { lastClose, high5y, pctUnder5yHigh, annualDividend, dividendYieldPct, dividendCuts5y, maxAnnualGain5y, years5pctGrowth };
+  // Per-jaar dividendrendement: y1 = vorig jaar, y5 = 5 jaar geleden.
+  // Gebruik de eindkoers van dat jaar als noemer (voor lopend jaar: huidige koers).
+  const currentYear = new Date().getFullYear();
+  const divYieldByYear: (number | null)[] = [];
+  for (let offset = 1; offset <= 5; offset++) {
+    const year = currentYear - offset;
+    const divTotal = divByYear[year] ?? 0;
+    if (divTotal === 0) { divYieldByYear.push(null); continue; }
+    const yearBars = byYear[year];
+    if (!yearBars || yearBars.length === 0) { divYieldByYear.push(null); continue; }
+    const priceAtYearEnd = yearBars[yearBars.length - 1];
+    if (priceAtYearEnd <= 0) { divYieldByYear.push(null); continue; }
+    divYieldByYear.push(Math.round((divTotal / priceAtYearEnd) * 10000) / 100);
+  }
+
+  return { lastClose, high5y, pctUnder5yHigh, annualDividend, dividendYieldPct, dividendCuts5y, maxAnnualGain5y, years5pctGrowth, divYieldByYear };
 }
 
 function computeRiskLabel(cuts: number, payoutRatio: number | null, years5pct: number): string {
@@ -225,6 +241,20 @@ Deno.serve(runBackground("compute-zwitserleven", async () => {
         const meets = checkMeetsCriteria(m);
         const riskLabel = computeRiskLabel(m.dividendCuts5y, summary.payoutRatio, m.years5pctGrowth);
         if (meets) foundCount++;
+
+        // Controleer of dit een nieuw "Laag"-risico aandeel is dat nog niet eerder was gevonden
+        // zodat we niet bij elke 90-daagse herscan opnieuw een notificatie sturen.
+        let isNewLaag = false;
+        if (meets && riskLabel === "Laag") {
+          const { data: existing } = await sb
+            .from("zwitserleven_stocks")
+            .select("meets_criteria, risk_label")
+            .eq("ticker", row.ticker)
+            .single();
+          const wasAlreadyLaag = existing?.meets_criteria === true && existing?.risk_label === "Laag";
+          isNewLaag = !wasAlreadyLaag;
+        }
+
         await sb.from("zwitserleven_stocks").upsert({
           ticker: row.ticker,
           company: row.company,
@@ -245,7 +275,25 @@ Deno.serve(runBackground("compute-zwitserleven", async () => {
           meets_criteria: meets,
           error_msg: null,
           scanned_at: now,
+          div_yield_y1: m.divYieldByYear[0] ?? null,
+          div_yield_y2: m.divYieldByYear[1] ?? null,
+          div_yield_y3: m.divYieldByYear[2] ?? null,
+          div_yield_y4: m.divYieldByYear[3] ?? null,
+          div_yield_y5: m.divYieldByYear[4] ?? null,
         }, { onConflict: "ticker" });
+
+        // Notificatie voor nieuw gevonden Laag-risico aandeel — 🌴
+        if (isNewLaag) {
+          const yieldStr = `${m.dividendYieldPct.toFixed(1)}%`;
+          const underStr = `${m.pctUnder5yHigh.toFixed(1)}%`;
+          await sb.from("signal_events").insert({
+            ticker: row.ticker,
+            signal_type: "zwitserleven_laag",
+            severity: "yellow",
+            title: `${row.ticker} · Zwitserleven Laag risico · dividend ${yieldStr}`,
+            detail: `${row.company ?? row.ticker} · Dividend ${yieldStr} TTM · ${underStr} onder 5j-hoog · Laag dividendrisico. Voldoet aan alle Zwitserleven-criteria.`,
+          });
+        }
       }
     } catch (e) {
       errors++;

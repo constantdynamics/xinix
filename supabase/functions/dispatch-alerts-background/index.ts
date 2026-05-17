@@ -29,6 +29,7 @@ const LIMIT_EVENT_TYPES = new Set<string>([
   "buy_limit_close",
   "buy_limit_warmup",
   "phoenix_near_limit",
+  "zwitserleven_laag",
 ]);
 const BULLISH_CATALYST_TYPES = new Set<string>([
   "bonanza_au", "bonanza_ag", "bonanza_cu",
@@ -41,14 +42,17 @@ const BULLISH_CATALYST_TYPES = new Set<string>([
 const POSITIVE_ACTIONS = new Set<string>(["BUY", "STRONG_BUY"]);
 
 // Bepaalt of een signaal überhaupt een notificatie waard is.
-//  - Vereist altijd: ≥2 goud OF ≥3 zilver (anders te veel ruis).
-//  - Daarna: buy_limit events altijd; bullish catalysts alleen bij BUY/STRONG_BUY.
+//  - Vereist altijd: ≥2 goud OF ≥3 zilver OF ≥4 brons (kwaliteitsdrempel).
+//  - Uitzonderingen: phoenix_near_limit en zwitserleven_laag bypass de medalcheck.
+//  - Bullish catalysts: alleen bij BUY/STRONG_BUY-actie.
 function shouldNotify(signalType: string, action: string | null | undefined, medals: Medals | null): boolean {
-  // Phoenix alerts bypass de medal-eis — is_phoenix zelf is het kwaliteitssignaal
+  // Speciale typen bypass de medal-eis — het type zelf is het kwaliteitssignaal
   if (signalType === "phoenix_near_limit") return true;
+  if (signalType === "zwitserleven_laag") return true;
   const g = medals?.gold ?? 0;
   const si = medals?.silver ?? 0;
-  if (g < 2 && si < 3) return false;
+  const br = medals?.bronze ?? 0;
+  if (g < 2 && si < 3 && br < 4) return false;
   if (LIMIT_EVENT_TYPES.has(signalType)) return true;
   if (BULLISH_CATALYST_TYPES.has(signalType) && action != null && POSITIVE_ACTIONS.has(action)) return true;
   return false;
@@ -160,9 +164,10 @@ function formatAlert(
   const ts = showAction ? (score?.trade_setup ?? null) : null;
 
   const isPhoenixAlert = sig.signal_type === "phoenix_near_limit";
-  const emoji = isPhoenixAlert ? "🦅" : isLimit ? "📉" : showAction ? "\u{1F680}" : "\u{1F4CC}";
-  const priority = isPhoenixAlert ? 5 : isLimit ? 5 : showAction && action === "STRONG_BUY" ? 5 : 4;
-  const tags = isPhoenixAlert ? ["eagle", "chart_with_downwards_trend"] : isLimit ? ["chart_with_downwards_trend"] : ["rocket"];
+  const isZwitserlevenAlert = sig.signal_type === "zwitserleven_laag";
+  const emoji = isPhoenixAlert ? "🦅" : isZwitserlevenAlert ? "🌴" : isLimit ? "📉" : showAction ? "\u{1F680}" : "\u{1F4CC}";
+  const priority = isPhoenixAlert || isZwitserlevenAlert ? 5 : isLimit ? 5 : showAction && action === "STRONG_BUY" ? 5 : 4;
+  const tags = isPhoenixAlert ? ["eagle", "chart_with_downwards_trend"] : isZwitserlevenAlert ? ["palm_tree", "moneybag"] : isLimit ? ["chart_with_downwards_trend"] : ["rocket"];
 
   // Verwijder leading ticker uit de signaaltitel om dubbele ticker in header te voorkomen
   const cleanSigTitle = safeTitleBase
