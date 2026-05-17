@@ -1,4 +1,4 @@
-// xinix-sim-results — rankings + lerende inzichten voor de 100-strategie simulatie.
+// xinix-sim-results — rankings + lerende inzichten voor de 200-strategie simulatie.
 // Geeft per strategie: rang, rendement, win-rate, medaille, generatie, bescherming.
 // Geeft per configuratie-dimensie: welke waarde correleert met betere resultaten.
 // Geeft evolutie-info: cycli, laatste cull, volgende verwachte cyclus, gepensioneerden.
@@ -68,14 +68,20 @@ Deno.serve(async (req) => {
     type OpenDetail = { ticker: string; entry_signal_types: string[]; entry_sector: string | null; entry_date: string; entry_reason: string };
     type ClosedDetail = OpenDetail & { return_pct: number; closed_at: string; closed_reason: string };
 
-    const openVal = new Map<number, { val: number; cnt: number }>();
+    // TX_COST per CLAUDE.md spec — gebruikt om de echte cost basis te bepalen
+    // i.p.v. een schatting (initial / maxPos).
+    const TX_COST = 0.001;
+    const openVal = new Map<number, { val: number; cnt: number; cost: number }>();
     const openDetailMap = new Map<number, OpenDetail[]>();
     for (const p of (openRes.data ?? [])) {
       const sid = p.strategy_id as number;
-      const px = priceMap.get(p.ticker as string) ?? Number(p.avg_price);
-      const mv = Number(p.qty) * px;
-      const cur = openVal.get(sid) ?? { val: 0, cnt: 0 };
-      cur.val += mv; cur.cnt++;
+      const qty = Number(p.qty);
+      const avg = Number(p.avg_price);
+      const px = priceMap.get(p.ticker as string) ?? avg;
+      const mv = qty * px;
+      const cost = qty * avg * (1 + TX_COST);
+      const cur = openVal.get(sid) ?? { val: 0, cnt: 0, cost: 0 };
+      cur.val += mv; cur.cnt++; cur.cost += cost;
       openVal.set(sid, cur);
       const d = openDetailMap.get(sid) ?? [];
       d.push({
@@ -133,11 +139,13 @@ Deno.serve(async (req) => {
       const ov = openVal.get(sid);
       const posVal = ov?.val ?? 0;
       const openCnt = ov?.cnt ?? 0;
+      const openCost = ov?.cost ?? 0;
       const totalEquity = cash + posVal;
       const totalReturnUsd = totalEquity - initial;
       const totalReturnPct = initial > 0 ? (totalReturnUsd / initial) * 100 : 0;
       const a = agg.get(sid) ?? { realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0 };
-      const unrealizedUsd = posVal - (openCnt * (initial / Math.max(1, (strat.config as Record<string, unknown>).maxPos as number)));
+      // Marktwaarde open posities − werkelijke aankoopkost (incl. transactiekosten).
+      const unrealizedUsd = posVal - openCost;
       results.push({
         id: sid, slug: strat.slug as string, name: strat.name as string,
         grp: strat.grp as string, config: strat.config as Record<string, unknown>,

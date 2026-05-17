@@ -1,4 +1,4 @@
-// xinix-evolve-background — survival-of-the-fittest voor de 100-strategie simulatie.
+// xinix-evolve-background — survival-of-the-fittest voor de 200-strategie simulatie.
 //
 // v4 — niche-diversiteit via spawn-sturing (geen fitness-penalty):
 //   Als een nakomelingniche al vol zit (>NICHE_MAX strategieën met dezelfde
