@@ -617,6 +617,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
           "● Scan 1× — start één batch van 40 tickers uit het INDEX_UNIVERSE die het langst geleden gescand zijn (of nog nooit). Wacht ~2 min en ververs.\n● Auto-scan 20× — start automatisch 20 batches achter elkaar (≈800 ticker-scans). Aangezien het universum ~300 large-caps is, kun je dus de volledige set in ≤8 batches doorlopen. Tussendoor zie je 'X/20 · +N gevonden'. Klik 'Stop' om vroegtijdig af te breken.\nTickers die in de laatste 90 dagen al gescand zijn worden overgeslagen (anders herhaal je werk). De 'Nog te scannen'-teller geeft aan hoeveel index-leden er nog niet gescand zijn.\nVereist admin-token in de topbalk.",
       },
       {
+        id: "zw-sanity",
+        title: "Sanity-checks — waarom waarschijnlijk-fout-data wordt uitgesloten",
+        body:
+          "Yahoo Finance markeert soms eenmalige uitkeringen (special distributions, return of capital, delisting-paybacks) als gewone dividenden. Daardoor kan TTM ineens 100%+ aangeven terwijl het bedrijf in werkelijkheid 2% dividend uitkeert. Voorbeeld: CRH.L gaf 128% door een return of value bij de NYSE-verhuizing.\nTwee extra filters voorkomen dat zulke ruis als 'voldoet' wordt gemarkeerd:\n● TTM-yield ≤ 30%. Boven 30% is bijna altijd een special distribution of currency-fout in Yahoo's data. Reguliere large-cap dividenden zitten zelden boven 15%.\n● Minstens 1 van de laatste 3 kalenderjaren moet een echte dividenduitkering hebben gehad. Een aandeel met een hoog TTM maar 0 historie (zoals CURI: 16,7% TTM, niks in Y-1..Y-5) is een eenmalige flits, geen 'Zwitserleven'. Dividend-zekerheid kan alleen bestaan als er historie is.\nDeze entries verschijnen wel onder filter 'Alle gescand' maar krijgen géén ✓ en zitten niet in 'Voldoet aan criteria'.",
+      },
+      {
         id: "zw-vindtniks",
         title: "Auto-scan vindt niks — wat nu?",
         body:

@@ -105,10 +105,12 @@ const AEX: string[] = [
   "REL.AS","SHELL.AS","UMG.AS","UNA.AS","WKL.AS",
 ];
 // FTSE 100 (UK) — Yahoo suffix .L
+// LET OP: CRH.L verwijderd — CRH plc verhuisde primaire notering naar NYSE in 2023.
+// CRH zit nu in DJIA. CRH.L heeft stale Yahoo data (return of capital als dividend → 128%).
 const FTSE_100: string[] = [
   "AAL.L","ABF.L","ADM.L","AHT.L","ANTO.L","AUTO.L","AV.L","AZN.L","BA.L","BARC.L",
   "BATS.L","BDEV.L","BEZ.L","BKG.L","BME.L","BNZL.L","BP.L","BRBY.L","BT-A.L","CCH.L",
-  "CNA.L","CPG.L","CRDA.L","CRH.L","CTEC.L","DCC.L","DGE.L","DPLM.L","EDV.L","ENT.L",
+  "CNA.L","CPG.L","CRDA.L","CTEC.L","DCC.L","DGE.L","DPLM.L","EDV.L","ENT.L",
   "EXPN.L","EZJ.L","FCIT.L","FRAS.L","FRES.L","GLEN.L","GSK.L","HIK.L","HL.L","HLN.L",
   "HSBA.L","HSX.L","HWDN.L","IAG.L","ICG.L","IHG.L","III.L","IMB.L","IMI.L","INF.L",
   "ITRK.L","JD.L","KGF.L","LAND.L","LGEN.L","LLOY.L","LMP.L","LSEG.L","MNDI.L","MNG.L",
@@ -279,11 +281,23 @@ function computeRiskLabel(cuts: number, payoutRatio: number | null, years5pct: n
   return "Laag"; // cuts=0, pr≤0.70 of onbekend, years5pct≥2
 }
 
+// Sanity-cap: yield > MAX_TRUSTED_YIELD_PCT is bijna altijd een special distribution,
+// return-of-capital, of currency-mismatch in Yahoo's dividend feed (zoals CRH.L 128%).
+// Reguliere dividenden van large-caps zitten zelden boven 15%, ~20% is al uitzonderlijk.
+const MAX_TRUSTED_YIELD_PCT = 30;
+// Historie-eis: dividend-zekerheid kan alleen als er ECHTE historie is.
+// CURI met 16.7% TTM maar 0 dividenden in 2021-2025 = eenmalige flits, geen Zwitserleven.
+const MIN_RECENT_YEARS_WITH_DIV = 1;
+
 function checkMeetsCriteria(m: Metrics): boolean {
   if (m.dividendYieldPct < MIN_YIELD_PCT) return false;
+  if (m.dividendYieldPct > MAX_TRUSTED_YIELD_PCT) return false;
   if (m.pctUnder5yHigh < MIN_UNDER_5Y_HIGH_PCT) return false;
   if (m.maxAnnualGain5y == null || m.maxAnnualGain5y < MIN_MAX_ANNUAL_GAIN) return false;
   if (m.years5pctGrowth < MIN_YEARS_5PCT) return false;
+  // Minstens N van de laatste 3 kalenderjaren moet een echte dividenduitkering bevatten.
+  const recentYearsWithDiv = m.divYieldByYear.slice(0, 3).filter((v) => v != null && v > 0).length;
+  if (recentYearsWithDiv < MIN_RECENT_YEARS_WITH_DIV) return false;
   return true;
 }
 
