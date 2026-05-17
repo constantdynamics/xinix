@@ -710,7 +710,7 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
   candidates.sort((a, b) => b.score - a.score);
   const fallbacks = [
     `Behoort tot groep "${groupLabel(s.grp)}" — geoptimaliseerd voor die specifieke configuratie-dimensie.`,
-    "Gebalanceerde combinatie van parameters, zonder extreme uitschieters t.o.v. het gemiddelde van de 100 strategieën.",
+    "Gebalanceerde combinatie van parameters, zonder extreme uitschieters t.o.v. het gemiddelde van de 200 strategieën.",
     `${s.protected ? "Beschermde" : "Cullbare"} ${s.generation > 1 ? `Gen-${s.generation}` : "originele"} strategie met solide parameterruimte.`,
   ];
   while (candidates.length < 3) {
@@ -1520,7 +1520,7 @@ function KnowledgeExportSection({ isAdmin }: { isAdmin: boolean }) {
         </div>
 
         <p className="text-xs text-neutral-400 leading-relaxed mb-3">
-          Elke <strong className="text-neutral-200">1e van de maand</strong> wordt automatisch een volledige snapshot opgeslagen: alle 100 strategieën met hun config + performance, de volledige watchlist met buy-limieten en medailles, alle gesloten posities uitgesplitst per signaaltype + sector, en configuratie-inzichten.
+          Elke <strong className="text-neutral-200">1e van de maand</strong> wordt automatisch een volledige snapshot opgeslagen: alle 200 strategieën met hun config + performance, de volledige watchlist met buy-limieten en medailles, alle gesloten posities uitgesplitst per signaaltype + sector, en configuratie-inzichten.
           Op de <strong className="text-neutral-200">25e</strong> ontvang je een herinnering om de stand ook handmatig door te nemen.
         </p>
 

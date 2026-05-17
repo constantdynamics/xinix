@@ -33,7 +33,7 @@ Er zijn twee gesimuleerde portefeuilles:
         │
         ▼ dagelijks 22:05 UTC (na US close)
 xinix-trade-background     → beheert single paper portfolio
-xinix-sim-background       → beheert 100+ strategieën parallel
+xinix-sim-background       → beheert 200 strategieën parallel
         │
         ▼ wekelijks (evolutie)
 xinix-evolve               → pensioneer onderste 5% → muteer top 5% → nieuwe Gen
@@ -195,7 +195,7 @@ Eén gecureerde portefeuille die altijd:
 3. Deploy: `supabase functions deploy xinix-trade-background --project-ref zfcjugqgufsyltxhvkuu`
 
 ### Kennisexport handmatig triggeren
-Via het dashboard: 100 Strategieën → Evolutie → Kennis-export → "Export nu"
+Via het dashboard: 200 Strategieën → Evolutie → Kennis-export → "Export nu"
 Of via curl:
 ```bash
 curl -X POST https://zfcjugqgufsyltxhvkuu.supabase.co/functions/v1/xinix-knowledge-export \

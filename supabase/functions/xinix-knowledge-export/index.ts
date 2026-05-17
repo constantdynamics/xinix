@@ -1,7 +1,7 @@
 // xinix-knowledge-export — Maandelijkse kenniscumulatie-snapshot
 //
 // Compileert een volledig beeld van:
-//   - Alle 100 strategieën (config + performance + generatie-historie)
+//   - Alle 200 strategieën (config + performance + generatie-historie)
 //   - Gepensioneerde strategieën
 //   - Alle gesloten posities (uitgesplitst per signaal + sector)
 //   - Huidige open posities
@@ -264,7 +264,7 @@ function buildKennisbasis(data: Record<string, unknown>, now: Date, exportId: nu
   lines.push("");
 
   lines.push("---");
-  lines.push(`_Volledig JSON-archief: dashboard → 100 Strategieën → Evolutie → Kennis-export_`);
+  lines.push(`_Volledig JSON-archief: dashboard → 200 Strategieën → Evolutie → Kennis-export_`);
 
   return lines.join("\n");
 }
@@ -344,7 +344,7 @@ function buildSummary(data: Record<string, unknown>, now: Date): string {
   lines.push("");
 
   lines.push("---");
-  lines.push("Download de volledige JSON via het dashboard > 100 Strategieën > Evolutie > Kennis-export.");
+  lines.push("Download de volledige JSON via het dashboard > 200 Strategieën > Evolutie > Kennis-export.");
 
   return lines.join("\n");
 }

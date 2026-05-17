@@ -1,4 +1,4 @@
-// xinix-sim-background — simuleert 100+ fundamenteel verschillende handelsstrategieën
+// xinix-sim-background — simuleert 200 fundamenteel verschillende handelsstrategieën
 // op hetzelfde universum (watchlist + real price data). Elke strategie beheert een
 // eigen papieren portefeuille van $10.000. Dagelijks draaien na US close (22:00 UTC).
 //
@@ -6,7 +6,7 @@
 //   min_score, require_red, sector, max_pos, pos_size, hold_days,
 //   stop_loss, take_profit, limit_buf, min_gold, trailing_stop, opportunity_replace
 //
-// Gegroepeerd in 14 groepen (A–N) zodat per dimensie lessen getrokken kunnen worden.
+// Gegroepeerd in 23 groepen (A–W) zodat per dimensie lessen getrokken kunnen worden.
 //
 // Marktconforme transactiekosten: 0,1% per transactie (koop én verkoop).
 // Slimme exits:
@@ -46,7 +46,7 @@ interface Cfg {
   opportunityReplace: boolean; // vervang slechtste positie voor significant betere kans
 }
 
-// ── 100 + 6 strategieën ───────────────────────────────────────────────────────
+// ── 200 strategieën (B = basisprofiel, gebruikt als basis voor c()) ─────────
 const B: Cfg = {
   slug:"s65", name:"Score ≥65 (basis)", grp:"A-Score",
   minScore:65, redReq:false, sector:"all", maxPos:8, posSize:1200,

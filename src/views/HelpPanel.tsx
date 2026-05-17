@@ -450,7 +450,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
 
   xinix: {
     intro:
-      "De lerende gesimuleerde belegger Xinix. Dit tabblad toont twee dingen: de 'Basisportefeuille' (één papieren portefeuille van $10.000 met vaste parameters) en de '100 Strategieën' (106 parallelle papieren portefeuilles die allemaal andere parameters testen).",
+      "De lerende gesimuleerde belegger Xinix. Dit tabblad toont twee dingen: de 'Basisportefeuille' (één papieren portefeuille van $10.000 met vaste parameters) en de '200 Strategieën' (200 parallelle papieren portefeuilles die allemaal andere parameters testen).",
     blocks: [
       {
         id: "xi-tabs",

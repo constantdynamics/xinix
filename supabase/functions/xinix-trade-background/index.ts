@@ -102,7 +102,9 @@ async function run(): Promise<RunResult> {
   const ENTRY_MIN_SCORE       = Number(_cfg.entry_min_score      ?? 65);
   const ENTRY_LIMIT_BUFFER    = Number(_cfg.entry_limit_buffer   ?? 0.10);
   const SIGNAL_DECAY_LOSS_PCT = Number(_cfg.signal_decay_loss_pct ?? -3);
-  const SIGNAL_DECAY_MIN_DAYS = Number(_cfg.signal_decay_min_days ?? 20);
+  // Per CLAUDE.md spec: held ≥ max(14d, holdDays × 0.33). Schaalt automatisch mee
+  // met HOLD_DAYS zodat korte/lange holds dezelfde verhouding krijgen.
+  const SIGNAL_DECAY_MIN_DAYS = Math.max(14, Math.round(HOLD_DAYS * 0.33));
 
   // 1b) State + open posities + marktdata ophalen.
   const [stateRes, posRes, summaryRes, tickersRes, signalsRes, regimeRes, stratPosRes] = await Promise.all([

@@ -117,12 +117,15 @@ Deno.serve(async (req) => {
     }
 
     const now = Date.now();
+    // TX_COST per CLAUDE.md spec — cost basis includes the 0,1% transactiekost
+    // die bij entry is betaald (cash -= qty × prijs × (1 + TX_COST)).
+    const TX_COST = 0.001;
     const openPositions: OpenPosition[] = (openRes.data ?? []).map((p: Record<string, unknown>) => {
       const ticker = p.ticker as string;
       const qty = Number(p.qty);
       const avg = Number(p.avg_price);
       const cur = priceByTicker.get(ticker) ?? null;
-      const cost = qty * avg;
+      const cost = qty * avg * (1 + TX_COST);
       const mv = cur != null ? qty * cur : null;
       const unUsd = mv != null ? mv - cost : null;
       const unPct = mv != null && cost > 0 ? (unUsd! / cost) * 100 : null;
