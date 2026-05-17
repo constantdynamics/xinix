@@ -326,12 +326,14 @@ export interface ZwitserlevenStock {
   div_yield_y3: number | null;
   div_yield_y4: number | null;
   div_yield_y5: number | null;
+  is_manual: boolean | null;
 }
 
 export interface ZwitserlevenResults {
   stocks: ZwitserlevenStock[];
   total_scanned: number;
   meets_criteria_count: number;
+  manual_count?: number;
   unscanned_count: number;
 }
 
@@ -339,6 +341,20 @@ export async function fetchZwitserlevenResults(): Promise<ZwitserlevenResults> {
   const res = await fetch(apiUrl("/api/zwitserleven-results"));
   if (!res.ok) throw new Error(`zwitserleven-results ${res.status}`);
   return (await res.json()) as ZwitserlevenResults;
+}
+
+// Handmatig toevoegen + force-scan van één ticker.
+// Vereist admin-token. Voegt ticker toe aan watchlist als hij nog niet bestaat.
+export async function addZwitserlevenManual(ticker: string): Promise<{ ok: boolean; message?: string }> {
+  const t = ticker.trim().toUpperCase();
+  if (!t) throw new Error("Ticker vereist");
+  const res = await fetch(
+    apiUrl(`/api/compute-zwitserleven-background?ticker=${encodeURIComponent(t)}&manual=1`),
+    { method: "POST", headers: authHeaders() }
+  );
+  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+  if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
+  return { ok: json.ok === true, message: json.message };
 }
 
 // ── Xinix paper portfolio ──

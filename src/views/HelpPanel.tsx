@@ -560,6 +560,77 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
   },
 
+  zwitserleven: {
+    intro:
+      "🌴 Zwitserleven = 'fallen angels met dividendzekerheid'. De scan zoekt aandelen die fors gezakt zijn van hun 5-jaars-top, maar wél een gezond dividend uitkeren én historisch bewezen herstelvermogen hebben. Doel: een rustige inkomstenstroom uit aandelen waar 'het lijf nog wel zit, maar de koers tijdelijk uit de gratie is'.",
+    blocks: [
+      {
+        id: "zw-criteria",
+        title: "De vier criteria — wat is een 'Zwitserleven'?",
+        body:
+          "Een aandeel voldoet aan ALLE vier de criteria:\n● Div % bruto (TTM) ≥ 6,5% — over de afgelopen 12 maanden moet het totale dividend minstens 6,5% van de huidige koers zijn.\n● Val v 5j% ≥ 50% — de huidige koers staat ten minste 50% onder de hoogste slotkoers van de laatste 5 jaar.\n● Max jaar + ≥ 25% — minstens één keer in de laatste 5 jaar heeft het aandeel binnen één kalenderjaar ≥25% gestegen (bewijs dat herstel mogelijk is).\n● Groeijaren ≥ 2 — in minstens 2 van de laatste 5 jaar heeft de koers ≥5% gestegen (geen pure dalende lijn).",
+        example:
+          "BMY met TTM-dividend van 7%, koers 55% onder 5j-hoog, één gelukkig jaar +30% in 2021, en 3 positieve jaren totaal = ✓ Zwitserleven.",
+      },
+      {
+        id: "zw-tabel-kolommen",
+        title: "Kolommen in de tabel — wat betekent elke?",
+        body:
+          "● Ticker / Naam — het beurssymbool en de bedrijfsnaam. Klik = Google Finance.\n● Beurs / Land — waar het aandeel genoteerd staat. Belangrijk voor bronbelasting.\n● Sector — Biotech / Mining / Overig.\n● Koers — laatste slotkoers van Yahoo Finance.\n● Div % bruto — TTM dividend ÷ huidige koers, vóór belasting.\n● Bronbel % — geschatte dividendbelasting (zie eigen blok hieronder).\n● Div % netto — wat je daadwerkelijk overhoudt na bronbelasting (bruto × (1 − bronbel)).\n● Val v 5j% — hoeveel procent de koers onder zijn 5-jaars-top staat.\n● Max jaar + — beste kalenderjaar-rendement in de afgelopen 5 jaar (bewijs van herstelvermogen).\n● Groeijr — aantal van de laatste 5 jaar met ≥5% koersstijging.\n● Div Y-1 t/m Y-5 — dividendrendement per kalenderjaar (zie eigen blok).\n● Payout — payout ratio (dividend ÷ winst). >85% = risico, >100% = duurzaamheid twijfelachtig.\n● Cuts — hoeveel keer in de afgelopen 5 jaar is het jaardividend met >10% verlaagd. 0 = stabiel.\n● Risico — Laag / Matig / Hoog / Zeer hoog samengevat uit cuts + payout + groeijaren.\n● ✓ — voldoet aan alle vier criteria.",
+      },
+      {
+        id: "zw-bronbelasting",
+        title: "Bronbelasting (Bronbel %) en netto dividend",
+        body:
+          "Het 'bruto' dividendrendement is wat het bedrijf uitkeert. Voor jou als NL-particulier wordt er vooraf bronbelasting ingehouden — dat percentage verschilt per land en per belastingverdrag.\nVoorbeelden (indicatief, NL-particulier):\n● VS (United States): 15% (W-8BEN/W-9 ingevuld via je broker).\n● Verenigd Koninkrijk: 0% (geen bronheffing).\n● Nederland: 15%, verrekenbaar in box 3.\n● Zwitserland: 35% nominaal — 20% terugvorderbaar via verdrag, eindheffing 15%.\n● Duitsland: 26,375% — verdrag cap 15%, deels terug te vragen (papierwerk vereist).\n'Div % netto' is een snelle schatting: bruto × (1 − bronbel). Dit is GEEN belastingadvies — het is een ruwe vergelijkingshulp. Het werkelijke nettorendement hangt af van je broker, verrekening in box 3, en of je terugvorderingsprocedures gebruikt.\nDe kolom toont '—' als het land onbekend is of niet in onze schatting-tabel staat.",
+      },
+      {
+        id: "zw-jaarkolommen",
+        title: "Div Y-1 t/m Y-5 — waarom soms leeg?",
+        body:
+          "Deze kolommen tonen het dividendrendement per kalenderjaar in de afgelopen 5 jaar. De berekening: alle dividenduitkeringen in dat jaar bij elkaar opgeteld, gedeeld door de slotkoers van het einde van dat jaar.\nLeeg ('—') betekent: in dat kalenderjaar zijn er GÉÉN dividenden uitgekeerd door dit bedrijf.\nWaarom staat het aandeel dan toch in de tabel? Omdat het TTM-dividend (laatste 12 maanden, gerold) wél hoog genoeg is. Een aandeel dat pas dit jaar dividend is gaan uitkeren (of na een schorsing weer is begonnen) kan ineens een hoog TTM laten zien terwijl de jaarkolommen leeg blijven.\nLet hier extra op: weinig dividendhistorie = minder voorspelbaar. Combineer altijd met de 'Cuts' en 'Payout' kolommen.",
+        example:
+          "CURI met 16,7% TTM-dividend maar Div Y-1 t/m Y-5 allemaal '—' = CURI is recent met een grote dividenduitkering begonnen. Hoge yield kan een eenmalige speciale uitkering zijn — onderzoek dit voor je koopt.",
+      },
+      {
+        id: "zw-risico-label",
+        title: "Risico — hoe wordt 'Laag' / 'Matig' / 'Hoog' bepaald?",
+        body:
+          "Het risico-label is een snelle samenvatting van dividendzekerheid:\n● Zeer hoog: meer dan 2 dividendkortingen in 5 jaar, of payout >100% (keert meer uit dan winst — onhoudbaar).\n● Hoog: 2 cuts, of payout >85%.\n● Matig: 1 cut, of payout >70%, of minder dan 2 groeijaren.\n● Laag: 0 cuts, payout ≤70% (of onbekend), én ≥2 groeijaren.\nHET label gaat alleen over dividend-duurzaamheid, NIET over koersrisico. Een 'Laag risico'-aandeel kan nog steeds 30% verder dalen.",
+      },
+      {
+        id: "zw-filters",
+        title: "Filterknoppen bovenaan",
+        body:
+          "● Voldoet aan criteria + handmatig — alleen aandelen die aan alle 4 criteria voldoen, plus alles wat je handmatig hebt toegevoegd.\n● Bijna (yield ≥4% + val ≥30%) — aandelen die er nét niet bij horen maar interessant kunnen zijn om in de gaten te houden.\n● Alle gescand (met dividend) — elk gescand aandeel dat überhaupt dividend uitkeert.",
+      },
+      {
+        id: "zw-scan-knoppen",
+        title: "Scan-knoppen — wat doet 'Scan 1×' en 'Auto-scan 20×'?",
+        body:
+          "● Scan 1× — start één batch van 40 tickers die het langst geleden gescand zijn (of nog nooit). Wacht ~2 min en ververs.\n● Auto-scan 20× — start automatisch 20 batches achter elkaar (≈800 tickers, ~2 minuten). Handig om de hele watchlist in één keer door te lopen na een lange pauze. Tussendoor zie je 'X/20 · +N gevonden'. Klik 'Stop' om vroegtijdig af te breken.\nElke scan is een batch van 40 tickers. Tickers die in de laatste 90 dagen al gescand zijn worden overgeslagen (anders herhaal je werk).\nVereist admin-token in de topbalk.",
+      },
+      {
+        id: "zw-handmatig",
+        title: "Handmatig toevoegen — wat doet dat precies?",
+        body:
+          "Vul een ticker in (bv. 'KO' voor Coca-Cola) en druk op '+ Toevoegen & scannen'. Het systeem:\n1. Voegt de ticker toe aan je watchlist als hij nog niet bestaat (active=true).\n2. Doet direct een force-scan op die ene ticker (bypass de 90-dagen herscan-regel).\n3. Markeert hem als 'handmatig' (badge 'handm.' bij de ticker).\nHandmatig-toegevoegde aandelen blijven zichtbaar onder het filter 'Voldoet aan criteria + handmatig', ook als ze niet aan de Zwitserleven-criteria voldoen. Zo kun je een eigen lijstje bouwen om te tracken.\nVereist admin-token.",
+      },
+      {
+        id: "zw-kolommen-verbergen",
+        title: "Kolommen verbergen",
+        body:
+          "Klik rechtsboven op 'Kolommen (X/Y)' om een lijst met checkboxes te krijgen. Vink kolommen uit om ze te verbergen. Je voorkeur wordt opgeslagen in de browser (per device). Klik 'Reset' voor de standaard-set.",
+      },
+      {
+        id: "zw-notificaties",
+        title: "Notificaties — wanneer krijg je een melding?",
+        body:
+          "Zodra een NIEUW aandeel voor het eerst aan alle criteria voldoet ÉN risico='Laag' krijgt, wordt er één keer een 🌴 ntfy/email-notificatie verstuurd. Bij volgende 90-daagse herscans van hetzelfde aandeel wordt er géén dubbele melding gestuurd, tenzij het van risiconiveau verandert en weer terugkeert naar Laag.",
+      },
+    ],
+  },
+
   settings: {
     intro: "Hier stel je in waar en wanneer je notificaties krijgt, en welke aandelen wél een melding waard zijn.",
     blocks: [
