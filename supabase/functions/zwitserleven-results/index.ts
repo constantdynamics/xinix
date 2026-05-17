@@ -28,10 +28,10 @@ const INDEX_UNIVERSE: string[] = [...new Set([
   "ADYEN.AS","AGN.AS","AD.AS","AKZA.AS","MT.AS","ASML.AS","ASM.AS","ASRNL.AS","BESI.AS","DSFIR.AS",
   "EXO.AS","GLPG.AS","HEIA.AS","IMCD.AS","INGA.AS","KPN.AS","NN.AS","PHIA.AS","PRX.AS","RAND.AS",
   "REL.AS","SHELL.AS","UMG.AS","UNA.AS","WKL.AS",
-  // FTSE 100 (≈100)
+  // FTSE 100 (≈100) — CRH.L verwijderd (delisted 2023, stale Yahoo data)
   "AAL.L","ABF.L","ADM.L","AHT.L","ANTO.L","AUTO.L","AV.L","BARC.L",
   "BATS.L","BDEV.L","BEZ.L","BKG.L","BME.L","BNZL.L","BP.L","BRBY.L","BT-A.L","CCH.L",
-  "CNA.L","CPG.L","CRDA.L","CRH.L","CTEC.L","DCC.L","DGE.L","DPLM.L","EDV.L","ENT.L",
+  "CNA.L","CPG.L","CRDA.L","CTEC.L","DCC.L","DGE.L","DPLM.L","EDV.L","ENT.L",
   "EXPN.L","EZJ.L","FCIT.L","FRAS.L","FRES.L","GLEN.L","GSK.L","HIK.L","HL.L","HLN.L",
   "HSBA.L","HSX.L","HWDN.L","IAG.L","ICG.L","IHG.L","III.L","IMB.L","IMI.L","INF.L",
   "ITRK.L","JD.L","KGF.L","LAND.L","LGEN.L","LLOY.L","LMP.L","LSEG.L","MNDI.L","MNG.L",
