@@ -373,6 +373,31 @@ export async function removeZwitserlevenStock(ticker: string): Promise<{ ok: boo
   return { ok: json.ok === true, message: json.message };
 }
 
+// ── UI settings (tab-aanpassingen) ───────────────────────────────────────────
+export interface UiSettings {
+  id: number;
+  tab_order: string[];
+  tab_labels: Record<string, string>;
+  tab_hidden: string[];
+  updated_at: string;
+}
+
+export async function fetchUiSettings(): Promise<UiSettings> {
+  const res = await fetch(apiUrl("/api/ui-settings"));
+  if (!res.ok) throw new Error(`ui-settings ${res.status}`);
+  return (await res.json()) as UiSettings;
+}
+
+export async function saveUiSettings(s: Partial<UiSettings>): Promise<UiSettings> {
+  const res = await fetch(apiUrl("/api/ui-settings"), {
+    method: "POST",
+    headers: { ...authHeaders(), "content-type": "application/json" },
+    body: JSON.stringify(s),
+  });
+  if (!res.ok) throw new Error(`ui-settings save ${res.status}: ${await res.text()}`);
+  return (await res.json()) as UiSettings;
+}
+
 // ── Xinix paper portfolio ──
 export interface XinixOpenPosition {
   id: number;

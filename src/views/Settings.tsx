@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { fetchSettings, saveSettings, unbenchAll } from "../api";
+import { fetchSettings, fetchUiSettings, saveSettings, saveUiSettings, unbenchAll, getToken } from "../api";
+import { DEFAULT_TABS, type Tab, type TabDef } from "../tabsConfig";
 import type { Settings, Severity, Dashboard } from "../types";
 import {
   loadTilePrefs,
@@ -199,6 +200,8 @@ export function SettingsView({ data }: { data?: Dashboard }) {
       </Card>
 
       <TilePrefsCard />
+
+      <TabsCustomizerCard />
 
       {data?.poll_status && <ScanRulesCard data={data} />}
     </div>
@@ -481,5 +484,178 @@ function SeveritySelect({
       <option value="orange">oranje en hoger</option>
       <option value="red">alleen rood</option>
     </Select>
+  );
+}
+
+// ── Tabs aanpassen ──────────────────────────────────────────────────────────
+// Hernoemen, verbergen, en drag-and-drop volgorde. Sync over devices via DB.
+function TabsCustomizerCard() {
+  const [order, setOrder] = useState<Tab[]>(DEFAULT_TABS.map((t) => t.key));
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [hidden, setHidden] = useState<Set<Tab>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [dragKey, setDragKey] = useState<Tab | null>(null);
+
+  useEffect(() => {
+    fetchUiSettings()
+      .then((s) => {
+        const validOrder = (s.tab_order ?? []).filter((k): k is Tab => DEFAULT_TABS.some((t) => t.key === k));
+        const missing = DEFAULT_TABS.map((t) => t.key).filter((k) => !validOrder.includes(k));
+        setOrder([...validOrder, ...missing]);
+        setLabels(s.tab_labels ?? {});
+        setHidden(new Set((s.tab_hidden ?? []).filter((k): k is Tab => DEFAULT_TABS.some((t) => t.key === k))));
+      })
+      .catch(() => { /* fallback defaults */ })
+      .finally(() => setLoading(false));
+  }, []);
+
+  function defaultLabel(key: Tab): string {
+    return DEFAULT_TABS.find((t) => t.key === key)?.label ?? key;
+  }
+
+  function toggleHidden(key: Tab) {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function updateLabel(key: Tab, value: string) {
+    setLabels((prev) => {
+      const next = { ...prev };
+      if (value === defaultLabel(key) || value.trim() === "") delete next[key];
+      else next[key] = value;
+      return next;
+    });
+  }
+
+  function onDragStart(key: Tab) {
+    setDragKey(key);
+  }
+  function onDragOver(e: React.DragEvent, overKey: Tab) {
+    if (!dragKey || dragKey === overKey) return;
+    e.preventDefault();
+    setOrder((prev) => {
+      const next = [...prev];
+      const from = next.indexOf(dragKey);
+      const to = next.indexOf(overKey);
+      if (from < 0 || to < 0) return prev;
+      next.splice(from, 1);
+      next.splice(to, 0, dragKey);
+      return next;
+    });
+  }
+  function onDragEnd() {
+    setDragKey(null);
+  }
+
+  async function save() {
+    if (!getToken()) {
+      setMsg("Admin-token nodig om op te slaan.");
+      return;
+    }
+    setSaving(true);
+    setMsg(null);
+    try {
+      await saveUiSettings({
+        tab_order: order,
+        tab_labels: labels,
+        tab_hidden: [...hidden],
+      });
+      setMsg("Opgeslagen — andere devices zien het bij hun volgende refresh.");
+      window.dispatchEvent(new Event("xinix-ui-settings-updated"));
+    } catch (e) {
+      setMsg(`Fout: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function reset() {
+    if (!confirm("Alle tabaanpassingen herstellen naar de standaard?")) return;
+    setOrder(DEFAULT_TABS.map((t) => t.key));
+    setLabels({});
+    setHidden(new Set());
+  }
+
+  return (
+    <>
+      <SectionHeader
+        eyebrow="UI"
+        title="Tabs aanpassen"
+        subtitle="Volgorde slepen, namen hernoemen, of tabs verbergen. Synchroniseert over devices (DB-opslag). Verborgen tabs blijven bereikbaar via de '+ verborgen'-knop in de tabbalk."
+      />
+      <Card className="p-4 space-y-3">
+        {loading ? (
+          <div className="text-sm text-neutral-500">Laden…</div>
+        ) : (
+          <>
+            <div className="space-y-1">
+              {order.map((key) => {
+                const isHidden = hidden.has(key);
+                const isDragging = dragKey === key;
+                return (
+                  <div
+                    key={key}
+                    draggable
+                    onDragStart={() => onDragStart(key)}
+                    onDragOver={(e) => onDragOver(e, key)}
+                    onDragEnd={onDragEnd}
+                    onDrop={(e) => e.preventDefault()}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded border transition-colors ${
+                      isDragging
+                        ? "border-emerald-500 bg-emerald-500/10 opacity-50"
+                        : isHidden
+                        ? "border-ink-5 bg-ink-2/30 opacity-60"
+                        : "border-ink-5 bg-ink-2/40 hover:border-ink-5/80"
+                    }`}
+                  >
+                    <span className="cursor-grab text-neutral-500 select-none px-1" title="Slepen om te verplaatsen">⋮⋮</span>
+                    <span className="text-[10px] text-neutral-600 font-mono w-24 truncate" title={key}>{key}</span>
+                    <Input
+                      type="text"
+                      value={labels[key] ?? defaultLabel(key)}
+                      onChange={(e) => updateLabel(key, e.target.value)}
+                      placeholder={defaultLabel(key)}
+                      className="flex-1 text-sm"
+                    />
+                    <label className="flex items-center gap-1 text-xs text-neutral-400 cursor-pointer select-none whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={!isHidden}
+                        onChange={() => toggleHidden(key)}
+                        className="accent-emerald-500"
+                      />
+                      Zichtbaar
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-ink-5">
+              <Button onClick={save} disabled={saving}>
+                {saving ? "Opslaan…" : "Opslaan"}
+              </Button>
+              <Button onClick={reset} variant="secondary" disabled={saving}>
+                Reset naar standaard
+              </Button>
+              {msg && (
+                <span className={`text-xs ${msg.startsWith("Fout") || msg.startsWith("Admin") ? "text-fog-loss" : "text-fog-lime"}`}>
+                  {msg}
+                </span>
+              )}
+              <span className="ml-auto text-[11px] text-neutral-500">
+                {hidden.size > 0 ? `${hidden.size} verborgen` : "Alle tabs zichtbaar"}
+              </span>
+            </div>
+          </>
+        )}
+      </Card>
+    </>
   );
 }
