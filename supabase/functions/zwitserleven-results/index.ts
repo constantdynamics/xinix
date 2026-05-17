@@ -1,7 +1,53 @@
 // zwitserleven-results — geeft Zwitserleven-scan resultaten terug aan de frontend.
 // Retourneert: alle gescande stocks + statistieken (client-side filteren/sorteren).
+//
+// Universum-grootte wordt hier hardcoded zodat we niet bij elke read de full
+// lijst over de wire hoeven. LET OP: zelfde lijst staat in
+// compute-zwitserleven-background/index.ts. Bij wijziging beide aanpassen.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+// Index-universum (zelfde lijst als in compute-zwitserleven-background)
+const INDEX_UNIVERSE: string[] = [...new Set([
+  // DJIA (30)
+  "AAPL","AMGN","AMZN","AXP","BA","CAT","CRM","CSCO","CVX","DIS",
+  "GS","HD","HON","IBM","JNJ","JPM","KO","MCD","MMM","MRK",
+  "MSFT","NKE","NVDA","PG","SHW","TRV","UNH","V","VZ","WMT",
+  // NASDAQ-100 (100)
+  "ABNB","ADBE","ADI","ADP","ADSK","AEP","AMAT","AMD","ANSS","APP",
+  "ARM","ASML","AVGO","AXON","AZN","BIIB","BKNG","BKR","CCEP","CDNS",
+  "CDW","CEG","CHTR","CMCSA","COST","CPRT","CRWD","CSGP","CSX","CTAS",
+  "CTSH","DASH","DDOG","DXCM","EA","EXC","FANG","FAST","FTNT","GEHC",
+  "GFS","GILD","GOOG","GOOGL","IDXX","INTC","INTU","ISRG","KDP","KHC",
+  "KLAC","LIN","LRCX","LULU","MAR","MCHP","MDB","MDLZ","MELI","META",
+  "MNST","MRVL","MU","NFLX","NXPI","ODFL","ON","ORLY","PANW","PAYX",
+  "PCAR","PDD","PEP","PLTR","PYPL","QCOM","REGN","ROP","ROST","SBUX",
+  "SNPS","TEAM","TMUS","TSLA","TTD","TTWO","TXN","VRSK","VRTX","WBD",
+  "WDAY","XEL","ZS",
+  // AEX (25)
+  "ADYEN.AS","AGN.AS","AD.AS","AKZA.AS","MT.AS","ASML.AS","ASM.AS","ASRNL.AS","BESI.AS","DSFIR.AS",
+  "EXO.AS","GLPG.AS","HEIA.AS","IMCD.AS","INGA.AS","KPN.AS","NN.AS","PHIA.AS","PRX.AS","RAND.AS",
+  "REL.AS","SHELL.AS","UMG.AS","UNA.AS","WKL.AS",
+  // FTSE 100 (≈100)
+  "AAL.L","ABF.L","ADM.L","AHT.L","ANTO.L","AUTO.L","AV.L","BARC.L",
+  "BATS.L","BDEV.L","BEZ.L","BKG.L","BME.L","BNZL.L","BP.L","BRBY.L","BT-A.L","CCH.L",
+  "CNA.L","CPG.L","CRDA.L","CRH.L","CTEC.L","DCC.L","DGE.L","DPLM.L","EDV.L","ENT.L",
+  "EXPN.L","EZJ.L","FCIT.L","FRAS.L","FRES.L","GLEN.L","GSK.L","HIK.L","HL.L","HLN.L",
+  "HSBA.L","HSX.L","HWDN.L","IAG.L","ICG.L","IHG.L","III.L","IMB.L","IMI.L","INF.L",
+  "ITRK.L","JD.L","KGF.L","LAND.L","LGEN.L","LLOY.L","LMP.L","LSEG.L","MNDI.L","MNG.L",
+  "MRO.L","NG.L","NWG.L","NXT.L","PHNX.L","PRU.L","PSH.L","PSN.L","PSON.L","REL.L",
+  "RIO.L","RKT.L","RR.L","RS1.L","RTO.L","SBRY.L","SDR.L","SGE.L","SGRO.L","SHEL.L",
+  "SMDS.L","SMIN.L","SMT.L","SN.L","SPX.L","SSE.L","STAN.L","STJ.L","SVT.L","TSCO.L",
+  "TW.L","ULVR.L","UTG.L","UU.L","VOD.L","WEIR.L","WPP.L","WTB.L",
+  // CAC 40 (≈40)
+  "AC.PA","AI.PA","AIR.PA","ALO.PA","CS.PA","BNP.PA","EN.PA","CAP.PA","CA.PA","ACA.PA",
+  "BN.PA","DSY.PA","EDEN.PA","ENGI.PA","EL.PA","ERF.PA","RMS.PA","KER.PA","LR.PA","OR.PA",
+  "MC.PA","ML.PA","ORA.PA","RI.PA","PUB.PA","SGO.PA","SAN.PA","SU.PA","GLE.PA","STLAP.PA",
+  "STMPA.PA","TEP.PA","HO.PA","TTE.PA","URW.PA","VIE.PA","DG.PA","VIV.PA",
+  // SMI (20)
+  "ABBN.SW","ALC.SW","GEBN.SW","GIVN.SW","HOLN.SW","KNIN.SW","LOGN.SW","LONN.SW","NESN.SW","NOVN.SW",
+  "PGHN.SW","ROG.SW","SCMN.SW","SGSN.SW","SIKA.SW","SLHN.SW","SOON.SW","SREN.SW","UBSG.SW","ZURN.SW",
+])];
 
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
@@ -32,23 +78,22 @@ Deno.serve(async (req) => {
   try {
     const sb = getServiceClient();
 
-    const [stocksResult, totalResult, unscannedResult] = await Promise.all([
+    const [stocksResult, totalResult, universeScannedResult] = await Promise.all([
       // Alle gescande stocks (max 500), gesorteerd op yield
       sb
         .from("zwitserleven_stocks")
         .select("ticker,company,exchange,country,sector,last_close,currency,dividend_yield_pct,annual_dividend,high_5y,pct_under_5y_high,max_annual_gain_5y,years_5pct_growth_5y,payout_ratio,dividend_cuts_5y,risk_label,meets_criteria,scanned_at,div_yield_y1,div_yield_y2,div_yield_y3,div_yield_y4,div_yield_y5,is_manual")
         .order("dividend_yield_pct", { ascending: false, nullsLast: true })
         .limit(500),
-      // Totaal gescand
+      // Totaal gescand (alle tickers ooit gescand, inclusief handmatige)
       sb
         .from("zwitserleven_stocks")
         .select("*", { count: "exact", head: true }),
-      // Nog te scannen (nooit gescand)
+      // Hoeveel uit het INDEX_UNIVERSE zijn al gescand
       sb
-        .from("signal_tickers")
-        .select("*", { count: "exact", head: true })
-        .eq("active", true)
-        .is("zwitserleven_at", null),
+        .from("zwitserleven_stocks")
+        .select("ticker", { count: "exact", head: true })
+        .in("ticker", INDEX_UNIVERSE),
     ]);
 
     const stocks = (stocksResult.data ?? []) as Array<{
@@ -80,6 +125,9 @@ Deno.serve(async (req) => {
 
     const meetsCriteriaCount = stocks.filter((s) => s.meets_criteria).length;
     const manualCount = stocks.filter((s) => s.is_manual === true).length;
+    const universeSize = INDEX_UNIVERSE.length;
+    const universeScanned = universeScannedResult.count ?? 0;
+    const unscannedCount = Math.max(0, universeSize - universeScanned);
 
     return new Response(
       JSON.stringify({
@@ -87,7 +135,9 @@ Deno.serve(async (req) => {
         total_scanned: totalResult.count ?? 0,
         meets_criteria_count: meetsCriteriaCount,
         manual_count: manualCount,
-        unscanned_count: unscannedResult.count ?? 0,
+        unscanned_count: unscannedCount,
+        universe_size: universeSize,
+        universe_scanned: universeScanned,
       }),
       { status: 200, headers: { ...cors(req), "content-type": "application/json" } }
     );

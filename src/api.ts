@@ -335,6 +335,8 @@ export interface ZwitserlevenResults {
   meets_criteria_count: number;
   manual_count?: number;
   unscanned_count: number;
+  universe_size?: number;
+  universe_scanned?: number;
 }
 
 export async function fetchZwitserlevenResults(): Promise<ZwitserlevenResults> {

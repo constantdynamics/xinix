@@ -1,7 +1,13 @@
-// compute-zwitserleven-background — scant de watchlist op het Zwitserleven-profiel:
+// compute-zwitserleven-background — scant de major indices op het Zwitserleven-profiel:
 // hoog dividend (≥6.5% TTM), ver onder 5j-hoog (≥50%), met historische groeijaren.
 // Filtert op "fallen angels" — aandelen met dividendzekerheid én historisch aangetoond
-// herstelvermogen. Verwerkt max 40 tickers per run; herscan iedere 90 dagen.
+// herstelvermogen.
+//
+// Universum: NASDAQ-100 + DJIA + AEX + FTSE 100 + CAC 40 + SMI (~315 large-caps).
+// Bewust GEEN signal_tickers (de Xinix-watchlist) — die is voor biotech/mining catalyst
+// plays en bevat nauwelijks dividend-aandelen.
+//
+// Verwerkt max 40 tickers per run; herscan iedere 90 dagen per ticker.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -30,15 +36,32 @@ async function logRun(job: string, fn: () => Promise<RunResult>): Promise<RunRes
 function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r) return false; return (req.headers.get("authorization") ?? "") === `Bearer ${r}`; }
 function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
 function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
+
+const ALLOWED_ORIGINS = new Set([
+  "https://constantdynamics.github.io",
+  "http://localhost:5173",
+  "http://localhost:4173",
+]);
+function corsHeaders(req: Request): Record<string, string> {
+  const o = req.headers.get("origin") ?? "";
+  return {
+    "access-control-allow-origin": ALLOWED_ORIGINS.has(o) ? o : "null",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type, x-cron-secret, apikey",
+    "access-control-max-age": "86400",
+    vary: "origin",
+  };
+}
+
 function runBackground(job: string, fn: (req: Request) => Promise<RunResult>) {
   return async (req: Request) => {
-    if (req.method === "OPTIONS") return new Response(null, { status: 204 });
-    if (!checkAdminOrCron(req)) return new Response("Unauthorized", { status: 401 });
+    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req) });
+    if (!checkAdminOrCron(req)) return new Response("Unauthorized", { status: 401, headers: corsHeaders(req) });
     try {
       const r = await logRun(job, () => fn(req));
-      return new Response(JSON.stringify({ ok: r.ok, ...r }), { status: r.ok ? 200 : 500, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ ok: r.ok, ...r }), { status: r.ok ? 200 : 500, headers: { ...corsHeaders(req), "content-type": "application/json" } });
     } catch (e) {
-      return new Response(JSON.stringify({ ok: false, message: e instanceof Error ? e.message : String(e) }), { status: 500, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ ok: false, message: e instanceof Error ? e.message : String(e) }), { status: 500, headers: { ...corsHeaders(req), "content-type": "application/json" } });
     }
   };
 }
@@ -53,6 +76,63 @@ const MIN_YIELD_PCT = 6.5;
 const MIN_UNDER_5Y_HIGH_PCT = 50; // koers ≥50% onder 5j-hoog
 const MIN_MAX_ANNUAL_GAIN = 25;   // minstens 1 jaar met ≥25% stijging
 const MIN_YEARS_5PCT = 2;         // minstens 2 jaar met ≥5% stijging
+
+// ── INDEX_UNIVERSE ──────────────────────────────────────────────────────────
+// Hoogste indices van de 6 markten waar dividend-aandelen vandaan moeten komen.
+// LET OP: zelfde lijst staat in zwitserleven-results/index.ts (UNIVERSE_SIZE).
+// Bij wijziging hier → ook daar bijwerken.
+const DJIA: string[] = [
+  "AAPL","AMGN","AMZN","AXP","BA","CAT","CRM","CSCO","CVX","DIS",
+  "GS","HD","HON","IBM","JNJ","JPM","KO","MCD","MMM","MRK",
+  "MSFT","NKE","NVDA","PG","SHW","TRV","UNH","V","VZ","WMT",
+];
+const NASDAQ_100: string[] = [
+  "AAPL","ABNB","ADBE","ADI","ADP","ADSK","AEP","AMAT","AMD","AMGN",
+  "AMZN","ANSS","APP","ARM","ASML","AVGO","AXON","AZN","BIIB","BKNG",
+  "BKR","CCEP","CDNS","CDW","CEG","CHTR","CMCSA","COST","CPRT","CRWD",
+  "CSCO","CSGP","CSX","CTAS","CTSH","DASH","DDOG","DXCM","EA","EXC",
+  "FANG","FAST","FTNT","GEHC","GFS","GILD","GOOG","GOOGL","HON","IDXX",
+  "INTC","INTU","ISRG","KDP","KHC","KLAC","LIN","LRCX","LULU","MAR",
+  "MCHP","MDB","MDLZ","MELI","META","MNST","MRVL","MSFT","MU","NFLX",
+  "NVDA","NXPI","ODFL","ON","ORLY","PANW","PAYX","PCAR","PDD","PEP",
+  "PLTR","PYPL","QCOM","REGN","ROP","ROST","SBUX","SNPS","TEAM","TMUS",
+  "TSLA","TTD","TTWO","TXN","VRSK","VRTX","WBD","WDAY","XEL","ZS",
+];
+// AEX (NL, 25 hoofdfondsen) — Yahoo suffix .AS
+const AEX: string[] = [
+  "ADYEN.AS","AGN.AS","AD.AS","AKZA.AS","MT.AS","ASML.AS","ASM.AS","ASRNL.AS","BESI.AS","DSFIR.AS",
+  "EXO.AS","GLPG.AS","HEIA.AS","IMCD.AS","INGA.AS","KPN.AS","NN.AS","PHIA.AS","PRX.AS","RAND.AS",
+  "REL.AS","SHELL.AS","UMG.AS","UNA.AS","WKL.AS",
+];
+// FTSE 100 (UK) — Yahoo suffix .L
+const FTSE_100: string[] = [
+  "AAL.L","ABF.L","ADM.L","AHT.L","ANTO.L","AUTO.L","AV.L","AZN.L","BA.L","BARC.L",
+  "BATS.L","BDEV.L","BEZ.L","BKG.L","BME.L","BNZL.L","BP.L","BRBY.L","BT-A.L","CCH.L",
+  "CNA.L","CPG.L","CRDA.L","CRH.L","CTEC.L","DCC.L","DGE.L","DPLM.L","EDV.L","ENT.L",
+  "EXPN.L","EZJ.L","FCIT.L","FRAS.L","FRES.L","GLEN.L","GSK.L","HIK.L","HL.L","HLN.L",
+  "HSBA.L","HSX.L","HWDN.L","IAG.L","ICG.L","IHG.L","III.L","IMB.L","IMI.L","INF.L",
+  "ITRK.L","JD.L","KGF.L","LAND.L","LGEN.L","LLOY.L","LMP.L","LSEG.L","MNDI.L","MNG.L",
+  "MRO.L","NG.L","NWG.L","NXT.L","PHNX.L","PRU.L","PSH.L","PSN.L","PSON.L","REL.L",
+  "RIO.L","RKT.L","RR.L","RS1.L","RTO.L","SBRY.L","SDR.L","SGE.L","SGRO.L","SHEL.L",
+  "SMDS.L","SMIN.L","SMT.L","SN.L","SPX.L","SSE.L","STAN.L","STJ.L","SVT.L","TSCO.L",
+  "TW.L","ULVR.L","UTG.L","UU.L","VOD.L","WEIR.L","WPP.L","WTB.L",
+];
+// CAC 40 (FR) — Yahoo suffix .PA
+const CAC_40: string[] = [
+  "AC.PA","AI.PA","AIR.PA","ALO.PA","CS.PA","BNP.PA","EN.PA","CAP.PA","CA.PA","ACA.PA",
+  "BN.PA","DSY.PA","EDEN.PA","ENGI.PA","EL.PA","ERF.PA","RMS.PA","KER.PA","LR.PA","OR.PA",
+  "MC.PA","ML.PA","ORA.PA","RI.PA","PUB.PA","SGO.PA","SAN.PA","SU.PA","GLE.PA","STLAP.PA",
+  "STMPA.PA","TEP.PA","HO.PA","TTE.PA","URW.PA","VIE.PA","DG.PA","VIV.PA",
+];
+// SMI (Zwitserland) — Yahoo suffix .SW
+const SMI: string[] = [
+  "ABBN.SW","ALC.SW","GEBN.SW","GIVN.SW","HOLN.SW","KNIN.SW","LOGN.SW","LONN.SW","NESN.SW","NOVN.SW",
+  "PGHN.SW","ROG.SW","SCMN.SW","SGSN.SW","SIKA.SW","SLHN.SW","SOON.SW","SREN.SW","UBSG.SW","ZURN.SW",
+];
+
+const INDEX_UNIVERSE: string[] = [...new Set([
+  ...DJIA, ...NASDAQ_100, ...AEX, ...FTSE_100, ...CAC_40, ...SMI,
+])];
 
 interface Bar { date: string; close: number; }
 interface DivEvent { date: string; amount: number; }
@@ -90,16 +170,17 @@ async function fetchYahoo5yWeekly(ticker: string): Promise<{ bars: Bar[]; divs: 
   return { bars, divs };
 }
 
-async function fetchQuoteSummary(ticker: string): Promise<{ payoutRatio: number | null; country: string | null; currency: string | null }> {
+async function fetchQuoteSummary(ticker: string): Promise<{ payoutRatio: number | null; country: string | null; currency: string | null; company: string | null; exchange: string | null; sector: string | null }> {
   try {
-    const url = `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=summaryDetail,assetProfile`;
+    const url = `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=summaryDetail,assetProfile,price`;
     const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; ZwitserBot/1.0; +https://github.com)" } });
-    if (!res.ok) return { payoutRatio: null, country: null, currency: null };
+    if (!res.ok) return { payoutRatio: null, country: null, currency: null, company: null, exchange: null, sector: null };
     const json = await res.json() as {
       quoteSummary?: {
         result?: Array<{
           summaryDetail?: { payoutRatio?: { raw?: number }; currency?: string };
-          assetProfile?: { country?: string };
+          assetProfile?: { country?: string; sector?: string };
+          price?: { longName?: string; shortName?: string; fullExchangeName?: string; exchangeName?: string };
         }>;
       };
     };
@@ -108,9 +189,12 @@ async function fetchQuoteSummary(ticker: string): Promise<{ payoutRatio: number 
       payoutRatio: r?.summaryDetail?.payoutRatio?.raw ?? null,
       country: r?.assetProfile?.country ?? null,
       currency: r?.summaryDetail?.currency ?? null,
+      company: r?.price?.longName ?? r?.price?.shortName ?? null,
+      exchange: r?.price?.fullExchangeName ?? r?.price?.exchangeName ?? null,
+      sector: r?.assetProfile?.sector ?? null,
     };
   } catch {
-    return { payoutRatio: null, country: null, currency: null };
+    return { payoutRatio: null, country: null, currency: null, company: null, exchange: null, sector: null };
   }
 }
 
@@ -208,45 +292,42 @@ Deno.serve(runBackground("compute-zwitserleven", async (req) => {
   const startMs = Date.now();
 
   // Force-scan modes:
-  //   ?ticker=XYZ        → scan alleen deze ene ticker (bypass 90d cutoff)
+  //   ?ticker=XYZ          → scan alleen deze ene ticker (bypass 90d cutoff)
   //   ?ticker=XYZ&manual=1 → idem, en markeer als handmatig toegevoegd
-  //                          (auto-toevoegen aan signal_tickers als nieuw)
+  //                          (gaat NIET via signal_tickers — direct in zwitserleven_stocks)
   const url = new URL(req.url);
   const forceTicker = (url.searchParams.get("ticker") ?? "").trim().toUpperCase();
   const isManualAdd = url.searchParams.get("manual") === "1";
 
   let batch: { ticker: string; company: string | null; exchange: string | null; sector: string | null }[];
   if (forceTicker) {
-    // Eén ticker: haal eerst meta op uit signal_tickers, voeg toe als handmatig en niet bestaand
-    const { data: existing } = await sb
-      .from("signal_tickers")
-      .select("ticker, company, exchange, sector, active")
-      .eq("ticker", forceTicker)
-      .maybeSingle();
-    if (existing) {
-      if (existing.active === false) {
-        return { ok: false, message: `${forceTicker} bestaat maar staat op niet-actief in de watchlist.` };
-      }
-      batch = [{ ticker: existing.ticker as string, company: (existing.company as string | null) ?? null, exchange: (existing.exchange as string | null) ?? null, sector: (existing.sector as string | null) ?? null }];
-    } else if (isManualAdd) {
-      // Voeg automatisch toe aan watchlist zodat dagelijkse pollers het ook oppakken
-      const { error: insErr } = await sb.from("signal_tickers").insert({ ticker: forceTicker, active: true });
-      if (insErr) return { ok: false, message: `Kon ${forceTicker} niet toevoegen aan watchlist: ${insErr.message}` };
-      batch = [{ ticker: forceTicker, company: null, exchange: null, sector: null }];
-    } else {
-      return { ok: false, message: `Ticker ${forceTicker} niet in watchlist. Gebruik manual=1 om hem toe te voegen.` };
-    }
+    // Force-scan één ticker (kan elke beurs zijn, hoeft niet in INDEX_UNIVERSE te staan).
+    // Bij isManualAdd=1: meteen aanmaken in zwitserleven_stocks met is_manual=true,
+    // ook als nog geen scan-data beschikbaar is.
+    batch = [{ ticker: forceTicker, company: null, exchange: null, sector: null }];
   } else {
+    // Reguliere batch: kies uit INDEX_UNIVERSE de tickers die nooit zijn gescand
+    // of waarvan de laatste scan langer dan RESCAN_DAYS geleden is.
     const cutoff = new Date(Date.now() - RESCAN_DAYS * 24 * 3600 * 1000).toISOString();
-    const { data: tickers, error: fetchError } = await sb
-      .from("signal_tickers")
-      .select("ticker, company, exchange, sector")
-      .eq("active", true)
-      .or(`zwitserleven_at.is.null,zwitserleven_at.lt.${cutoff}`)
-      .order("zwitserleven_at", { ascending: true, nullsFirst: true })
-      .limit(BATCH_SIZE);
+    const { data: scanned, error: fetchError } = await sb
+      .from("zwitserleven_stocks")
+      .select("ticker, scanned_at")
+      .in("ticker", INDEX_UNIVERSE);
     if (fetchError) throw new Error(fetchError.message);
-    batch = (tickers ?? []) as { ticker: string; company: string | null; exchange: string | null; sector: string | null }[];
+    const scannedMap = new Map<string, string | null>();
+    for (const r of (scanned ?? [])) scannedMap.set(r.ticker as string, (r.scanned_at as string | null) ?? null);
+
+    const candidates = INDEX_UNIVERSE
+      .map((t) => ({ ticker: t, scannedAt: scannedMap.get(t) ?? null }))
+      .filter((c) => c.scannedAt == null || c.scannedAt < cutoff)
+      .sort((a, b) => {
+        if (a.scannedAt == null && b.scannedAt == null) return 0;
+        if (a.scannedAt == null) return -1;
+        if (b.scannedAt == null) return 1;
+        return a.scannedAt.localeCompare(b.scannedAt);
+      })
+      .slice(0, BATCH_SIZE);
+    batch = candidates.map((c) => ({ ticker: c.ticker, company: null, exchange: null, sector: null }));
   }
 
   let checked = 0, foundCount = 0, errors = 0;
@@ -262,9 +343,13 @@ Deno.serve(runBackground("compute-zwitserleven", async (req) => {
         fetchQuoteSummary(row.ticker),
       ]);
       const m = computeMetrics(bars, divs);
+      // Verkies meta van Yahoo boven (lege) row-meta — voor index-tickers is row.* leeg.
+      const company  = summary.company  ?? row.company;
+      const exchange = summary.exchange ?? row.exchange;
+      const sector   = summary.sector   ?? row.sector;
       if (!m) {
         await sb.from("zwitserleven_stocks").upsert({
-          ticker: row.ticker, company: row.company, exchange: row.exchange, sector: row.sector,
+          ticker: row.ticker, company, exchange, sector,
           meets_criteria: false, error_msg: "te weinig data", scanned_at: now,
           ...(isManualAdd ? { is_manual: true } : {}),
         }, { onConflict: "ticker" });
@@ -288,10 +373,10 @@ Deno.serve(runBackground("compute-zwitserleven", async (req) => {
 
         await sb.from("zwitserleven_stocks").upsert({
           ticker: row.ticker,
-          company: row.company,
-          exchange: row.exchange,
+          company,
+          exchange,
           country: summary.country,
-          sector: row.sector,
+          sector,
           last_close: m.lastClose,
           currency: summary.currency,
           dividend_yield_pct: Math.round(m.dividendYieldPct * 100) / 100,
@@ -323,7 +408,7 @@ Deno.serve(runBackground("compute-zwitserleven", async (req) => {
             signal_type: "zwitserleven_laag",
             severity: "yellow",
             title: `🌴 ${row.ticker} · Zwitserleven Laag risico · dividend ${yieldStr}`,
-            detail: `${row.company ?? row.ticker} · Dividend ${yieldStr} TTM · ${underStr} onder 5j-hoog · Laag dividendrisico. Voldoet aan alle Zwitserleven-criteria.`,
+            detail: `${company ?? row.ticker} · Dividend ${yieldStr} TTM · ${underStr} onder 5j-hoog · Laag dividendrisico. Voldoet aan alle Zwitserleven-criteria.`,
           });
         }
       }
@@ -337,8 +422,6 @@ Deno.serve(runBackground("compute-zwitserleven", async (req) => {
         ...(isManualAdd ? { is_manual: true } : {}),
       }, { onConflict: "ticker" });
     }
-    // Altijd zwitserleven_at bijwerken zodat de ticker pas na RESCAN_DAYS opnieuw aan de beurt is
-    await sb.from("signal_tickers").update({ zwitserleven_at: now }).eq("ticker", row.ticker);
     await new Promise((r) => setTimeout(r, SLEEP_MS));
   }
 
