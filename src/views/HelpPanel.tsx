@@ -562,8 +562,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
 
   zwitserleven: {
     intro:
-      "🌴 Zwitserleven = 'fallen angels met dividendzekerheid'. De scan zoekt aandelen die fors gezakt zijn van hun 5-jaars-top, maar wél een gezond dividend uitkeren én historisch bewezen herstelvermogen hebben. Doel: een rustige inkomstenstroom uit aandelen waar 'het lijf nog wel zit, maar de koers tijdelijk uit de gratie is'.",
+      "🌴 Zwitserleven = 'fallen angels met dividendzekerheid' uit de grote indices. De scan zoekt aandelen uit NASDAQ-100, Dow Jones (DJIA), AEX, FTSE 100, CAC 40 en SMI (Zwitserland) die fors gezakt zijn van hun 5-jaars-top, maar wél een gezond dividend uitkeren én historisch bewezen herstelvermogen hebben. Doel: een rustige inkomstenstroom uit aandelen waar 'het lijf nog wel zit, maar de koers tijdelijk uit de gratie is'.",
     blocks: [
+      {
+        id: "zw-universum",
+        title: "Universum — waar wordt naar gezocht?",
+        body:
+          "Bewust GEEN biotech/mining watchlist. De scan loopt over de hoogste indices van zes grote markten:\n● 🇺🇸 NASDAQ-100 — top 100 niet-financiële NASDAQ noteringen (AAPL, MSFT, ASML, etc.)\n● 🇺🇸 Dow Jones Industrial Average — 30 grote US bedrijven (KO, JNJ, MMM, etc.)\n● 🇳🇱 AEX — 25 hoofdfondsen Amsterdam (ASML, Shell, ING, etc.)\n● 🇬🇧 FTSE 100 — top 100 Londen (HSBC, Shell, AstraZeneca, etc.)\n● 🇫🇷 CAC 40 — 40 hoofdfondsen Parijs (LVMH, TotalEnergies, Sanofi, etc.)\n● 🇨🇭 SMI — 20 hoofdfondsen Zwitserland (Nestlé, Roche, Novartis, etc.)\nNa dedupliceren ≈ 300 large-caps. Dit is bewust een ander universum dan de Xinix-watchlist (die focust op catalyst-driven biotech/mining).\nHandmatige toevoegingen mogen elke beurs zijn (bv. WHA.AS voor Wereldhave).",
+      },
       {
         id: "zw-criteria",
         title: "De vier criteria — wat is een 'Zwitserleven'?",
@@ -608,13 +614,19 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         id: "zw-scan-knoppen",
         title: "Scan-knoppen — wat doet 'Scan 1×' en 'Auto-scan 20×'?",
         body:
-          "● Scan 1× — start één batch van 40 tickers die het langst geleden gescand zijn (of nog nooit). Wacht ~2 min en ververs.\n● Auto-scan 20× — start automatisch 20 batches achter elkaar (≈800 tickers, ~2 minuten). Handig om de hele watchlist in één keer door te lopen na een lange pauze. Tussendoor zie je 'X/20 · +N gevonden'. Klik 'Stop' om vroegtijdig af te breken.\nElke scan is een batch van 40 tickers. Tickers die in de laatste 90 dagen al gescand zijn worden overgeslagen (anders herhaal je werk).\nVereist admin-token in de topbalk.",
+          "● Scan 1× — start één batch van 40 tickers uit het INDEX_UNIVERSE die het langst geleden gescand zijn (of nog nooit). Wacht ~2 min en ververs.\n● Auto-scan 20× — start automatisch 20 batches achter elkaar (≈800 ticker-scans). Aangezien het universum ~300 large-caps is, kun je dus de volledige set in ≤8 batches doorlopen. Tussendoor zie je 'X/20 · +N gevonden'. Klik 'Stop' om vroegtijdig af te breken.\nTickers die in de laatste 90 dagen al gescand zijn worden overgeslagen (anders herhaal je werk). De 'Nog te scannen'-teller geeft aan hoeveel index-leden er nog niet gescand zijn.\nVereist admin-token in de topbalk.",
+      },
+      {
+        id: "zw-vindtniks",
+        title: "Auto-scan vindt niks — wat nu?",
+        body:
+          "Goed mogelijk. De criteria zijn streng en bedoeld voor échte fallen angels:\n● Yield ≥ 6,5% TTM — dit is een hoge drempel. Index-large-caps hebben meestal 2–5% yield.\n● 50% onder 5j-hoog — die combinatie met hoge yield is zeldzaam.\nVerwachting: van ~300 large-caps voldoen er typisch 0–5 aan alle 4 criteria. Het is geen lijst met 50 winnaars.\nWat te doen:\n● Kijk onder filter 'Bijna (yield ≥4% + val ≥30%)' voor kandidaten die nét niet voldoen.\n● Of voeg handmatig specifieke aandelen toe die je vertrouwt (bv. JEPI, KO, WHA.AS).\n● Of pas de criteria aan via een toekomstige update als je een soepeler net wil.",
       },
       {
         id: "zw-handmatig",
         title: "Handmatig toevoegen — wat doet dat precies?",
         body:
-          "Vul een ticker in (bv. 'KO' voor Coca-Cola) en druk op '+ Toevoegen & scannen'. Het systeem:\n1. Voegt de ticker toe aan je watchlist als hij nog niet bestaat (active=true).\n2. Doet direct een force-scan op die ene ticker (bypass de 90-dagen herscan-regel).\n3. Markeert hem als 'handmatig' (badge 'handm.' bij de ticker).\nHandmatig-toegevoegde aandelen blijven zichtbaar onder het filter 'Voldoet aan criteria + handmatig', ook als ze niet aan de Zwitserleven-criteria voldoen. Zo kun je een eigen lijstje bouwen om te tracken.\nVereist admin-token.",
+          "Vul een ticker in (bv. 'KO' voor Coca-Cola, of 'WHA.AS' voor Wereldhave) en druk op '+ Toevoegen & scannen'. Het systeem:\n1. Doet direct een force-scan op die ene ticker via Yahoo Finance (bypass de 90-dagen herscan-regel).\n2. Markeert hem als 'handmatig' (badge 'handm.' bij de ticker).\nHandmatig-toegevoegde aandelen blijven zichtbaar onder het filter 'Voldoet aan criteria + handmatig', ook als ze niet aan de Zwitserleven-criteria voldoen. Zo kun je een eigen lijstje bouwen om te tracken.\nFormat: gebruik altijd de Yahoo Finance ticker (US zonder suffix; .AS Amsterdam, .L Londen, .PA Parijs, .SW Zwitserland, .DE Duitsland, etc.).\nVereist admin-token.",
       },
       {
         id: "zw-kolommen-verbergen",

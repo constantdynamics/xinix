@@ -129,7 +129,7 @@ const AUTO_SCAN_TOTAL = 20;
 const AUTO_SCAN_INTERVAL_MS = 6_000; // 6s per scan-cycle (scan loopt async op de backend)
 
 export function ZwitserlevenView() {
-  const [data, setData] = useState<{ stocks: ZwitserlevenStock[]; total_scanned: number; meets_criteria_count: number; manual_count?: number; unscanned_count: number } | null>(null);
+  const [data, setData] = useState<{ stocks: ZwitserlevenStock[]; total_scanned: number; meets_criteria_count: number; manual_count?: number; unscanned_count: number; universe_size?: number; universe_scanned?: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -329,7 +329,8 @@ export function ZwitserlevenView() {
               Geen dividend-traps: het gaat om echte kwaliteit die tijdelijk uit de gratie is.
             </p>
             <p className="text-xs text-neutral-500 mt-2">
-              Scope: alle actieve tickers in de watchlist · Criteria worden automatisch dagelijks gescand · Herscan elke 90 dagen per ticker
+              Universum: <strong>NASDAQ-100 + DJIA + AEX + FTSE 100 + CAC 40 + SMI</strong>
+              {data?.universe_size ? ` (${data.universe_size} large-caps)` : ""} · Herscan elke 90 dagen per ticker · Handmatige toevoegingen kunnen elke beurs zijn.
             </p>
           </div>
         </div>
@@ -339,7 +340,10 @@ export function ZwitserlevenView() {
       <div className="flex flex-wrap items-center gap-4">
         <Stat label="Voldoen aan criteria" value={data?.meets_criteria_count ?? 0} />
         <Stat label="Handmatig toegevoegd" value={data?.manual_count ?? 0} />
-        <Stat label="Totaal gescand" value={data?.total_scanned ?? 0} />
+        <Stat
+          label="Universum gescand"
+          value={`${data?.universe_scanned ?? 0}/${data?.universe_size ?? "—"}`}
+        />
         <Stat label="Nog te scannen" value={data?.unscanned_count ?? 0} />
         <div className="flex items-center gap-2 ml-auto flex-wrap">
           {scanMsg && <span className="text-xs text-neutral-400">{scanMsg}</span>}
