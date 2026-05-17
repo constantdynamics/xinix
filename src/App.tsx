@@ -13,47 +13,10 @@ import { HikkertjesView } from "./views/Hikkertjes";
 import { ZwitserlevenView } from "./views/Zwitserleven";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
-import { fetchDashboard, getToken, setToken } from "./api";
+import { fetchDashboard, fetchUiSettings, getToken, setToken, type UiSettings } from "./api";
 import type { Dashboard } from "./types";
 import { Button, NavTab, Input, Skeleton, Dot } from "./components/ui";
-
-type Tab =
-  | "dashboard"
-  | "scores"
-  | "tickers"
-  | "limits"
-  | "backtest"
-  | "track-record"
-  | "signal-log"
-  | "scans"
-  | "xinix"
-  | "feniks"
-  | "hikkertjes"
-  | "zwitserleven"
-  | "status"
-  | "settings";
-
-interface TabDef {
-  key: Tab;
-  label: string;
-}
-
-const TABS: TabDef[] = [
-  { key: "dashboard", label: "Dashboard" },
-  { key: "scores", label: "Scores" },
-  { key: "tickers", label: "Watchlist" },
-  { key: "limits", label: "Limieten" },
-  { key: "backtest", label: "Backtest" },
-  { key: "track-record", label: "Track record" },
-  { key: "signal-log", label: "Signaallog" },
-  { key: "scans", label: "Scans" },
-  { key: "xinix", label: "Xinix" },
-  { key: "feniks", label: "🦅 Feniks" },
-  { key: "hikkertjes", label: "⚡ Hikkertjes" },
-  { key: "zwitserleven", label: "🌴 Zwitserleven" },
-  { key: "status", label: "Status" },
-  { key: "settings", label: "Instellingen" },
-];
+import { DEFAULT_TABS as TABS, type Tab, type TabDef } from "./tabsConfig";
 
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
 const HELP_PAGE: Record<Tab, string> = {
@@ -95,6 +58,37 @@ export function App() {
   const [tokenInput, setTokenInput] = useState(getToken() ?? "");
   const [showTokenBar, setShowTokenBar] = useState(false);
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
+  const [uiSettings, setUiSettings] = useState<UiSettings | null>(null);
+  const [showHiddenTabs, setShowHiddenTabs] = useState(false);
+
+  // UI-settings 1× laden + opnieuw na save (via custom event).
+  useEffect(() => {
+    const load = () => fetchUiSettings().then(setUiSettings).catch(() => { /* fallback naar defaults */ });
+    load();
+    const onUpdate = () => load();
+    window.addEventListener("xinix-ui-settings-updated", onUpdate);
+    return () => window.removeEventListener("xinix-ui-settings-updated", onUpdate);
+  }, []);
+
+  // Pas UI-overrides toe op TABS: volgorde, hernoemd, verborgen.
+  const effectiveTabs = useMemo<TabDef[]>(() => {
+    let list = [...TABS];
+    if (uiSettings?.tab_order && uiSettings.tab_order.length > 0) {
+      const order = uiSettings.tab_order.filter((k) => TABS.some((t) => t.key === k));
+      const ordered = order.map((k) => TABS.find((t) => t.key === k)!).filter(Boolean);
+      const missing = TABS.filter((t) => !order.includes(t.key));
+      list = [...ordered, ...missing];
+    }
+    const labels = uiSettings?.tab_labels ?? {};
+    list = list.map((t) => labels[t.key] ? { ...t, label: labels[t.key] } : t);
+    const hidden = new Set(uiSettings?.tab_hidden ?? []);
+    if (!showHiddenTabs && hidden.size > 0) {
+      list = list.filter((t) => !hidden.has(t.key));
+    }
+    return list;
+  }, [uiSettings, showHiddenTabs]);
+
+  const hiddenCount = (uiSettings?.tab_hidden ?? []).filter((k) => TABS.some((t) => t.key === k)).length;
 
   async function refresh() {
     try {
@@ -214,8 +208,8 @@ export function App() {
         </div>
 
         {/* Tab nav — onderlijn-stijl, horizontaal scrollbaar op mobiel */}
-        <div className="mx-auto max-w-7xl px-4 flex gap-0.5 overflow-x-auto scrollbar-thin">
-          {TABS.map((t) => (
+        <div className="mx-auto max-w-7xl px-4 flex gap-0.5 overflow-x-auto scrollbar-thin items-center">
+          {effectiveTabs.map((t) => (
             <NavTab
               key={t.key}
               active={tab === t.key}
@@ -226,6 +220,19 @@ export function App() {
               {t.label}
             </NavTab>
           ))}
+          {hiddenCount > 0 && (
+            <button
+              onClick={() => setShowHiddenTabs((v) => !v)}
+              title={showHiddenTabs ? "Verborgen tabs weer verbergen" : `${hiddenCount} verborgen tab${hiddenCount === 1 ? "" : "s"} tonen`}
+              className={`ml-2 px-2 py-1 rounded text-[11px] font-semibold border whitespace-nowrap transition-colors ${
+                showHiddenTabs
+                  ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                  : "border-ink-5 text-neutral-500 hover:text-neutral-200 hover:border-ink-5/80"
+              }`}
+            >
+              {showHiddenTabs ? "✕ verberg" : `+ ${hiddenCount} verborgen`}
+            </button>
+          )}
         </div>
 
         {showTokenBar && (
