@@ -10,6 +10,7 @@ import { SignalLogView } from "./views/SignalLog";
 import { ScansView } from "./views/Scans";
 import { XinixPortfolioView, PhoenixView } from "./views/XinixPortfolio";
 import { HikkertjesView } from "./views/Hikkertjes";
+import { ZwitserlevenView } from "./views/Zwitserleven";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, getToken, setToken } from "./api";
@@ -28,6 +29,7 @@ type Tab =
   | "xinix"
   | "feniks"
   | "hikkertjes"
+  | "zwitserleven"
   | "status"
   | "settings";
 
@@ -48,6 +50,7 @@ const TABS: TabDef[] = [
   { key: "xinix", label: "Xinix" },
   { key: "feniks", label: "🦅 Feniks" },
   { key: "hikkertjes", label: "⚡ Hikkertjes" },
+  { key: "zwitserleven", label: "🏦 Zwitserleven" },
   { key: "status", label: "Status" },
   { key: "settings", label: "Instellingen" },
 ];
@@ -65,6 +68,7 @@ const HELP_PAGE: Record<Tab, string> = {
   xinix: "xinix",
   feniks: "feniks",
   hikkertjes: "hikkertjes",
+  zwitserleven: "zwitserleven",
   status: "status",
   settings: "settings",
 };
@@ -280,6 +284,7 @@ export function App() {
         {tab === "xinix" && <XinixPortfolioView />}
         {tab === "feniks" && <PhoenixView />}
         {tab === "hikkertjes" && <HikkertjesView />}
+        {tab === "zwitserleven" && <ZwitserlevenView />}
         {tab === "status" && <HealthView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>

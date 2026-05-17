@@ -302,6 +302,40 @@ export async function fetchScanResults(): Promise<ScanResults> {
   return (await res.json()) as ScanResults;
 }
 
+export interface ZwitserlevenStock {
+  ticker: string;
+  company: string | null;
+  exchange: string | null;
+  country: string | null;
+  sector: string | null;
+  last_close: number | null;
+  currency: string | null;
+  dividend_yield_pct: number | null;
+  annual_dividend: number | null;
+  high_5y: number | null;
+  pct_under_5y_high: number | null;
+  max_annual_gain_5y: number | null;
+  years_5pct_growth_5y: number | null;
+  payout_ratio: number | null;
+  dividend_cuts_5y: number | null;
+  risk_label: string | null;
+  meets_criteria: boolean | null;
+  scanned_at: string | null;
+}
+
+export interface ZwitserlevenResults {
+  stocks: ZwitserlevenStock[];
+  total_scanned: number;
+  meets_criteria_count: number;
+  unscanned_count: number;
+}
+
+export async function fetchZwitserlevenResults(): Promise<ZwitserlevenResults> {
+  const res = await fetch(apiUrl("/api/zwitserleven-results"));
+  if (!res.ok) throw new Error(`zwitserleven-results ${res.status}`);
+  return (await res.json()) as ZwitserlevenResults;
+}
+
 // ── Xinix paper portfolio ──
 export interface XinixOpenPosition {
   id: number;
