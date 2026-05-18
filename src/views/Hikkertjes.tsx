@@ -31,6 +31,8 @@ export function HikkertjesView() {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
+  const [limitFilter, setLimitFilter] = useState<"all" | "near" | "below">("all");
+  const [sortBy, setSortBy] = useState<"spikes" | "limit">("spikes");
 
   useEffect(() => {
     setLoading(true);
@@ -89,6 +91,15 @@ export function HikkertjesView() {
       {/* Stats + trigger */}
       <div className="flex flex-wrap items-center gap-4">
         <Stat label="Hikkertjes gevonden" value={hikkertjeCount} />
+        <Stat
+          label="Op/onder limiet"
+          value={ranking.filter((r) => r.above_limit_pct != null && r.above_limit_pct <= 0).length}
+          tone="lime"
+        />
+        <Stat
+          label="≤10% boven limiet"
+          value={ranking.filter((r) => r.above_limit_pct != null && r.above_limit_pct > 0 && r.above_limit_pct <= 10).length}
+        />
         <Stat label="Nog te scannen" value={unscanned} />
         {isAdmin && (
           <div className="flex items-center gap-2 ml-auto">
@@ -98,6 +109,37 @@ export function HikkertjesView() {
             </Button>
           </div>
         )}
+      </div>
+
+      {/* Filter + sortering */}
+      <div className="flex gap-2 flex-wrap items-center">
+        {(["all", "near", "below"] as const).map((f) => {
+          const labels = { all: "Alle hikkertjes", near: "≤10% boven limiet", below: "Op/onder limiet" };
+          return (
+            <button
+              key={f}
+              onClick={() => setLimitFilter(f)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                limitFilter === f
+                  ? "border-yellow-500 bg-yellow-500/20 text-yellow-300"
+                  : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              {labels[f]}
+            </button>
+          );
+        })}
+        <div className="ml-auto flex items-center gap-1 text-xs">
+          <span className="text-neutral-500">Sorteer:</span>
+          <button
+            onClick={() => setSortBy("spikes")}
+            className={`px-2 py-1 rounded font-semibold ${sortBy === "spikes" ? "bg-ink-3 text-neutral-100" : "text-neutral-500 hover:text-neutral-300"}`}
+          >Spikes</button>
+          <button
+            onClick={() => setSortBy("limit")}
+            className={`px-2 py-1 rounded font-semibold ${sortBy === "limit" ? "bg-ink-3 text-neutral-100" : "text-neutral-500 hover:text-neutral-300"}`}
+          >Dichtbij limiet</button>
+        </div>
       </div>
 
       {/* Ranking */}
@@ -111,16 +153,31 @@ export function HikkertjesView() {
               : "Alle tickers zijn gescand."}
           </div>
         </Card>
-      ) : (
+      ) : (() => {
+          const filtered = ranking.filter((h) => {
+            if (limitFilter === "below") return h.above_limit_pct != null && h.above_limit_pct <= 0;
+            if (limitFilter === "near") return h.above_limit_pct != null && h.above_limit_pct <= 10;
+            return true;
+          });
+          const sorted = sortBy === "limit"
+            ? [...filtered].sort((a, b) => {
+                const av = a.above_limit_pct ?? Number.POSITIVE_INFINITY;
+                const bv = b.above_limit_pct ?? Number.POSITIVE_INFINITY;
+                return av - bv;
+              })
+            : filtered;
+          return (
         <Card className="p-0 overflow-hidden">
           <div className="px-4 py-3 border-b border-ink-5 flex items-center justify-between">
             <div className="font-semibold text-sm">
-              Top {ranking.length} hikkertjes
+              {sorted.length} hikkertjes getoond {sorted.length !== ranking.length && <span className="text-neutral-500 font-normal">({ranking.length} totaal)</span>}
             </div>
-            <div className="text-xs text-neutral-500">gesorteerd op meeste spikes, daarna aankooplimiet</div>
+            <div className="text-xs text-neutral-500">
+              {sortBy === "limit" ? "gesorteerd op afstand tot limiet" : "gesorteerd op meeste spikes"}
+            </div>
           </div>
           <div className="divide-y divide-ink-5">
-            {ranking.map((h, idx) => {
+            {sorted.map((h, idx) => {
               const gfUrl = googleFinanceUrl(h.ticker, h.exchange);
               const belowLimit = h.above_limit_pct != null && h.above_limit_pct <= 0;
               const nearLimit = h.above_limit_pct != null && h.above_limit_pct > 0 && h.above_limit_pct <= 10;
@@ -191,7 +248,8 @@ export function HikkertjesView() {
             })}
           </div>
         </Card>
-      )}
+          );
+        })()}
     </div>
   );
 }

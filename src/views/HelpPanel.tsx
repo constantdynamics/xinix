@@ -293,8 +293,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
 
   backtest: {
     intro:
-      "Een terugtest van de scoring-logica op een vaste set bekende historische gevallen, zodat je kunt zien of het algoritme winnaars consequent hoger zet dan verliezers.",
+      "Een terugtest van de scoring-logica op een vaste set bekende historische gevallen, zodat je kunt zien of het algoritme winnaars consequent hoger zet dan verliezers. LET OP: dit tabblad vult zich NIET vanzelf — je moet de backtest handmatig starten (zie onderstaand).",
     blocks: [
+      {
+        id: "bt-handmatig",
+        title: "Waarom is dit tabblad vaak (bijna) leeg?",
+        body:
+          "Backtest is een handmatige terugtest, geen continue achtergrondjob. Hij draait alleen wanneer jij op de 'Backtest draaien'-knop drukt (met admin-token gezet). Resultaten blijven daarna staan tot je opnieuw draait. Standaard is er dus geen recente data — het is een eenmalige sanity-check.",
+      },
       {
         id: "bt-pairs",
         title: "Test pairs",
@@ -324,8 +330,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
 
   trackrecord: {
     intro:
-      "De werkelijke uitkomsten van eerder uitgegeven signalen, naast de baselines die het systeem vooraf voorspelde. Zo zie je of de scoring in de praktijk klopt.",
+      "De werkelijke uitkomsten van eerder uitgegeven signalen, naast de baselines die het systeem vooraf voorspelde. Zo zie je of de scoring in de praktijk klopt. LET OP: vult zich pas naarmate er BUY/STRONG_BUY-signalen sluiten — momenteel zijn er weinig actionable scores, dus weinig data.",
     blocks: [
+      {
+        id: "tr-waaromleeg",
+        title: "Waarom zie ik (bijna) niks?",
+        body:
+          "Track record meet de werkelijke return na een BUY of STRONG_BUY-signaal. Dat vereist twee dingen:\n1. Het scoringsalgoritme moet überhaupt BUY/STRONG_BUY uitdelen — momenteel staan vrijwel alle ~3600 scores op AVOID (te strenge drempels).\n2. Het signaal moet 7/14/30/90 dagen oud zijn voor die forward-return-buckets.\nForward-returns-job draait dagelijks om 07:30 UTC. Zodra er BUY-signalen verschijnen en oud genoeg worden, vult deze tab vanzelf.",
+      },
       {
         id: "tr-forward",
         title: "Forward returns (7d / 14d / 30d / 90d)",
@@ -362,8 +374,14 @@ export const PAGE_HELP: Record<string, PageHelp> = {
 
   signaallog: {
     intro:
-      "Alle BUY/STRONG_BUY-episodes uit de gekozen periode, met instapkoers, huidige koers en de gerealiseerde return. Handig om te zien hoe eerder uitgegeven koop-signalen er achteraf uitzien.",
+      "Alle BUY/STRONG_BUY-episodes uit de gekozen periode, met instapkoers, huidige koers en de gerealiseerde return. Handig om te zien hoe eerder uitgegeven koop-signalen er achteraf uitzien. LET OP: dit is iets ANDERS dan de signaal-events op de Dashboard-tab — hier gaat het puur om de hoogste actie-scores (BUY/STRONG_BUY).",
     blocks: [
+      {
+        id: "sl-waaromleeg",
+        title: "Waarom is dit zo leeg, terwijl er wel signalen zijn?",
+        body:
+          "Dit tabblad toont alleen 'koopwaardige' episodes (BUY of STRONG_BUY). Op het Dashboard zie je daarentegen ALLE soorten signaal-events (FDA-meldingen, koers-spikes, near-low alarmen, etc.) — die zijn er volop (16k+ in 7 dagen).\nBij weinig BUY-scores blijft Signaallog dus leeg. Verifieer op de Scores-tab: hoeveel STRONG_BUY/BUY zijn er nu? Als nul → dit tabblad blijft leeg tot scores actionable worden.",
+      },
       {
         id: "sl-episode",
         title: "Wat is een episode?",
