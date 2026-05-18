@@ -579,10 +579,26 @@ export interface SimEvolution {
   run_log: { at: string; message: string }[];
 }
 
+export interface SimFamilyPoint {
+  date: string;
+  avg_return_pct: number | null;
+  n: number;
+}
+export interface SimFamily {
+  grp: string;
+  n: number;
+  avg_return_pct: number;
+  best_return_pct: number | null;
+  best_slug: string | null;
+  worst_return_pct: number | null;
+  worst_slug: string | null;
+  series: SimFamilyPoint[];
+}
 export interface SimResults {
   strategies: SimStrategy[];
   insights: SimInsight[];
   recommendations: string[];
+  families?: { groups: SimFamily[]; dates: string[] };
   meta: {
     total: number;
     last_run_at: string | null;

@@ -79,7 +79,7 @@ function fmtDate(s: string): string {
 }
 
 export function XinixPortfolioView() {
-  const [mainTab, setMainTab] = useState<"portfolio" | "sim">("portfolio");
+  const [mainTab, setMainTab] = useState<"portfolio" | "sim" | "families">("portfolio");
   const [data, setData] = useState<XinixPortfolio | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +108,7 @@ export function XinixPortfolioView() {
     <div className="space-y-6">
       {/* Tab-switcher: Portfolio vs Simulatie */}
       <div className="flex gap-0 border-b border-ink-5">
-        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"]] as const).map(([key, label]) => (
+        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"], ["families", "🧬 Families"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMainTab(key)}
@@ -124,6 +124,7 @@ export function XinixPortfolioView() {
       </div>
 
       {mainTab === "sim" && <SimulationView />}
+      {mainTab === "families" && <FamiliesView />}
       {mainTab === "portfolio" && <div className="space-y-8">
 
       {/* Intro */}
@@ -1990,6 +1991,246 @@ export function PhoenixView() {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+// ── FamiliesView ────────────────────────────────────────────────────────────
+// Per-groep gemiddelde return + tijd-lijngrafiek over alle groepen heen.
+function FamiliesView() {
+  const [data, setData] = useState<SimResults | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<"avg" | "n" | "best" | "worst" | "grp">("avg");
+
+  useEffect(() => {
+    setLoading(true);
+    fetchSimResults()
+      .then((r) => { setData(r); setLoading(false); })
+      .catch((e) => { setError(e instanceof Error ? e.message : String(e)); setLoading(false); });
+  }, []);
+
+  if (loading) return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
+  if (error) return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
+  if (!data?.families) return <Card className="p-6 text-sm text-neutral-500">Nog geen familie-data beschikbaar. Wacht tot de eerstvolgende sim-run (22:30 UTC).</Card>;
+
+  const { groups, dates } = data.families;
+  const sorted = [...groups].sort((a, b) => {
+    switch (sortBy) {
+      case "n": return b.n - a.n;
+      case "best": return (b.best_return_pct ?? -Infinity) - (a.best_return_pct ?? -Infinity);
+      case "worst": return (a.worst_return_pct ?? Infinity) - (b.worst_return_pct ?? Infinity);
+      case "grp": return a.grp.localeCompare(b.grp);
+      default: return b.avg_return_pct - a.avg_return_pct;
+    }
+  });
+
+  // ── SVG chart ─────────────────────────────────────────────────────────────
+  const W = 900, H = 360;
+  const PAD = { l: 50, r: 20, t: 16, b: 36 };
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const visibleGroups = groups.filter((g) => !hiddenGroups.has(g.grp));
+  // Y-range over alle zichtbare groepen + alle dagen
+  let yMin = 0, yMax = 0;
+  for (const g of visibleGroups) {
+    for (const p of g.series) {
+      if (p.avg_return_pct == null) continue;
+      if (p.avg_return_pct < yMin) yMin = p.avg_return_pct;
+      if (p.avg_return_pct > yMax) yMax = p.avg_return_pct;
+    }
+  }
+  // Buffer + symmetry around 0
+  const pad = Math.max(0.5, (yMax - yMin) * 0.1);
+  yMin -= pad; yMax += pad;
+  if (yMin > 0) yMin = 0;
+  if (yMax < 0) yMax = 0.5;
+
+  const x = (i: number) => PAD.l + (dates.length <= 1 ? cw / 2 : (i * cw) / (dates.length - 1));
+  const y = (v: number) => PAD.t + (1 - (v - yMin) / (yMax - yMin)) * ch;
+  const yZero = y(0);
+
+  // Genereer kleuren in HSL spread
+  const colorFor = (idx: number, total: number) => `hsl(${Math.round((idx * 360) / Math.max(total, 1))} 70% 55%)`;
+
+  const yTicks: number[] = [];
+  const range = yMax - yMin;
+  const tickStep = range >= 50 ? 10 : range >= 10 ? 5 : range >= 2 ? 1 : 0.5;
+  for (let v = Math.ceil(yMin / tickStep) * tickStep; v <= yMax; v += tickStep) yTicks.push(v);
+
+  function toggleGroup(grp: string) {
+    setHiddenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(grp)) next.delete(grp); else next.add(grp);
+      return next;
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-4 border-emerald-500/30 bg-emerald-500/[0.04]">
+        <div className="flex items-start gap-3">
+          <span className="text-2xl">🧬</span>
+          <div className="flex-1">
+            <div className="font-semibold text-emerald-300 mb-1">Strategie-families</div>
+            <p className="text-sm text-neutral-300 leading-relaxed">
+              Gemiddeld rendement per familie (strategie-groep). Elke groep test één dimensie:
+              A-Score = score-drempel sweep · K-Profiel = agressieve profielen · X-Hikkertjes =
+              momentum-plays op explosieve dagstijgers · Y-Zwitserleven = high-yield fallen angels
+              (incl. dividend). De grafiek toont het gemiddelde verloop per familie over tijd.
+              Klik op een groep in de legenda om te tonen/verbergen.
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Chart */}
+      <Card className="p-4">
+        <div className="text-xs text-neutral-500 mb-2">
+          Gemiddelde return% per familie over {dates.length} dagen
+          ({dates.length > 0 ? `${dates[0]} → ${dates[dates.length - 1]}` : "—"})
+        </div>
+        <div className="overflow-x-auto">
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" style={{ minWidth: 600 }}>
+            {/* Y-grid */}
+            {yTicks.map((v, i) => (
+              <g key={i}>
+                <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="#374151" strokeWidth="0.5" strokeDasharray={v === 0 ? "" : "2,3"} />
+                <text x={PAD.l - 6} y={y(v) + 3} textAnchor="end" fill="#9ca3af" fontSize="10">{v.toFixed(range >= 10 ? 0 : 1)}%</text>
+              </g>
+            ))}
+            {/* Zero baseline (highlight) */}
+            <line x1={PAD.l} x2={W - PAD.r} y1={yZero} y2={yZero} stroke="#6b7280" strokeWidth="1" />
+
+            {/* X-axis labels (first, middle, last) */}
+            {dates.length > 0 && (
+              <>
+                <text x={PAD.l} y={H - PAD.b + 16} textAnchor="start" fill="#9ca3af" fontSize="10">{dates[0]}</text>
+                {dates.length > 2 && (
+                  <text x={W / 2} y={H - PAD.b + 16} textAnchor="middle" fill="#9ca3af" fontSize="10">
+                    {dates[Math.floor(dates.length / 2)]}
+                  </text>
+                )}
+                <text x={W - PAD.r} y={H - PAD.b + 16} textAnchor="end" fill="#9ca3af" fontSize="10">{dates[dates.length - 1]}</text>
+              </>
+            )}
+
+            {/* Lines per group */}
+            {groups.map((g, idx) => {
+              const color = colorFor(idx, groups.length);
+              const hidden = hiddenGroups.has(g.grp);
+              if (hidden) return null;
+              const pts: Array<[number, number]> = [];
+              g.series.forEach((p, i) => {
+                if (p.avg_return_pct != null) pts.push([x(i), y(p.avg_return_pct)]);
+              });
+              if (pts.length === 0) return null;
+              const d = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+              return (
+                <g key={g.grp}>
+                  <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+                  {pts.length === 1 && <circle cx={pts[0][0]} cy={pts[0][1]} r="2" fill={color} />}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        {/* Legend / toggles */}
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          {groups.map((g, idx) => {
+            const color = colorFor(idx, groups.length);
+            const hidden = hiddenGroups.has(g.grp);
+            return (
+              <button
+                key={g.grp}
+                onClick={() => toggleGroup(g.grp)}
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+                  hidden ? "opacity-30 border-ink-5" : "border-ink-5/60 hover:border-ink-5"
+                }`}
+                title={hidden ? "Toon" : "Verberg"}
+              >
+                <span className="w-3 h-1.5 rounded-sm" style={{ backgroundColor: color }} />
+                <span>{g.grp}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Tabel */}
+      <Card className="p-0 overflow-hidden">
+        <div className="px-4 py-3 border-b border-ink-5 flex items-center justify-between text-sm">
+          <div className="font-semibold">Per-familie statistieken</div>
+          <div className="text-xs text-neutral-500">{groups.length} families · klik kolomkop om te sorteren</div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b border-ink-5 bg-ink-2/40">
+              <tr>
+                {([
+                  ["grp",   "Familie"],
+                  ["n",     "Strategieën"],
+                  ["avg",   "Gem. return"],
+                  ["best",  "Beste"],
+                  ["worst", "Slechtste"],
+                ] as const).map(([key, label]) => (
+                  <th
+                    key={key}
+                    onClick={() => setSortBy(key)}
+                    className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide cursor-pointer hover:text-neutral-200 select-none"
+                  >
+                    {label}{sortBy === key ? " ▼" : " ·"}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink-5">
+              {sorted.map((g, idx) => {
+                const color = colorFor(groups.findIndex((x) => x.grp === g.grp), groups.length);
+                return (
+                  <tr key={g.grp} className="hover:bg-ink-3/30">
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-1.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+                        <span className="font-mono text-xs text-neutral-200">{g.grp}</span>
+                        <span className="text-[10px] text-neutral-600 tabular w-6 text-right">#{idx + 1}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 tabular text-xs text-neutral-300">{g.n}</td>
+                    <td className="px-3 py-2 tabular font-mono text-sm">
+                      <span className={g.avg_return_pct >= 0 ? "text-emerald-400" : "text-fog-loss"}>
+                        {g.avg_return_pct >= 0 ? "+" : ""}{g.avg_return_pct.toFixed(2)}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 tabular text-xs">
+                      {g.best_return_pct != null ? (
+                        <>
+                          <span className={g.best_return_pct >= 0 ? "text-emerald-400" : "text-fog-loss"}>
+                            {g.best_return_pct >= 0 ? "+" : ""}{g.best_return_pct.toFixed(2)}%
+                          </span>
+                          {g.best_slug && <span className="text-[10px] text-neutral-500 font-mono ml-1">{g.best_slug}</span>}
+                        </>
+                      ) : "—"}
+                    </td>
+                    <td className="px-3 py-2 tabular text-xs">
+                      {g.worst_return_pct != null ? (
+                        <>
+                          <span className={g.worst_return_pct >= 0 ? "text-emerald-400" : "text-fog-loss"}>
+                            {g.worst_return_pct >= 0 ? "+" : ""}{g.worst_return_pct.toFixed(2)}%
+                          </span>
+                          {g.worst_slug && <span className="text-[10px] text-neutral-500 font-mono ml-1">{g.worst_slug}</span>}
+                        </>
+                      ) : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 }

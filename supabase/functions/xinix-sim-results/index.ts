@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   try {
     const sb = getServiceClient();
-    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes] = await Promise.all([
+    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, equityRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected, parent_id").eq("active", true),
       sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, last_run_at, started_at"),
       sb.from("xinix_strategy_positions").select("strategy_id, return_usd, return_pct, entry_signal_types, entry_sector").not("closed_at","is",null),
@@ -46,6 +46,11 @@ Deno.serve(async (req) => {
         .not("closed_at", "is", null)
         .order("closed_at", { ascending: false })
         .limit(500),
+      // Equity-historie voor de Families-grafiek (alle dagelijkse snapshots).
+      // Met 220 strategieën × ~90d worden dat ~20k rows; goed te doen voor één call.
+      sb.from("xinix_strategy_equity")
+        .select("strategy_id, date, total_equity")
+        .order("date", { ascending: true }),
     ]);
 
     const priceMap = new Map<string, number>();
@@ -262,10 +267,73 @@ Deno.serve(async (req) => {
     const lastRun = results.find((r) => r.last_run_at)?.last_run_at ?? null;
     const runCount = results.filter((r) => r.closed_count > 0).length;
 
+    // ── Families: per-groep gemiddelde return + equity-tijdreeks per dag ───
+    // initial_capital per strategie (default 10000) om return% per snapshot te bepalen.
+    const initialByStrat = new Map<number, number>();
+    for (const r of (statesRes.data ?? [])) {
+      initialByStrat.set(r.strategy_id as number, Number(r.initial_capital ?? 10000));
+    }
+    const grpByStrat = new Map<number, string>();
+    for (const r of (stratRes.data ?? [])) grpByStrat.set(r.id as number, (r.grp as string) ?? "?");
+
+    // dailySum[grp][date] = { sumRetPct, n }
+    const dailyMap: Map<string, Map<string, { sumRetPct: number; n: number }>> = new Map();
+    const dateSet = new Set<string>();
+    for (const r of (equityRes.data ?? [])) {
+      const sid = r.strategy_id as number;
+      const grp = grpByStrat.get(sid);
+      if (!grp) continue;
+      const date = r.date as string;
+      const initial = initialByStrat.get(sid) ?? 10000;
+      const eq = Number(r.total_equity);
+      if (!Number.isFinite(eq) || initial <= 0) continue;
+      const retPct = ((eq - initial) / initial) * 100;
+      dateSet.add(date);
+      let perGrp = dailyMap.get(grp);
+      if (!perGrp) { perGrp = new Map(); dailyMap.set(grp, perGrp); }
+      const cur = perGrp.get(date) ?? { sumRetPct: 0, n: 0 };
+      cur.sumRetPct += retPct; cur.n += 1;
+      perGrp.set(date, cur);
+    }
+    const allDates = [...dateSet].sort();
+
+    // Per groep ook de huidige (laatste-dag) gemiddelde return, # strategieën,
+    // beste en slechtste binnen de groep.
+    const grpStats = new Map<string, { n: number; sumRetPct: number; best: number; worst: number; bestSlug: string | null; worstSlug: string | null }>();
+    for (const r of results) {
+      const g = r.grp;
+      const cur = grpStats.get(g) ?? { n: 0, sumRetPct: 0, best: -Infinity, worst: Infinity, bestSlug: null, worstSlug: null };
+      cur.n++;
+      cur.sumRetPct += r.total_return_pct;
+      if (r.total_return_pct > cur.best) { cur.best = r.total_return_pct; cur.bestSlug = r.slug; }
+      if (r.total_return_pct < cur.worst) { cur.worst = r.total_return_pct; cur.worstSlug = r.slug; }
+      grpStats.set(g, cur);
+    }
+    const families = [...grpStats.entries()]
+      .map(([grp, s]) => {
+        const series = dailyMap.get(grp);
+        const points = allDates.map((d) => {
+          const cur = series?.get(d);
+          return cur && cur.n > 0 ? { date: d, avg_return_pct: cur.sumRetPct / cur.n, n: cur.n } : { date: d, avg_return_pct: null, n: 0 };
+        });
+        return {
+          grp,
+          n: s.n,
+          avg_return_pct: s.n > 0 ? s.sumRetPct / s.n : 0,
+          best_return_pct: s.best === -Infinity ? null : s.best,
+          best_slug: s.bestSlug,
+          worst_return_pct: s.worst === Infinity ? null : s.worst,
+          worst_slug: s.worstSlug,
+          series: points,
+        };
+      })
+      .sort((a, b) => b.avg_return_pct - a.avg_return_pct);
+
     return new Response(JSON.stringify({
       strategies: results,
       insights: insights.filter(Boolean),
       recommendations,
+      families: { groups: families, dates: allDates },
       meta: { total: results.length, last_run_at: lastRun, strategies_with_closed_positions: runCount },
       evolution: {
         cycles:            evolveRuns.length,
