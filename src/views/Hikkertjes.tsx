@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   fetchScanResults,
   triggerJob,
@@ -33,20 +33,23 @@ export function HikkertjesView() {
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [limitFilter, setLimitFilter] = useState<"all" | "near" | "below">("all");
   const [sortBy, setSortBy] = useState<"spikes" | "limit">("spikes");
+  const [fullScanRunning, setFullScanRunning] = useState(false);
+  const [fullScanBatch, setFullScanBatch] = useState(0);
+  const fullScanStopRef = useRef(false);
+
+  async function refreshData() {
+    const r = await fetchScanResults();
+    setRanking(r.hikkertje_ranking ?? []);
+    setHikkertjeCount(r.hikkertje_count ?? 0);
+    setUnscanned(r.hikkertje_unscanned ?? 0);
+    return r.hikkertje_unscanned ?? 0;
+  }
 
   useEffect(() => {
     setLoading(true);
-    fetchScanResults()
-      .then((r) => {
-        setRanking(r.hikkertje_ranking ?? []);
-        setHikkertjeCount(r.hikkertje_count ?? 0);
-        setUnscanned(r.hikkertje_unscanned ?? 0);
-        setLoading(false);
-      })
-      .catch((e) => {
-        setError(e instanceof Error ? e.message : String(e));
-        setLoading(false);
-      });
+    refreshData()
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false));
   }, []);
 
   async function runScan() {
@@ -61,6 +64,33 @@ export function HikkertjesView() {
       setScanning(false);
     }
   }
+
+  async function runFullScan() {
+    if (fullScanRunning) return;
+    fullScanStopRef.current = false;
+    setFullScanRunning(true);
+    setFullScanBatch(0);
+    setScanMsg(null);
+    const MAX_BATCHES = 60;
+    const BATCH_WAIT_MS = 95_000;
+    try {
+      let batch = 0;
+      while (!fullScanStopRef.current && batch < MAX_BATCHES) {
+        const remaining = await refreshData();
+        if (remaining === 0) { setScanMsg(`Volledige scan klaar — geen ongezicende tickers meer.`); break; }
+        try { await triggerJob("compute-hikkertjes-background"); } catch (e) { setScanMsg(`Fout bij batch ${batch + 1}: ${e instanceof Error ? e.message : String(e)}`); break; }
+        batch++;
+        setFullScanBatch(batch);
+        for (let waited = 0; waited < BATCH_WAIT_MS && !fullScanStopRef.current; waited += 1000) {
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+      await refreshData();
+    } finally {
+      setFullScanRunning(false);
+    }
+  }
+  function stopFullScan() { fullScanStopRef.current = true; }
 
   const isAdmin = !!getToken();
 
@@ -102,11 +132,23 @@ export function HikkertjesView() {
         />
         <Stat label="Nog te scannen" value={unscanned} />
         {isAdmin && (
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
             {scanMsg && <span className="text-xs text-neutral-400">{scanMsg}</span>}
-            <Button size="sm" variant="secondary" onClick={runScan} disabled={scanning}>
-              {scanning ? "…" : "⚡ Scan starten"}
+            <Button size="sm" variant="secondary" onClick={runScan} disabled={scanning || fullScanRunning}>
+              {scanning ? "…" : "⚡ Scan 1×"}
             </Button>
+            {!fullScanRunning ? (
+              <Button size="sm" onClick={runFullScan} disabled={scanning || unscanned === 0}>
+                ⚡ Scan hele watchlist
+              </Button>
+            ) : (
+              <>
+                <span className="text-xs text-yellow-400 font-semibold">
+                  Batch {fullScanBatch} · {unscanned} resterend
+                </span>
+                <Button size="sm" variant="secondary" onClick={stopFullScan}>Stop</Button>
+              </>
+            )}
           </div>
         )}
       </div>
