@@ -1,12 +1,17 @@
-// xinix-sim-background — simuleert 200 fundamenteel verschillende handelsstrategieën
+// xinix-sim-background — simuleert 220 fundamenteel verschillende handelsstrategieën
 // op hetzelfde universum (watchlist + real price data). Elke strategie beheert een
 // eigen papieren portefeuille van $10.000. Dagelijks draaien na US close (22:00 UTC).
 //
 // Dimensies die variëren tussen de strategieën:
 //   min_score, require_red, sector, max_pos, pos_size, hold_days,
-//   stop_loss, take_profit, limit_buf, min_gold, trailing_stop, opportunity_replace
+//   stop_loss, take_profit, limit_buf, min_gold, trailing_stop, opportunity_replace,
+//   require_hikkertje, require_zwitserleven
 //
-// Gegroepeerd in 23 groepen (A–W) zodat per dimensie lessen getrokken kunnen worden.
+// Gegroepeerd in 25 groepen (A–Y) zodat per dimensie lessen getrokken kunnen worden.
+// Groep X = hikkertjes (momentum plays), Y = zwitserleven (dividend-rijke fallen angels).
+//
+// Dividend-income wordt approximatief meegeteld in totaalrendement:
+// avg_price × dividend_yield × qty × (hold_days/365) bij elke positie-sluiting.
 //
 // Marktconforme transactiekosten: 0,1% per transactie (koop én verkoop).
 // Slimme exits:
@@ -44,6 +49,8 @@ interface Cfg {
   minGold: number;
   trailingStop: number | null; // trailing stop (stop ratchets mee omhoog); null = geen
   opportunityReplace: boolean; // vervang slechtste positie voor significant betere kans
+  requireHikkertje?: boolean;   // alleen kandidaten met is_hikkertje=true
+  requireZwitserleven?: boolean; // alleen kandidaten met zwitserleven_stocks.meets_criteria=true
 }
 
 // ── 200 strategieën (B = basisprofiel, gebruikt als basis voor c()) ─────────
@@ -301,6 +308,33 @@ const STRATEGIES: Cfg[] = [
   c({slug:"lim0_trail15",     name:"Strikt limiet + trailing -15%",   grp:"W-MultiCombo", limitBuf:0.00, trailingStop:0.15, stop:null}),
   c({slug:"s65_bio_trail",    name:"S≥65 + Biotech + trailing -15%",  grp:"W-MultiCombo", minScore:65, sector:"biotech", trailingStop:0.15, stop:null}),
   c({slug:"min_red_h60",      name:"Mining + Rood + 60d",             grp:"W-MultiCombo", sector:"mining", redReq:true, minScore:0}),
+
+  // X: Hikkertjes-strategieën (10) — momentum plays op explosieve 1-dag stijgers.
+  // Korte hold, hoge TP, deel met trailing om de spike mee te pakken.
+  c({slug:"hik_basic",      name:"⚡ Hikkertje basis (30d, TP+50%)",          grp:"X-Hikkertjes", minScore:0, holdDays:30, stop:0.20, tp:0.50, requireHikkertje:true}),
+  c({slug:"hik_aggr",       name:"⚡ Hikkertje agressief (20d, TP+100%)",      grp:"X-Hikkertjes", minScore:0, holdDays:20, stop:0.20, tp:1.00, requireHikkertje:true, maxPos:5, posSize:2000}),
+  c({slug:"hik_explosive",  name:"⚡ Hikkertje explosief (15d, TP+200%)",      grp:"X-Hikkertjes", minScore:0, holdDays:15, stop:0.25, tp:2.00, requireHikkertje:true, maxPos:4, posSize:2500}),
+  c({slug:"hik_trail10",    name:"⚡ Hikkertje trailing -10%",                grp:"X-Hikkertjes", minScore:0, holdDays:45, stop:null, trailingStop:0.10, requireHikkertje:true}),
+  c({slug:"hik_trail15",    name:"⚡ Hikkertje trailing -15%",                grp:"X-Hikkertjes", minScore:0, holdDays:60, stop:null, trailingStop:0.15, requireHikkertje:true}),
+  c({slug:"hik_s50",        name:"⚡ Hikkertje + S≥50",                       grp:"X-Hikkertjes", minScore:50, holdDays:30, stop:0.20, tp:0.50, requireHikkertje:true}),
+  c({slug:"hik_red",        name:"⚡ Hikkertje + Rood signaal",               grp:"X-Hikkertjes", minScore:0, holdDays:30, stop:0.20, tp:0.75, redReq:true, requireHikkertje:true}),
+  c({slug:"hik_lim0",       name:"⚡ Hikkertje op buy_limit (strikt)",         grp:"X-Hikkertjes", minScore:0, holdDays:30, stop:0.20, tp:0.50, limitBuf:0.00, requireHikkertje:true}),
+  c({slug:"hik_opr",        name:"⚡ Hikkertje + kansrotatie",                grp:"X-Hikkertjes", minScore:0, holdDays:30, stop:null, trailingStop:0.12, tp:0.75, requireHikkertje:true, opportunityReplace:true}),
+  c({slug:"hik_bio",        name:"⚡ Hikkertje biotech only",                  grp:"X-Hikkertjes", minScore:0, holdDays:30, stop:0.20, tp:1.00, sector:"biotech", requireHikkertje:true}),
+
+  // Y: Zwitserleven-strategieën (10) — dividend-rijke fallen angels uit grote indices.
+  // Lange hold zodat dividend (avg × yield × days/365) significant bijdraagt aan totaalrendement.
+  // Stops zijn ruimer/afwezig omdat het dividend een buffer biedt.
+  c({slug:"zwl_basic",      name:"🌴 Zwitserleven 90d",                      grp:"Y-Zwitserleven", minScore:0, holdDays:90, stop:0.20, tp:null, requireZwitserleven:true}),
+  c({slug:"zwl_long",       name:"🌴 Zwitserleven 180d (lange dividend-rit)", grp:"Y-Zwitserleven", minScore:0, holdDays:180, stop:0.25, tp:null, requireZwitserleven:true}),
+  c({slug:"zwl_nostop",     name:"🌴 Zwitserleven geen stop (180d)",          grp:"Y-Zwitserleven", minScore:0, holdDays:180, stop:null, tp:null, requireZwitserleven:true}),
+  c({slug:"zwl_trail15",    name:"🌴 Zwitserleven trailing -15%",            grp:"Y-Zwitserleven", minScore:0, holdDays:120, stop:null, trailingStop:0.15, requireZwitserleven:true}),
+  c({slug:"zwl_trail20",    name:"🌴 Zwitserleven trailing -20%",            grp:"Y-Zwitserleven", minScore:0, holdDays:120, stop:null, trailingStop:0.20, requireZwitserleven:true}),
+  c({slug:"zwl_tp25",       name:"🌴 Zwitserleven + TP+25%",                 grp:"Y-Zwitserleven", minScore:0, holdDays:90, stop:0.20, tp:0.25, requireZwitserleven:true}),
+  c({slug:"zwl_tp50",       name:"🌴 Zwitserleven + TP+50%",                 grp:"Y-Zwitserleven", minScore:0, holdDays:120, stop:0.20, tp:0.50, requireZwitserleven:true}),
+  c({slug:"zwl_cons",       name:"🌴 Zwitserleven conservatief (15 pos)",     grp:"Y-Zwitserleven", minScore:0, holdDays:120, stop:0.15, tp:null, maxPos:15, posSize:600, requireZwitserleven:true}),
+  c({slug:"zwl_concentrate", name:"🌴 Zwitserleven geconcentreerd (5 pos)",   grp:"Y-Zwitserleven", minScore:0, holdDays:120, stop:0.20, tp:null, maxPos:5, posSize:2000, requireZwitserleven:true}),
+  c({slug:"zwl_lim5",       name:"🌴 Zwitserleven + buy_limit +5%",          grp:"Y-Zwitserleven", minScore:0, holdDays:90, stop:0.20, tp:null, limitBuf:0.05, requireZwitserleven:true}),
 ];
 // A:10 + B:6 + C:5 + D:4 + E:6 + F:8 + G:7 + H:5 + I:5 + J:8 + K:5 + L:5 + M:26 + N:6
 // + O:8 + P:10 + Q:10 + R:8 + S:8 + T:8 + U:6 + V:6 + W:30 = 200
@@ -328,7 +362,7 @@ interface OpenPos {
   entry_signal_types: string[];
   partial_exits: Array<{ qty_sold: number; net_proceeds: number; at: string; reason: string }>;
 }
-interface TickerRow { ticker: string; sector: string | null; goud_score: number | null; buy_limit: number | null; medal_gold: number | null; }
+interface TickerRow { ticker: string; sector: string | null; goud_score: number | null; buy_limit: number | null; medal_gold: number | null; is_hikkertje: boolean | null; dividend_yield: number | null; }
 interface SigRow { ticker: string; signal_type: string; severity: string; }
 
 Deno.serve(async (req) => {
@@ -369,18 +403,30 @@ async function run() {
   await sb.from("xinix_strategy_state").upsert(stateRows, { onConflict: "strategy_id", ignoreDuplicates: true });
 
   // 2. Gedeelde marktdata ophalen
-  const [statesRes, openRes, tickersRes, summaryRes, signalsRes, regimeRes] = await Promise.all([
+  const [statesRes, openRes, tickersRes, summaryRes, signalsRes, regimeRes, zwitserlevenRes] = await Promise.all([
     sb.from("xinix_strategy_state").select("strategy_id, cash, max_equity, max_drawdown_pct"),
     sb.from("xinix_strategy_positions")
       .select("id, strategy_id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, take_profit_price, entry_signal_types, partial_exits")
       .is("closed_at", null),
-    sb.from("signal_tickers").select("ticker, sector, goud_score, buy_limit, medal_gold").eq("active", true).eq("price_benched", false),
+    sb.from("signal_tickers").select("ticker, sector, goud_score, buy_limit, medal_gold, is_hikkertje, dividend_yield").eq("active", true).eq("price_benched", false),
     sb.from("signal_price_summary").select("ticker, last_close"),
     sb.from("signal_events").select("ticker, signal_type, severity")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
       .order("detected_at", { ascending: false }).limit(3000),
     sb.from("market_regime").select("is_bull, regime, updated_at").eq("id", 1).maybeSingle(),
+    sb.from("zwitserleven_stocks").select("ticker").eq("meets_criteria", true),
   ]);
+
+  // Zwitserleven-set (tickers die aan alle 4 criteria voldoen)
+  const zwitserlevenSet = new Set<string>();
+  for (const r of (zwitserlevenRes.data ?? [])) zwitserlevenSet.add(r.ticker as string);
+
+  // Dividend per ticker (TTM yield als fractie) — voor approximation van
+  // dividend-income op gesloten posities.
+  const dividendYieldByTicker = new Map<string, number>();
+  for (const t of (tickersRes.data ?? [])) {
+    if ((t as TickerRow).dividend_yield != null) dividendYieldByTicker.set(t.ticker as string, Number((t as TickerRow).dividend_yield));
+  }
 
   // Marktregime: 3 staten. Bij ontbrekende/verouderde data (>3d) → standaard strong_bull.
   const regimeRow  = regimeRes.data;
@@ -517,6 +563,15 @@ async function run() {
       // ── Positie sluiten ────────────────────────────────────────────────────
       const prevPartials = p.partial_exits ?? [];
       let retUsd: number, retPct: number, netProceeds: number;
+      const holdDays = Math.max(0, Math.round((now.getTime() - new Date(p.entry_date).getTime()) / 86_400_000));
+
+      // Dividend-income approximation: avg_price × dividend_yield × qty × (holdDays/365).
+      // Bron: signal_tickers.dividend_yield (TTM yield als fractie). Aanname dat het
+      // yield-niveau stabiel was tijdens de hold-periode — voor de meeste large-caps OK.
+      const divYield = dividendYieldByTicker.get(p.ticker) ?? 0;
+      const dividendIncome = divYield > 0 && holdDays > 0
+        ? Number(p.qty) * Number(p.avg_price) * divYield * (holdDays / 365)
+        : 0;
 
       if (prevPartials.length > 0) {
         // Herstel originele qty voor juiste return-berekening
@@ -524,16 +579,14 @@ async function run() {
         const origCost = origQty * Number(p.avg_price) * (1 + TX_COST);
         const partialProc = prevPartials.reduce((s, pe) => s + pe.net_proceeds, 0);
         netProceeds = Number(p.qty) * price * (1 - TX_COST);
-        retUsd = partialProc + netProceeds - origCost;
+        retUsd = partialProc + netProceeds + dividendIncome - origCost;
         retPct = origCost > 0 ? (retUsd / origCost) * 100 : 0;
       } else {
         netProceeds = Number(p.qty) * price * (1 - TX_COST);
         const cost = Number(p.qty) * Number(p.avg_price) * (1 + TX_COST);
-        retUsd = netProceeds - cost;
+        retUsd = netProceeds + dividendIncome - cost;
         retPct = cost > 0 ? (retUsd / cost) * 100 : 0;
       }
-
-      const holdDays = Math.max(0, Math.round((now.getTime() - new Date(p.entry_date).getTime()) / 86_400_000));
       const currentRetPct = (price - Number(p.avg_price)) / Number(p.avg_price) * 100;
       const reason = fixedStopHit   ? `Stop-loss -${(cfg.stop! * 100).toFixed(0)}%`
                   : trailStopHit   ? `Trailing stop -${(cfg.trailingStop! * 100).toFixed(0)}% (stop ${Number(p.stop_loss_price!).toFixed(2)})`
@@ -554,6 +607,8 @@ async function run() {
       for (const t of tickers) {
         if (stillOpenTickers.has(t.ticker)) continue;
         if (cfg.sector !== "all" && t.sector !== cfg.sector) continue;
+        if (cfg.requireHikkertje && !t.is_hikkertje) continue;
+        if (cfg.requireZwitserleven && !zwitserlevenSet.has(t.ticker)) continue;
         const price = priceMap.get(t.ticker);
         if (!price || price <= 0) continue;
         const score = t.goud_score ?? 0;
@@ -581,20 +636,25 @@ async function run() {
           const price = priceMap.get(worstPos.ticker)!;
           const prevPartials = worstPos.partial_exits ?? [];
           let retUsd: number, retPct: number, netProceeds: number;
+          const holdDays = Math.max(0, Math.round((now.getTime() - new Date(worstPos.entry_date).getTime()) / 86_400_000));
+          // Dividend-income (zie hoofdsluiting voor toelichting).
+          const divYield = dividendYieldByTicker.get(worstPos.ticker) ?? 0;
+          const dividendIncome = divYield > 0 && holdDays > 0
+            ? Number(worstPos.qty) * Number(worstPos.avg_price) * divYield * (holdDays / 365)
+            : 0;
           if (prevPartials.length > 0) {
             const origQty = Number(worstPos.qty) + prevPartials.reduce((s, pe) => s + pe.qty_sold, 0);
             const origCost = origQty * Number(worstPos.avg_price) * (1 + TX_COST);
             const partialProc = prevPartials.reduce((s, pe) => s + pe.net_proceeds, 0);
             netProceeds = Number(worstPos.qty) * price * (1 - TX_COST);
-            retUsd = partialProc + netProceeds - origCost;
+            retUsd = partialProc + netProceeds + dividendIncome - origCost;
             retPct = origCost > 0 ? (retUsd / origCost) * 100 : 0;
           } else {
             netProceeds = Number(worstPos.qty) * price * (1 - TX_COST);
             const cost = Number(worstPos.qty) * Number(worstPos.avg_price) * (1 + TX_COST);
-            retUsd = netProceeds - cost;
+            retUsd = netProceeds + dividendIncome - cost;
             retPct = cost > 0 ? (retUsd / cost) * 100 : 0;
           }
-          const holdDays = Math.max(0, Math.round((now.getTime() - new Date(worstPos.entry_date).getTime()) / 86_400_000));
           exits.push({ id: worstPos.id, data: {
             closed_at: now.toISOString(), closed_price: price,
             closed_reason: `Kans-rotatie: ${quickCandidates[0].ticker} (rank ${quickCandidates[0].rankScore}) — positie verlies ${worstRet.toFixed(1)}%`,
@@ -620,6 +680,8 @@ async function run() {
         if (stillOpenTickers.has(t.ticker)) continue;
         if (cfg.sector !== "all" && t.sector !== cfg.sector) continue;
         if ((t.medal_gold ?? 0) < cfg.minGold) continue;
+        if (cfg.requireHikkertje && !t.is_hikkertje) continue;
+        if (cfg.requireZwitserleven && !zwitserlevenSet.has(t.ticker)) continue;
         const price = priceMap.get(t.ticker);
         if (price == null || price <= 0) continue;
         const score = t.goud_score ?? 0;
