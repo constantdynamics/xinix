@@ -125,6 +125,71 @@ function deriveFromTrials(studies: CTStudy[]): {
   return { phase: bestPhase, maxEnrollment: maxEnrollment > 0 ? maxEnrollment : null, diseaseArea, isOncology, isRareDisease, hasBreakthroughHint: breakthroughHint };
 }
 
+// ── Mining: Yahoo quoteSummary voor industry + country ─────────────────────
+async function fetchYahooProfile(ticker: string): Promise<{ industry: string | null; country: string | null }> {
+  try {
+    const url = `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`;
+    const res = await fetch(url, { headers: { "User-Agent": UA } });
+    if (!res.ok) return { industry: null, country: null };
+    const json = (await res.json()) as { quoteSummary?: { result?: Array<{ assetProfile?: { industry?: string; country?: string } }> } };
+    const r = json.quoteSummary?.result?.[0]?.assetProfile;
+    return { industry: r?.industry ?? null, country: r?.country ?? null };
+  } catch {
+    return { industry: null, country: null };
+  }
+}
+
+// ── Tier-1/2/3 jurisdictie mapping (uit weights.ts mining_quality logic) ───
+const TIER1_COUNTRIES = new Set(["Canada", "Australia", "United States", "USA"]);
+const TIER2_COUNTRIES = new Set(["Chile", "Peru", "Brazil", "Mexico", "Argentina", "Colombia", "Finland", "Sweden", "Norway", "Portugal", "Spain"]);
+// Anders = tier 3 (Afrika, Centraal-Azië, etc.). Niet expliciet gelijst; we slaan
+// het land op, scoring leest het.
+function inferJurisdiction(country: string | null): string | null {
+  if (!country) return null;
+  if (TIER1_COUNTRIES.has(country)) return country;
+  if (TIER2_COUNTRIES.has(country)) return country;
+  return country; // tier-3 — opgeslagen voor transparantie, scoring beoordeelt
+}
+
+// Commodity-detectie uit industry-string + company-name fallback
+function inferCommodity(industry: string | null, company: string | null): string | null {
+  const blob = ((industry ?? "") + " " + (company ?? "")).toLowerCase();
+  if (/lithium/.test(blob)) return "lithium";
+  if (/copper/.test(blob)) return "copper";
+  if (/gold|au\b/.test(blob)) return "gold";
+  if (/silver|ag\b/.test(blob)) return "silver";
+  if (/uranium|u3o8/.test(blob)) return "uranium";
+  if (/nickel/.test(blob)) return "nickel";
+  if (/rare earth|ree\b|neodymium|praseodymium|dysprosium/.test(blob)) return "rare-earth";
+  if (/antimony/.test(blob)) return "antimony";
+  if (/cobalt/.test(blob)) return "cobalt";
+  if (/zinc|lead/.test(blob)) return "zinc-lead";
+  if (/iron|fe2o3/.test(blob)) return "iron";
+  if (/platinum|palladium|pgm/.test(blob)) return "pgm";
+  if (/tin\b/.test(blob)) return "tin";
+  if (/graphite/.test(blob)) return "graphite";
+  if (/coal/.test(blob)) return "coal";
+  return null;
+}
+
+// Operational status uit signal_catalysts events: PEA/PFS/DFS = pre-development,
+// permit/first_pour/production = operational.
+async function inferOperationalStatus(sb: ReturnType<typeof getServiceClient>, ticker: string): Promise<string | null> {
+  const { data: cats } = await sb
+    .from("signal_catalysts")
+    .select("catalyst_type, status")
+    .eq("ticker", ticker);
+  if (!cats || cats.length === 0) return null;
+  const types = new Set(cats.map((c) => (c.catalyst_type as string) || ""));
+  if (types.has("first_pour") || types.has("operational") || types.has("production_start")) return "operational";
+  if (types.has("permit") || types.has("permit_decision")) return "permit-stage";
+  if (types.has("dfs") || types.has("definitive_feasibility")) return "pre-development";
+  if (types.has("pfs") || types.has("pre_feasibility")) return "pre-development";
+  if (types.has("pea") || types.has("preliminary_economic_assessment")) return "pre-development";
+  if (types.has("resource_estimate")) return "exploration";
+  return null;
+}
+
 // ── openFDA: orphan/breakthrough/fast track designations ────────────────────
 interface FdaHit { sponsor_name?: string; products?: Array<{ active_ingredients?: Array<{ name?: string }> }>; }
 async function fetchFdaDesignations(company: string): Promise<{ hasOrphan: boolean; hasFastTrack: boolean; hasBreakthrough: boolean }> {
@@ -168,15 +233,15 @@ async function run(): Promise<RunResult> {
   const BATCH_SIZE = 30;
   const RESCAN_CUTOFF = new Date(Date.now() - RESCAN_DAYS * 24 * 3600 * 1000).toISOString();
 
-  // Pak biotech tickers met:
+  // Pak biotech + mining tickers met:
   //   - briefing_status='pending' OF 'no_data'
   //   - OF 'filled' + briefing_polled_at < cutoff
-  // not_applicable wordt nooit gepolld.
+  // 'not_applicable' wordt nooit gepolld (sector='other').
   const { data: batch, error } = await sb
     .from("signal_tickers")
-    .select("ticker, company, sector, phase, disease_area, trial_size_n, has_orphan_drug, has_breakthrough_designation, has_fast_track, briefing_status, briefing_polled_at")
+    .select("ticker, company, sector, phase, disease_area, trial_size_n, has_orphan_drug, has_breakthrough_designation, has_fast_track, commodity, jurisdiction, operational_status, briefing_status, briefing_polled_at")
     .eq("active", true)
-    .eq("sector", "biotech")
+    .in("sector", ["biotech", "mining"])
     .or(`briefing_status.eq.pending,briefing_status.eq.no_data,and(briefing_status.eq.filled,briefing_polled_at.lt.${RESCAN_CUTOFF})`)
     .order("briefing_polled_at", { ascending: true, nullsFirst: true })
     .limit(BATCH_SIZE);
@@ -200,25 +265,36 @@ async function run(): Promise<RunResult> {
         continue;
       }
 
-      const studies = await fetchTrials(company);
-      const derived = deriveFromTrials(studies);
-      // openFDA-aanroep voorlopig pragmatisch overgeslagen voor MVP — coverage is laag
-      // en CT.gov-velden geven al meeste impact. Ruimte voor uitbreiding in volgende iteratie.
-      const fda = await fetchFdaDesignations(company);
-
       const update: Record<string, unknown> = { briefing_polled_at: now };
       let anyFilled = false;
 
-      // Alleen bestaande null-waarden invullen — admin-overrides niet overschrijven
-      if (!t.phase && derived.phase) { update.phase = derived.phase; anyFilled = true; }
-      if (!t.disease_area && derived.diseaseArea) { update.disease_area = derived.diseaseArea; anyFilled = true; }
-      if (t.trial_size_n == null && derived.maxEnrollment != null) { update.trial_size_n = derived.maxEnrollment; anyFilled = true; }
-      if (t.has_orphan_drug == null && (fda.hasOrphan || derived.isRareDisease)) { update.has_orphan_drug = derived.isRareDisease; anyFilled = true; }
-      if (t.has_breakthrough_designation == null && (fda.hasBreakthrough || derived.hasBreakthroughHint)) {
-        update.has_breakthrough_designation = fda.hasBreakthrough || derived.hasBreakthroughHint;
-        anyFilled = true;
+      if (t.sector === "biotech") {
+        // ── Biotech: CT.gov sponsor-search → phase, disease_area, trial_size, designations
+        const studies = await fetchTrials(company);
+        const derived = deriveFromTrials(studies);
+        const fda = await fetchFdaDesignations(company);
+        if (!t.phase && derived.phase) { update.phase = derived.phase; anyFilled = true; }
+        if (!t.disease_area && derived.diseaseArea) { update.disease_area = derived.diseaseArea; anyFilled = true; }
+        if (t.trial_size_n == null && derived.maxEnrollment != null) { update.trial_size_n = derived.maxEnrollment; anyFilled = true; }
+        if (t.has_orphan_drug == null && (fda.hasOrphan || derived.isRareDisease)) { update.has_orphan_drug = derived.isRareDisease; anyFilled = true; }
+        if (t.has_breakthrough_designation == null && (fda.hasBreakthrough || derived.hasBreakthroughHint)) {
+          update.has_breakthrough_designation = fda.hasBreakthrough || derived.hasBreakthroughHint;
+          anyFilled = true;
+        }
+        if (t.has_fast_track == null && fda.hasFastTrack) { update.has_fast_track = true; anyFilled = true; }
+      } else if (t.sector === "mining") {
+        // ── Mining: Yahoo industry/country + signal_catalysts events → commodity,
+        //          jurisdiction, operational_status. Andere velden (deposit_type,
+        //          geological_anomaly, processing_tech, has_strategic_backer) vereisen
+        //          NI 43-101 PDF-parsing en blijven handmatig.
+        const profile = await fetchYahooProfile(t.ticker as string);
+        const commodity = inferCommodity(profile.industry, t.company as string);
+        const jurisdiction = inferJurisdiction(profile.country);
+        const opStatus = await inferOperationalStatus(sb, t.ticker as string);
+        if (!t.commodity && commodity) { update.commodity = commodity; anyFilled = true; }
+        if (!t.jurisdiction && jurisdiction) { update.jurisdiction = jurisdiction; anyFilled = true; }
+        if (!t.operational_status && opStatus) { update.operational_status = opStatus; anyFilled = true; }
       }
-      if (t.has_fast_track == null && fda.hasFastTrack) { update.has_fast_track = true; anyFilled = true; }
 
       update.briefing_status = anyFilled ? "filled" : "no_data";
       if (anyFilled) filled++; else noData++;

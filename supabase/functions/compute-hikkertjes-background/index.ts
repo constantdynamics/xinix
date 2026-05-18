@@ -1,5 +1,5 @@
 // compute-hikkertjes-background — scant de watchlist op het hikkertje-profiel:
-// aandelen die in het afgelopen jaar minimaal 2× op één dag ≥50% gestegen zijn
+// aandelen die in het afgelopen jaar minimaal 2× op één dag ≥55% gestegen zijn
 // én die stijging minimaal 3 handelsdagen vastgehouden hebben.
 // Verwerkt max 80 tickers per run (is_hikkertje IS NULL); draait daily of op verzoek.
 
@@ -43,7 +43,8 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
   };
 }
 
-const MIN_GAIN_PCT = 0.50;   // ≥50% single-day stijging
+const MIN_GAIN_PCT = 0.55;   // ≥55% single-day stijging (was 50% — opgeschroefd om
+                             // illiquide penny-flits-bewegingen €0.05→€0.10 uit te filteren)
 const MIN_HOLD_DAYS = 3;     // stijging minimaal 3 handelsdagen vasthouden
 const MIN_SPIKES = 2;        // minimaal 2 keer in het afgelopen jaar
 const BATCH_SIZE = 80;       // dagelijkse data is zwaarder, iets kleiner batch
