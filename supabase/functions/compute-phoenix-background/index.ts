@@ -65,9 +65,11 @@ const RUN_MIN_DAYS          = 10;
 const RUN_50X_MAX_DAYS      = 60;
 const RUN_100X_MAX_DAYS     = 120;
 const RAW_CLOSE_MIN_MULT    = 25;
-// Twee niveaus van piek-cap:
-//   • > $100.000  → ticker volledig deactiveren (te ver verwaterd voor watchlist)
-//   • $10k-$100k → blijft in watchlist maar geen feniks-flag (matig verwaterd)
+// Recovery-check: een echte feniks staat "nu laag" — de huidige koers moet
+// dichter bij de baseline liggen dan bij de piek. Als current > baseline × 3
+// is het aandeel niet gecrashed, of erger: ghost-data uit een reorg/Chapter
+// 11 waar de "baseline" een prereorg-prijs is die niet meer bestaat (AMPY).
+const MAX_CURRENT_VS_BASELINE = 3;
 const MAX_DEACTIVATE_PEAK   = 100_000;
 const MAX_HISTORICAL_PEAK   = 10_000;
 const MIN_BASELINE_PRICE    = 0.05;
@@ -128,7 +130,9 @@ function hasUntrustworthySplit(splits: SplitEvent[]): boolean {
 
 interface PhoenixIncident {
   baseline_date: string;
+  baseline_close: number;
   peak_date: string;
+  peak_close: number;
   days_to_50x: number;
   peak_mult: number;
   growth_180d_pct: number;
@@ -160,6 +164,7 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
   }
   const clean = cleanBars(bars);
   if (clean.length < 20) return [];
+  const currentClose = clean[clean.length - 1].adjClose;
 
   const incidents: PhoenixIncident[] = [];
   let i = 0;
@@ -187,6 +192,14 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
     }
 
     if (best) {
+      // Recovery-check: een feniks-aandeel staat NU laag. Als de huidige
+      // koers nog steeds veel hoger staat dan de baseline (>3× baseline)
+      // dan is het aandeel niet teruggekrast — ofwel het is geen feniks,
+      // ofwel de "baseline" is prereorg ghost-data (AMPY-pattern).
+      if (currentClose > baseAdj * MAX_CURRENT_VS_BASELINE) {
+        i = best.idx + 1;
+        continue;
+      }
       const cutoffMs = baselineMs + 180 * 86400000;
       let maxClose = clean[best.idx].adjClose;
       for (let k = i + 1; k < clean.length; k++) {
@@ -197,7 +210,9 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
       const growthPct = ((maxClose - baseAdj) / baseAdj) * 100;
       incidents.push({
         baseline_date: clean[i].date,
+        baseline_close: Math.round(baseAdj * 10000) / 10000,
         peak_date: clean[best.idx].date,
+        peak_close: Math.round(clean[best.idx].adjClose * 100) / 100,
         days_to_50x: best.days,
         peak_mult: Math.round(best.mult * 10) / 10,
         growth_180d_pct: Math.round(growthPct * 10) / 10,
