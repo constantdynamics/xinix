@@ -260,6 +260,10 @@ export interface PhoenixRankEntry {
   exchange: string | null;
   above_limit_pct: number | null;
   phoenix_50x_date: string | null;
+  phoenix_incident_count: number | null;
+  phoenix_median_date: string | null;
+  phoenix_max_growth_180d_pct: number | null;
+  phoenix_days_to_50x: number | null;
 }
 
 export interface ScanRun {

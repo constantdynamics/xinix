@@ -59,6 +59,10 @@ const MIN_BASELINE_PRICE   = 0.05;
 const MIN_PEAK_PRICE       = 1.0;
 const MIN_RUN_BARS         = 4;   // ≥4 weekly bars tussen min en piek
 const MAX_SINGLE_BAR_JUMP  = 10;  // bar-to-bar mag niet >10× zijn (5000% in 1 week = data-fout)
+// Na een gerecord 50×-incident vereist een nieuw incident dat de koers eerst
+// minimaal terugzakt naar peak/POST_PEAK_CRASH_DIV. Dit voorkomt dat 1 lange
+// rally als meerdere incidenten wordt geteld.
+const POST_PEAK_CRASH_DIV  = 10;
 
 interface Bar { date: string; close: number }
 interface SplitEvent { date: string; numerator: number; denominator: number; ratio: number }
@@ -86,10 +90,6 @@ async function fetchYahoo10y(ticker: string): Promise<{ bars: Bar[]; splits: Spl
   return { bars, splits };
 }
 
-// Skip-criterium: een ticker met een grote split (≥5:1 forward of reverse) in
-// de afgelopen 10 jaar krijgt geen phoenix-flag, ook al detecteert het algoritme
-// een 50× run. Yahoo's adjclose past niet altijd correct retroactief aan voor
-// Europese / Aziatische / OTC-tickers, dus de 50× is bijna altijd fake.
 const MAX_TRUSTED_SPLIT_RATIO = 5;
 function hasUntrustworthySplit(splits: SplitEvent[]): boolean {
   for (const s of splits) {
@@ -99,32 +99,44 @@ function hasUntrustworthySplit(splits: SplitEvent[]): boolean {
   return false;
 }
 
-// Vind de datum van de laatste echte 50× run. Het algoritme houdt het loop-minimum
-// bij + de bar-index van dat minimum. Een bar telt alleen als feniks-piek als:
-//   - baseline ≥ MIN_BASELINE_PRICE (geen sub-penny noise)
-//   - piek ≥ MIN_PEAK_PRICE (echte hoogte, geen penny→cent flits)
-//   - piek ≥ baseline × mult (de 50× zelf)
-//   - er zitten ≥ MIN_RUN_BARS bars tussen baseline en piek (geen 1-bar jump =
-//     altijd data-fout / split-artefact)
-// Bij een latere crash naar een nieuwe low staat een nieuwe 50× run toe vanaf die
-// low. We bewaren de meest recente match — null als er geen valide run gevonden is.
-// Bonus: bars die meer dan MAX_SINGLE_BAR_JUMP× t.o.v. de vorige spiken worden
-// overgeslagen (Yahoo serveert soms restanten van splits in adjclose).
-function findLastPhoenixDate(bars: Bar[], mult: number): string | null {
+interface PhoenixIncident {
+  baseline_date: string;
+  peak_date: string;
+  days_to_50x: number;
+  growth_180d_pct: number;
+}
+
+// Vind alle 50× incidenten. Een incident telt als: vanaf een lokaal minimum
+// stijgt de koers ≥ mult×, met de gebruikelijke anti-noise filters. Na een
+// geregistreerd incident eist het algoritme een echte crash (koers ≤ peak/10)
+// voordat een nieuw incident geteld kan worden — anders zou één lange rally
+// meerdere keren tellen.
+function findPhoenixIncidents(bars: Bar[], mult: number): PhoenixIncident[] {
+  const incidents: PhoenixIncident[] = [];
   let minSoFar = Infinity;
   let minBarIdx = -1;
-  let lastDate: string | null = null;
+  let lastPeak: number | null = null;
   let prevClose = NaN;
+
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i];
-    // Bar-to-bar jump check: een >10× rise in 1 weekly bar is geen organische
-    // koersbeweging maar een split-data-artefact. Skip deze bar voor analyse
-    // (reset prevClose zodat we erna verder kunnen).
     if (Number.isFinite(prevClose) && prevClose > 0 && b.close >= prevClose * MAX_SINGLE_BAR_JUMP) {
       prevClose = b.close;
       continue;
     }
     prevClose = b.close;
+
+    if (lastPeak !== null) {
+      // Wachten tot een echte crash voordat we een nieuw incident accepteren
+      if (b.close <= lastPeak / POST_PEAK_CRASH_DIV) {
+        lastPeak = null;
+        minSoFar = b.close;
+        minBarIdx = i;
+      } else {
+        if (b.close > lastPeak) lastPeak = b.close;
+      }
+      continue;
+    }
 
     if (b.close < minSoFar) {
       minSoFar = b.close;
@@ -135,17 +147,49 @@ function findLastPhoenixDate(bars: Bar[], mult: number): string | null {
       b.close >= minSoFar * mult &&
       (i - minBarIdx) >= MIN_RUN_BARS
     ) {
-      lastDate = b.date;
+      const baselineDate = bars[minBarIdx].date;
+      const baselineMs = new Date(baselineDate).getTime();
+      const cutoffMs = baselineMs + 180 * 86400 * 1000;
+      // Maximale prijs binnen 180 dagen na baseline (incl. de peak-bar zelf)
+      let maxClose = b.close;
+      for (let j = minBarIdx + 1; j < bars.length; j++) {
+        const jms = new Date(bars[j].date).getTime();
+        if (jms > cutoffMs) break;
+        if (bars[j].close > maxClose) maxClose = bars[j].close;
+      }
+      const growthPct = ((maxClose - minSoFar) / minSoFar) * 100;
+      const daysTo50x = Math.round((new Date(b.date).getTime() - baselineMs) / 86400000);
+
+      incidents.push({
+        baseline_date: baselineDate,
+        peak_date: b.date,
+        days_to_50x: daysTo50x,
+        growth_180d_pct: Math.round(growthPct * 10) / 10,
+      });
+      lastPeak = b.close;
     }
   }
-  return lastDate;
+  return incidents;
+}
+
+function median(nums: number[]): number | null {
+  if (nums.length === 0) return null;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function medianDate(dates: string[]): string | null {
+  if (dates.length === 0) return null;
+  const sorted = [...dates].sort();
+  const mid = Math.floor(sorted.length / 2);
+  return sorted[mid];
 }
 
 Deno.serve(runBackground("compute-phoenix", async () => {
   const sb = getServiceClient();
   const startMs = Date.now();
 
-  // Selectie: nooit-gescand of >RESCAN_DAYS oud (nieuwe tickers eerst)
   const cutoff = new Date(Date.now() - RESCAN_DAYS * 24 * 3600 * 1000).toISOString();
   const { data: tickers, error: fetchError } = await sb
     .from("signal_tickers")
@@ -166,29 +210,44 @@ Deno.serve(runBackground("compute-phoenix", async () => {
     checked++;
     let isPhoenix = false;
     let last50xDate: string | null = null;
+    let incidents: PhoenixIncident[] = [];
+    let incidentCount = 0;
+    let medianPeakDate: string | null = null;
+    let maxGrowth180d: number | null = null;
+    let medianDaysTo50x: number | null = null;
+
     try {
       const { bars, splits } = await fetchYahoo10y(row.ticker);
       if (bars.length >= 10) {
-        if (hasUntrustworthySplit(splits)) {
-          // Skip — adjclose-data is onbetrouwbaar door grote split, kans op vals positief.
-          isPhoenix = false;
-          last50xDate = null;
-        } else {
-          last50xDate = findLastPhoenixDate(bars, PHOENIX_MULT);
-          isPhoenix = last50xDate != null;
-          if (isPhoenix) phoenixFound++;
+        if (!hasUntrustworthySplit(splits)) {
+          incidents = findPhoenixIncidents(bars, PHOENIX_MULT);
+          if (incidents.length > 0) {
+            isPhoenix = true;
+            phoenixFound++;
+            last50xDate = incidents[incidents.length - 1].peak_date;
+            incidentCount = incidents.length;
+            medianPeakDate = medianDate(incidents.map((i) => i.peak_date));
+            maxGrowth180d = Math.max(...incidents.map((i) => i.growth_180d_pct));
+            const md = median(incidents.map((i) => i.days_to_50x));
+            medianDaysTo50x = md != null ? Math.round(md) : null;
+          }
         }
       }
     } catch (e) {
       errors++;
       if (errMsgs.length < 5) errMsgs.push(`${row.ticker}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    // Altijd opslaan (ook false bij fout). is_phoenix_at = nu → pas over RESCAN_DAYS weer aan de beurt
+
     await sb.from("signal_tickers")
       .update({
         is_phoenix: isPhoenix,
         is_phoenix_at: new Date().toISOString(),
         phoenix_50x_date: last50xDate,
+        phoenix_incident_count: isPhoenix ? incidentCount : null,
+        phoenix_median_date: medianPeakDate,
+        phoenix_max_growth_180d_pct: maxGrowth180d != null ? Math.round(maxGrowth180d * 10) / 10 : null,
+        phoenix_days_to_50x: medianDaysTo50x,
+        phoenix_incidents: isPhoenix ? incidents : null,
       })
       .eq("ticker", row.ticker);
     await new Promise((r) => setTimeout(r, SLEEP_MS));

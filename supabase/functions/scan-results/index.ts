@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       // Alle feniks-aandelen (voor ranking)
       sb
         .from("signal_tickers")
-        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, buy_limit, exchange, is_phoenix, phoenix_50x_date")
+        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, buy_limit, exchange, is_phoenix, phoenix_50x_date, phoenix_incident_count, phoenix_median_date, phoenix_max_growth_180d_pct, phoenix_days_to_50x")
         .eq("is_phoenix", true)
         .eq("active", true),
       // Totaal feniks-aandelen
@@ -129,6 +129,10 @@ Deno.serve(async (req) => {
       buy_limit: number | null;
       exchange: string | null;
       phoenix_50x_date: string | null;
+      phoenix_incident_count: number | null;
+      phoenix_median_date: string | null;
+      phoenix_max_growth_180d_pct: number | null;
+      phoenix_days_to_50x: number | null;
     }>;
 
     const phoenixWithPrice = phoenixTickers.map((p) => {

@@ -1748,7 +1748,54 @@ export function SimulationView() {
 
 // ── PhoenixView ───────────────────────────────────────────────────────────────
 
-type PhoenixSort = "near_limit" | "newest_50x" | "oldest_50x";
+type PhoenixSortKey =
+  | "above_limit_pct"
+  | "phoenix_50x_date"
+  | "phoenix_incident_count"
+  | "phoenix_median_date"
+  | "phoenix_max_growth_180d_pct"
+  | "phoenix_days_to_50x";
+
+type SortDir = "asc" | "desc";
+
+interface PhoenixColumn {
+  key: PhoenixSortKey;
+  label: string;
+  short: string;
+  defaultDir: SortDir;
+  hint: string;
+}
+
+const PHOENIX_COLUMNS: PhoenixColumn[] = [
+  { key: "above_limit_pct", label: "Afstand tot aankooplimiet", short: "Limit %", defaultDir: "asc", hint: "Hoe dichter bij 0 (of negatief), hoe dichter bij de aankooplimiet" },
+  { key: "phoenix_incident_count", label: "Aantal feniks-incidenten", short: "# 50×", defaultDir: "desc", hint: "Aantal afzonderlijke 50×-runs in de afgelopen 10 jaar" },
+  { key: "phoenix_median_date", label: "Mediaan datum (dagen geleden)", short: "Mediaan dagen", defaultDir: "asc", hint: "Hoeveel dagen geleden de mediaan-50× plaatsvond" },
+  { key: "phoenix_max_growth_180d_pct", label: "Max groei in 180 dagen", short: "Max 180d %", defaultDir: "desc", hint: "Hoogste groei vanaf baseline binnen 180 dagen" },
+  { key: "phoenix_days_to_50x", label: "Dagen tot 50×", short: "Dagen → 50×", defaultDir: "asc", hint: "Mediaan aantal dagen tussen baseline en 50×-piek" },
+  { key: "phoenix_50x_date", label: "Laatste 50× datum", short: "Laatste 50×", defaultDir: "desc", hint: "Datum van het meest recente 50×-incident" },
+];
+
+function daysAgo(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const t = new Date(dateStr).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.round((Date.now() - t) / 86400000);
+}
+
+function getSortValue(p: PhoenixRankEntry, key: PhoenixSortKey): number | null {
+  switch (key) {
+    case "above_limit_pct": return p.above_limit_pct;
+    case "phoenix_incident_count": return p.phoenix_incident_count;
+    case "phoenix_median_date": return daysAgo(p.phoenix_median_date);
+    case "phoenix_max_growth_180d_pct": return p.phoenix_max_growth_180d_pct;
+    case "phoenix_days_to_50x": return p.phoenix_days_to_50x;
+    case "phoenix_50x_date": {
+      const t = p.phoenix_50x_date ? new Date(p.phoenix_50x_date).getTime() : null;
+      return t != null && Number.isFinite(t) ? t : null;
+    }
+  }
+}
+
 type PhoenixDateFilter = "all" | "1y" | "3y" | "5y" | "older";
 
 export function PhoenixView() {
@@ -1759,8 +1806,13 @@ export function PhoenixView() {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<PhoenixSort>("near_limit");
+  const [sortKey, setSortKey] = useState<PhoenixSortKey>("above_limit_pct");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [dateFilter, setDateFilter] = useState<PhoenixDateFilter>("all");
+  const [visibleCols, setVisibleCols] = useState<Set<PhoenixSortKey>>(
+    () => new Set(PHOENIX_COLUMNS.map((c) => c.key)),
+  );
+  const [activeFilters, setActiveFilters] = useState<Set<PhoenixSortKey>>(new Set());
   const [fullScanRunning, setFullScanRunning] = useState(false);
   const [fullScanBatch, setFullScanBatch] = useState(0);
   const fullScanStopRef = useRef(false);
@@ -1799,8 +1851,8 @@ export function PhoenixView() {
     setFullScanRunning(true);
     setFullScanBatch(0);
     setScanMsg(null);
-    const MAX_BATCHES = 60; // safety cap: 60 × 100 = 6000 tickers
-    const BATCH_WAIT_MS = 95_000; // backend doet ~100 tickers/run in ~120s; 95s wachten houdt het veilig
+    const MAX_BATCHES = 60;
+    const BATCH_WAIT_MS = 95_000;
     try {
       let batch = 0;
       while (!fullScanStopRef.current && batch < MAX_BATCHES) {
@@ -1809,7 +1861,6 @@ export function PhoenixView() {
         try { await triggerJob("compute-phoenix-background"); } catch (e) { setScanMsg(`Fout bij batch ${batch + 1}: ${e instanceof Error ? e.message : String(e)}`); break; }
         batch++;
         setFullScanBatch(batch);
-        // Wacht in kleine stappen zodat stop-knop snel reageert.
         for (let waited = 0; waited < BATCH_WAIT_MS && !fullScanStopRef.current; waited += 1000) {
           await new Promise((r) => setTimeout(r, 1000));
         }
@@ -1821,8 +1872,35 @@ export function PhoenixView() {
   }
   function stopFullScan() { fullScanStopRef.current = true; }
 
-  // Gefilterde + gesorteerde ranking voor de UI. Server stuurt de volledige
-  // lijst — alle filtering/sortering gebeurt client-side.
+  function toggleSort(key: PhoenixSortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      const col = PHOENIX_COLUMNS.find((c) => c.key === key);
+      setSortDir(col?.defaultDir ?? "asc");
+    }
+  }
+
+  function toggleCol(key: PhoenixSortKey) {
+    setVisibleCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleFilter(key: PhoenixSortKey) {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  // Gefilterde + gesorteerde ranking. Server stuurt de volledige lijst — alles
+  // client-side. Actieve criterium-filters verbergen rijen zonder waarde voor
+  // dat criterium (zo zie je alleen aandelen waarvoor het kenmerk bekend is).
   const filteredRanking = useMemo(() => {
     const now = Date.now();
     const ms = 24 * 3600 * 1000;
@@ -1836,7 +1914,7 @@ export function PhoenixView() {
 
     let filtered = ranking;
     if (dateFilter !== "all") {
-      filtered = ranking.filter((p) => {
+      filtered = filtered.filter((p) => {
         if (!p.phoenix_50x_date) return false;
         const t = new Date(p.phoenix_50x_date).getTime();
         if (dateFilter === "older") {
@@ -1848,28 +1926,31 @@ export function PhoenixView() {
       });
     }
 
-    const sorted = [...filtered];
-    if (sortBy === "newest_50x") {
-      sorted.sort((a, b) => {
-        if (!a.phoenix_50x_date && !b.phoenix_50x_date) return 0;
-        if (!a.phoenix_50x_date) return 1;
-        if (!b.phoenix_50x_date) return -1;
-        return b.phoenix_50x_date.localeCompare(a.phoenix_50x_date);
-      });
-    } else if (sortBy === "oldest_50x") {
-      sorted.sort((a, b) => {
-        if (!a.phoenix_50x_date && !b.phoenix_50x_date) return 0;
-        if (!a.phoenix_50x_date) return 1;
-        if (!b.phoenix_50x_date) return -1;
-        return a.phoenix_50x_date.localeCompare(b.phoenix_50x_date);
+    if (activeFilters.size > 0) {
+      filtered = filtered.filter((p) => {
+        for (const key of activeFilters) {
+          if (getSortValue(p, key) == null) return false;
+        }
+        return true;
       });
     }
-    // "near_limit" is al server-side gesorteerd
-    return sorted.slice(0, 50);
-  }, [ranking, sortBy, dateFilter]);
+
+    const sorted = [...filtered].sort((a, b) => {
+      const av = getSortValue(a, sortKey);
+      const bv = getSortValue(b, sortKey);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+
+    return sorted;
+  }, [ranking, sortKey, sortDir, dateFilter, activeFilters]);
 
   if (loading) return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
   if (error) return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
+
+  const sortArrow = (key: PhoenixSortKey) => sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "";
 
   return (
     <div className="space-y-6">
@@ -1881,8 +1962,8 @@ export function PhoenixView() {
             <div className="font-bold text-neutral-100">Feniks-aandelen</div>
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">50×</strong> zijn gegaan en nu laag staan.
-              Ze hoeven niet per se via de scanners te zijn gevonden — ook bestaande watchlist-aandelen worden gecheckt.
-              Sorteer en filter op het laatste moment dat het aandeel 50× ging.
+              Klik op een kolomkop om te sorteren. Vink kolommen aan/uit met de checkboxes,
+              of activeer een filter om alleen aandelen te tonen waarvan het criterium bekend is.
             </div>
           </div>
         </div>
@@ -1922,42 +2003,68 @@ export function PhoenixView() {
         )}
       </div>
 
-      {/* Sort + filter controls */}
+      {/* Kolom-checkboxes + filter-checkboxes + datumfilter */}
       {ranking.length > 0 && (
-        <Card className="p-3 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-neutral-500 font-bold uppercase tracking-wide text-[10px]">Sorteer</span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as PhoenixSort)}
-              className="bg-ink-3 border border-ink-5 rounded px-2 py-1 text-xs text-neutral-200"
-            >
-              <option value="near_limit">Dicht bij aankooplimiet</option>
-              <option value="newest_50x">Recentste 50× eerst</option>
-              <option value="oldest_50x">Oudste 50× eerst</option>
-            </select>
+        <Card className="p-3 space-y-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+              Kolommen tonen
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {PHOENIX_COLUMNS.map((c) => (
+                <label key={c.key} className="flex items-center gap-1.5 text-xs text-neutral-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={visibleCols.has(c.key)}
+                    onChange={() => toggleCol(c.key)}
+                    className="accent-fog-lime"
+                  />
+                  <span>{c.short}</span>
+                </label>
+              ))}
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-neutral-500 font-bold uppercase tracking-wide text-[10px]">50× datum</span>
-            <select
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value as PhoenixDateFilter)}
-              className="bg-ink-3 border border-ink-5 rounded px-2 py-1 text-xs text-neutral-200"
-            >
-              <option value="all">Alle</option>
-              <option value="1y">Laatste jaar</option>
-              <option value="3y">Laatste 3 jaar</option>
-              <option value="5y">Laatste 5 jaar</option>
-              <option value="older">Ouder dan 5 jaar</option>
-            </select>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+              Filter op criterium (alleen rijen met waarde)
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {PHOENIX_COLUMNS.map((c) => (
+                <label key={c.key} className="flex items-center gap-1.5 text-xs text-neutral-300 cursor-pointer" title={c.hint}>
+                  <input
+                    type="checkbox"
+                    checked={activeFilters.has(c.key)}
+                    onChange={() => toggleFilter(c.key)}
+                    className="accent-fog-pink"
+                  />
+                  <span>{c.short}</span>
+                </label>
+              ))}
+            </div>
           </div>
-          <div className="ml-auto text-[11px] text-neutral-500">
-            {filteredRanking.length} van {ranking.length} getoond
+          <div className="flex items-center gap-3 pt-1 border-t border-ink-5/40">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-neutral-500 font-bold uppercase tracking-wide text-[10px]">50× datum</span>
+              <select
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value as PhoenixDateFilter)}
+                className="bg-ink-3 border border-ink-5 rounded px-2 py-1 text-xs text-neutral-200"
+              >
+                <option value="all">Alle</option>
+                <option value="1y">Laatste jaar</option>
+                <option value="3y">Laatste 3 jaar</option>
+                <option value="5y">Laatste 5 jaar</option>
+                <option value="older">Ouder dan 5 jaar</option>
+              </select>
+            </div>
+            <div className="ml-auto text-[11px] text-neutral-500">
+              {filteredRanking.length} van {ranking.length} getoond
+            </div>
           </div>
         </Card>
       )}
 
-      {/* Ranking */}
+      {/* Tabel */}
       {ranking.length === 0 ? (
         <Card className="p-10 text-center space-y-3">
           <div className="text-4xl">🦅</div>
@@ -1970,70 +2077,106 @@ export function PhoenixView() {
         </Card>
       ) : (
         <Card className="p-0 overflow-hidden">
-          <div className="p-3 flex items-center justify-between border-b border-ink-5">
-            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
-              {filteredRanking.length} aandelen — {sortBy === "near_limit" ? "dichtstbij aankooplimiet" : sortBy === "newest_50x" ? "recentste 50× eerst" : "oudste 50× eerst"}
-            </div>
-            <div className="text-[11px] text-neutral-500">{phoenixCount} feniks-aandelen in watchlist</div>
-          </div>
-          <div className="divide-y divide-ink-5/40">
-            {filteredRanking.map((p, i) => {
-              const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
-              const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
-              return (
-                <div
-                  key={p.ticker}
-                  className={`p-3 flex items-center gap-3 ${atOrBelow ? "bg-fog-lime/[0.05]" : ""}`}
-                >
-                  <div className="w-6 text-center text-[11px] text-neutral-500 font-mono tabular-nums">
-                    {i + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <a
-                        href={googleFinanceUrl(p.ticker, p.exchange)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-mono text-sm font-semibold text-fog-lime hover:underline"
-                      >
-                        {p.ticker}
-                      </a>
-                      {p.company && (
-                        <span className="text-xs text-neutral-400 truncate max-w-[160px]">{p.company}</span>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                  <th className="px-3 py-2 text-left w-10">#</th>
+                  <th className="px-3 py-2 text-left">Ticker</th>
+                  {PHOENIX_COLUMNS.map((c) => visibleCols.has(c.key) ? (
+                    <th
+                      key={c.key}
+                      className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+                      onClick={() => toggleSort(c.key)}
+                      title={c.hint}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {c.short}
+                        <span className="text-fog-lime text-[9px]">{sortArrow(c.key)}</span>
+                      </span>
+                    </th>
+                  ) : null)}
+                  <th className="px-3 py-2 text-right">Koers</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-5/40">
+                {filteredRanking.map((p, i) => {
+                  const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
+                  const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
+                  return (
+                    <tr key={p.ticker} className={atOrBelow ? "bg-fog-lime/[0.05]" : ""}>
+                      <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <a
+                            href={googleFinanceUrl(p.ticker, p.exchange)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-mono text-sm font-semibold text-fog-lime hover:underline"
+                          >
+                            {p.ticker}
+                          </a>
+                          {p.company && (
+                            <span className="text-xs text-neutral-400 truncate max-w-[140px]">{p.company}</span>
+                          )}
+                          {p.sector && <Pill>{p.sector}</Pill>}
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-neutral-500">
+                          🥇{p.medal_gold ?? 0} 🥈{p.medal_silver ?? 0} 🥉{p.medal_bronze ?? 0}
+                        </div>
+                      </td>
+                      {visibleCols.has("above_limit_pct") && (
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {p.above_limit_pct != null ? (
+                            <span className={atOrBelow ? "text-fog-lime font-semibold" : near ? "text-fog-warn" : "text-neutral-300"}>
+                              {atOrBelow ? "✓ onder" : `+${p.above_limit_pct.toFixed(1)}%`}
+                            </span>
+                          ) : (
+                            <span className="text-neutral-600">—</span>
+                          )}
+                        </td>
                       )}
-                      {p.sector && (
-                        <Pill>{p.sector}</Pill>
+                      {visibleCols.has("phoenix_incident_count") && (
+                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                          {p.phoenix_incident_count ?? <span className="text-neutral-600">—</span>}
+                        </td>
                       )}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-neutral-500 flex items-center gap-2 flex-wrap">
-                      <span>🥇{p.medal_gold ?? 0} 🥈{p.medal_silver ?? 0} 🥉{p.medal_bronze ?? 0}</span>
-                      {p.phoenix_50x_date && (
-                        <span className="text-fog-pink/80 font-mono">
-                          50× {fmtDate(p.phoenix_50x_date)}
-                        </span>
+                      {visibleCols.has("phoenix_median_date") && (
+                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                          {(() => {
+                            const d = daysAgo(p.phoenix_median_date);
+                            return d != null ? `${d}d` : <span className="text-neutral-600">—</span>;
+                          })()}
+                        </td>
                       )}
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0 space-y-0.5">
-                    {p.last_close != null && (
-                      <div className="text-sm font-mono text-neutral-200">{fmtPrice(p.last_close)}</div>
-                    )}
-                    {p.buy_limit != null && (
-                      <div className="text-[11px] font-mono text-neutral-500">
-                        lim {fmtPrice(p.buy_limit)}
-                      </div>
-                    )}
-                    {p.above_limit_pct != null ? (
-                      <div className={`text-[11px] font-mono font-semibold ${atOrBelow ? "text-fog-lime" : near ? "text-fog-warn" : "text-neutral-400"}`}>
-                        {atOrBelow ? "✓ onder limiet" : `+${p.above_limit_pct.toFixed(1)}%`}
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-neutral-600">geen limiet</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                      {visibleCols.has("phoenix_max_growth_180d_pct") && (
+                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                          {p.phoenix_max_growth_180d_pct != null
+                            ? `+${p.phoenix_max_growth_180d_pct.toFixed(0)}%`
+                            : <span className="text-neutral-600">—</span>}
+                        </td>
+                      )}
+                      {visibleCols.has("phoenix_days_to_50x") && (
+                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                          {p.phoenix_days_to_50x != null
+                            ? `${p.phoenix_days_to_50x}d`
+                            : <span className="text-neutral-600">—</span>}
+                        </td>
+                      )}
+                      {visibleCols.has("phoenix_50x_date") && (
+                        <td className="px-3 py-2 text-right font-mono tabular-nums text-fog-pink/80">
+                          {p.phoenix_50x_date ? fmtDate(p.phoenix_50x_date) : <span className="text-neutral-600">—</span>}
+                        </td>
+                      )}
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">
+                        {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
+                        {p.buy_limit != null && <div className="text-[10px] text-neutral-500">lim {fmtPrice(p.buy_limit)}</div>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </Card>
       )}
