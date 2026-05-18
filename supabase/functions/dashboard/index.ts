@@ -148,6 +148,8 @@ Deno.serve(async (req) => {
       is_phoenix: t.is_phoenix ?? null,
       is_hikkertje: t.is_hikkertje ?? null,
       is_zwitserleven: zwitserlevenSet.has(t.ticker),
+      briefing_status: t.briefing_status ?? null,
+      briefing_polled_at: t.briefing_polled_at ?? null,
     };
   });
   cards.sort((a: any, b: any) => {
