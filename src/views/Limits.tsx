@@ -101,6 +101,9 @@ interface LimitRow {
   bronze: number;
   dividend_yield: number | null;
   exchange: string | null;
+  is_hikkertje: boolean;
+  is_phoenix: boolean;
+  is_zwitserleven: boolean;
 }
 
 type ScopeFilter = "all" | "buy" | "close25" | "medals";
@@ -191,6 +194,16 @@ export function LimitsView({
       return "all";
     }
   });
+  const [scanFilter, setScanFilter] = useState<Set<"hikkertje" | "phoenix" | "zwitserleven">>(new Set());
+
+  function toggleScan(k: "hikkertje" | "phoenix" | "zwitserleven") {
+    setScanFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }
   const [sortBy, setSortBy] = useState<SortBy>(() => {
     try {
       const s = JSON.parse(localStorage.getItem(FILTER_KEY) ?? "{}");
@@ -226,6 +239,9 @@ export function LimitsView({
           bronze: c.medal_bronze ?? 0,
           dividend_yield: c.dividend_yield ?? null,
           exchange: c.exchange ?? null,
+          is_hikkertje: c.is_hikkertje === true,
+          is_phoenix: c.is_phoenix === true,
+          is_zwitserleven: c.is_zwitserleven === true,
         };
       });
   }, [data.cards]);
@@ -239,6 +255,13 @@ export function LimitsView({
     // dividend: NULL = nog niet opgehaald — die vallen buiten zowel "ja" als "nee".
     if (divF === "yes") r = r.filter((x) => x.dividend_yield != null && x.dividend_yield > 0);
     else if (divF === "no") r = r.filter((x) => x.dividend_yield === 0);
+    if (scanFilter.size > 0) {
+      r = r.filter((x) =>
+        (scanFilter.has("hikkertje")    && x.is_hikkertje) ||
+        (scanFilter.has("phoenix")      && x.is_phoenix) ||
+        (scanFilter.has("zwitserleven") && x.is_zwitserleven)
+      );
+    }
     const sorted = [...r];
     sorted.sort((a, b) => {
       switch (sortBy) {
@@ -271,7 +294,7 @@ export function LimitsView({
       }
     });
     return sorted;
-  }, [allRows, scope, sectorF, divF, sortBy]);
+  }, [allRows, scope, sectorF, divF, sortBy, scanFilter]);
 
   const buyNowCount = allRows.filter((r) => r.distance >= 1).length;
   const closeCount = allRows.filter((r) => r.distance >= 0.85 && r.distance < 1).length;
@@ -339,6 +362,31 @@ export function LimitsView({
             </option>
           ))}
         </Select>
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+          Scan
+        </span>
+        {([
+          { k: "hikkertje" as const,    label: "⚡",  title: "Hikkertjes",    color: "yellow"  },
+          { k: "phoenix" as const,      label: "🦅", title: "Feniks",         color: "orange"  },
+          { k: "zwitserleven" as const, label: "🌴", title: "Zwitserleven",  color: "emerald" },
+        ]).map((f) => {
+          const active = scanFilter.has(f.k);
+          const cls = active
+            ? f.color === "yellow"  ? "border-yellow-500 bg-yellow-500/20"
+            : f.color === "orange"  ? "border-orange-500 bg-orange-500/20"
+                                    : "border-emerald-500 bg-emerald-500/20"
+            : "border-ink-5 hover:border-ink-5/80";
+          return (
+            <button
+              key={f.k}
+              onClick={() => toggleScan(f.k)}
+              title={f.title}
+              className={`h-8 px-2 rounded border text-sm transition-colors ${cls}`}
+            >
+              {f.label}
+            </button>
+          );
+        })}
         <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
           Sorteer
         </span>
