@@ -127,6 +127,13 @@ function googleFinanceUrl(ticker: string, exchange?: string | null): string {
   if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
   return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`;
 }
+// Yahoo Finance fallback — onze data komt van Yahoo, dus elke ticker in onze
+// DB heeft per definitie een werkende Yahoo-quote-pagina. Google Finance heeft
+// niet alle tickers (vooral SPACs, OTC, kleine Aziatische listings) → die
+// link doodt zonder dat we het merken.
+function yahooFinanceUrl(ticker: string): string {
+  return `https://finance.yahoo.com/quote/${encodeURIComponent(ticker.trim().toUpperCase())}`;
+}
 interface ScoreSnapshot { action: string; final_score: number; expected_outcome: { catalystLabel?: string; peakReturnEst?: number; t90ReturnEst?: number; hitRateBaseline?: number; expectedPeakPrice?: number | null; expectedT90Price?: number | null; exitWindowDays?: number; } | null; components: { nearest_catalyst?: { type?: string; daysUntil?: number | null; date?: string | null; } | null; } | null; trade_setup: { entry?: number; target?: number; stop?: number; rr?: number; } | null; }
 function pct(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `${x >= 0 ? "+" : ""}${(x * 100).toFixed(0)}%`; }
 function fmtPrice(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `$${x.toFixed(x < 5 ? 3 : 2)}`; }
@@ -187,9 +194,12 @@ function formatAlert(
   const title = titleParts.join(" · ").slice(0, 120);
 
   const lines: string[] = [];
-  // Google Finance URL staat BOVENAAN zodat ie altijd zichtbaar is in de preview,
-  // ook als de rest van het bericht afgekapt wordt.
+  // Twee link-bronnen — Google Finance is gebruiksvriendelijker maar mist soms
+  // SPACs/OTC/Aziatische tickers (zoals ATON onlangs). Yahoo Finance heeft per
+  // definitie elke ticker uit onze DB. Beide links staan bovenaan voor preview.
+  const yfUrl = yahooFinanceUrl(sig.ticker);
   lines.push(`🔗 ${gfUrl}`);
+  lines.push(`🔁 ${yfUrl}`);
   lines.push(`${tickerDisp}${company ? ` (${company})` : ""}`);
   if (showAction && score) lines.push(`Actie: ${score.action} · score ${score.final_score.toFixed(2)}`);
   const ml = medalLine(medals);
@@ -245,7 +255,11 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       .select("ticker, company, buy_limit, exchange")
       .eq("is_phoenix", true)
       .eq("active", true)
-      .not("buy_limit", "is", null);
+      .not("buy_limit", "is", null)
+      // Extra veiligheidsklep: alleen tickers die DAADWERKELIJK door de scanner
+      // zijn geverifieerd. Voorkomt notificaties op legacy/handmatige is_phoenix
+      // flags zonder scan-bewijs (zoals H2O.DE eerder).
+      .not("is_phoenix_at", "is", null);
 
     if (phoenixTickers?.length) {
       const ptickers = phoenixTickers.map((p) => p.ticker as string);
