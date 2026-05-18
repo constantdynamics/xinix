@@ -51,12 +51,13 @@ const HEAT_CONTRIBUTION: Record<string, Sev> = {
 Deno.serve(async (req) => {
   const p = pf(req); if (p) return p;
   const supabase = getServiceClient();
-  const [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes] = await Promise.all([
+  const [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes] = await Promise.all([
     supabase.from("signal_tickers").select("*").eq("active", true),
     supabase.from("signal_price_summary").select("*"),
     supabase.from("signal_events").select("*").or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).order("detected_at", { ascending: false }).limit(500),
     supabase.from("signal_catalysts").select("*").eq("status", "pending").order("expected_date", { ascending: true }),
     supabase.from("signal_runs").select("job, started_at, finished_at, ok, message, metrics").order("started_at", { ascending: false }).limit(20),
+    supabase.from("zwitserleven_stocks").select("ticker").eq("meets_criteria", true),
   ]);
   const tickers = tickersRes.data ?? [];
   const summaries = summaryRes.data ?? [];
@@ -64,6 +65,7 @@ Deno.serve(async (req) => {
   const catalysts = catalystsRes.data ?? [];
   const runLog = runLogRes.data ?? [];
   const summaryByTicker = new Map(summaries.map((s: any) => [s.ticker, s]));
+  const zwitserlevenSet = new Set<string>((zwitserlevenRes.data ?? []).map((r: any) => r.ticker as string));
   const signalsByTicker = new Map<string, any[]>();
   for (const sig of signals) { const arr = signalsByTicker.get(sig.ticker) ?? []; arr.push(sig); signalsByTicker.set(sig.ticker, arr); }
   const catalystsByTicker = new Map<string, any[]>();
@@ -143,6 +145,9 @@ Deno.serve(async (req) => {
       has_strategic_backer: t.has_strategic_backer ?? null,
       strategic_backer_tier: t.strategic_backer_tier ?? null,
       notes: t.notes ?? null,
+      is_phoenix: t.is_phoenix ?? null,
+      is_hikkertje: t.is_hikkertje ?? null,
+      is_zwitserleven: zwitserlevenSet.has(t.ticker),
     };
   });
   cards.sort((a: any, b: any) => {

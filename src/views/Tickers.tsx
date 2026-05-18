@@ -261,17 +261,37 @@ export function TickersView({
   // hele tabel pijnlijk traag. Page-slicing houdt het responsief.
   const [wlQuery, setWlQuery] = useState("");
   const [wlPage, setWlPage] = useState(0);
+  const [scanFilter, setScanFilter] = useState<Set<"hikkertje" | "phoenix" | "zwitserleven">>(new Set());
   const PAGE_SIZE = 100;
+
+  function toggleScan(k: "hikkertje" | "phoenix" | "zwitserleven") {
+    setScanFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }
 
   const wlFiltered = useMemo(() => {
     const q = wlQuery.trim().toLowerCase();
-    if (!q) return data.cards;
-    return data.cards.filter(
-      (c) =>
-        c.ticker.toLowerCase().includes(q) ||
-        c.company.toLowerCase().includes(q)
-    );
-  }, [data.cards, wlQuery]);
+    let rows = data.cards;
+    if (scanFilter.size > 0) {
+      rows = rows.filter((c) =>
+        (scanFilter.has("hikkertje")    && c.is_hikkertje    === true) ||
+        (scanFilter.has("phoenix")      && c.is_phoenix      === true) ||
+        (scanFilter.has("zwitserleven") && c.is_zwitserleven === true)
+      );
+    }
+    if (q) {
+      rows = rows.filter(
+        (c) =>
+          c.ticker.toLowerCase().includes(q) ||
+          c.company.toLowerCase().includes(q)
+      );
+    }
+    return rows;
+  }, [data.cards, wlQuery, scanFilter]);
 
   // Reset naar pagina 0 als de filter de huidige pagina overbodig maakt.
   useEffect(() => {
@@ -1162,14 +1182,37 @@ export function TickersView({
         <SectionHeader
           eyebrow="Bewaakt"
           title="Huidige watchlist"
-          subtitle={`${data.cards.length} tickers${wlQuery ? ` · ${wlFiltered.length} match` : ""}`}
+          subtitle={`${data.cards.length} tickers${(wlQuery || scanFilter.size > 0) ? ` · ${wlFiltered.length} match` : ""}`}
           aside={
-            <Input
-              placeholder="Zoek ticker of bedrijf…"
-              value={wlQuery}
-              onChange={(e) => setWlQuery(e.target.value)}
-              className="w-48 sm:w-64 h-8 text-xs"
-            />
+            <div className="flex items-center gap-2 flex-wrap">
+              {([
+                { k: "hikkertje" as const,    label: "⚡ Hikkertjes",    color: "yellow"  },
+                { k: "phoenix" as const,      label: "🦅 Feniks",         color: "orange"  },
+                { k: "zwitserleven" as const, label: "🌴 Zwitserleven", color: "emerald" },
+              ]).map((f) => {
+                const active = scanFilter.has(f.k);
+                const cls = active
+                  ? f.color === "yellow"  ? "border-yellow-500 bg-yellow-500/20 text-yellow-300"
+                  : f.color === "orange"  ? "border-orange-500 bg-orange-500/20 text-orange-300"
+                                          : "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                  : "border-ink-5 text-neutral-400 hover:text-neutral-200";
+                return (
+                  <button
+                    key={f.k}
+                    onClick={() => toggleScan(f.k)}
+                    className={`px-2 py-1 rounded text-[11px] font-semibold border transition-colors whitespace-nowrap ${cls}`}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
+              <Input
+                placeholder="Zoek ticker of bedrijf…"
+                value={wlQuery}
+                onChange={(e) => setWlQuery(e.target.value)}
+                className="w-48 sm:w-64 h-8 text-xs"
+              />
+            </div>
           }
         />
 

@@ -127,6 +127,11 @@ export interface Card {
   promoter_concentration_pct?: number | null;
   has_strategic_backer?: boolean | null;
   strategic_backer_tier?: number | null;
+  // Scan-flags (uit watchlist + zwitserleven-tabel). True = ticker voldoet
+  // momenteel aan de bijbehorende scan-criteria.
+  is_phoenix?: boolean | null;
+  is_hikkertje?: boolean | null;
+  is_zwitserleven?: boolean | null;
   notes?: string | null;
 }
 
