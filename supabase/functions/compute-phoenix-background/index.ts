@@ -47,6 +47,18 @@ const BATCH_SIZE = 100;
 const RESCAN_DAYS = 90;
 const BUDGET_MS = 128_000;
 const SLEEP_MS = 280;
+// Anti-noise / anti-split-artefact criteria. Vier lagen verdediging:
+//  1. adjclose (i.p.v. raw close): kent reverse-/forward-splits af
+//  2. MIN_BASELINE: minimum baseline om sub-penny noise uit te sluiten
+//  3. MIN_PEAK: minimum top — een echte feniks raakt absolute hoogtes
+//  4. MIN_RUN_BARS: 50× run moet zich over meerdere bars ontwikkelen
+//     (1-bar jumps = altijd split-data-fout, geen organische run)
+//  5. MAX_SINGLE_BAR_JUMP: één bar mag niet >MAX×-jumpen t.o.v. de vorige
+//     (vangst van overgebleven split-artefacten in adjclose-data)
+const MIN_BASELINE_PRICE   = 0.05;
+const MIN_PEAK_PRICE       = 1.0;
+const MIN_RUN_BARS         = 4;   // ≥4 weekly bars tussen min en piek
+const MAX_SINGLE_BAR_JUMP  = 10;  // bar-to-bar mag niet >10× zijn (5000% in 1 week = data-fout)
 
 interface Bar { date: string; close: number }
 async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
@@ -57,23 +69,53 @@ async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
   const r = json.chart.result?.[0];
   if (!r) throw new Error(`Yahoo ${ticker}: ${json.chart.error?.description ?? "no result"}`);
   const ts = r.timestamp ?? [];
-  // Gebruik raw close prices (NIET adjclose) — dividend-aanpassing vertekent sterk
-  // bij hoog-dividend fondsen/REITs en geeft valse 50×-signalen. Feniks-patroon
-  // meet werkelijke koersbeweging, niet totaal-rendement inclusief herbelegd dividend.
-  const closes = r.indicators.quote[0]?.close ?? [];
+  // Gebruik adjclose: alleen die kent reverse-splits af. Zonder dit detecteert
+  // het algoritme valse "50×-runs" wanneer een aandeel een reverse-split deed
+  // (pre-split sub-penny vs post-split centen ziet eruit als 100× rise).
+  // Dividend-vertekening is voor het feniks-patroon (rare 50× runs) verwaarloosbaar.
+  const adj = r.indicators.adjclose?.[0]?.adjclose;
+  const closes = adj ?? r.indicators.quote[0]?.close ?? [];
   return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
 }
 
-// Vind de datum van de laatste 50× run. Het algoritme houdt de loop-minimum bij
-// en markeert iedere bar waar close ≥ minSoFar × mult. Een latere crash naar
-// een nieuwe low staat een nieuwe 50× run toe vanaf die low. We bewaren de
-// meest recente match — null als er geen 50× run gevonden is.
+// Vind de datum van de laatste echte 50× run. Het algoritme houdt het loop-minimum
+// bij + de bar-index van dat minimum. Een bar telt alleen als feniks-piek als:
+//   - baseline ≥ MIN_BASELINE_PRICE (geen sub-penny noise)
+//   - piek ≥ MIN_PEAK_PRICE (echte hoogte, geen penny→cent flits)
+//   - piek ≥ baseline × mult (de 50× zelf)
+//   - er zitten ≥ MIN_RUN_BARS bars tussen baseline en piek (geen 1-bar jump =
+//     altijd data-fout / split-artefact)
+// Bij een latere crash naar een nieuwe low staat een nieuwe 50× run toe vanaf die
+// low. We bewaren de meest recente match — null als er geen valide run gevonden is.
+// Bonus: bars die meer dan MAX_SINGLE_BAR_JUMP× t.o.v. de vorige spiken worden
+// overgeslagen (Yahoo serveert soms restanten van splits in adjclose).
 function findLastPhoenixDate(bars: Bar[], mult: number): string | null {
   let minSoFar = Infinity;
+  let minBarIdx = -1;
   let lastDate: string | null = null;
-  for (const b of bars) {
-    if (b.close < minSoFar) { minSoFar = b.close; }
-    else if (minSoFar > 0 && b.close >= minSoFar * mult) { lastDate = b.date; }
+  let prevClose = NaN;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    // Bar-to-bar jump check: een >10× rise in 1 weekly bar is geen organische
+    // koersbeweging maar een split-data-artefact. Skip deze bar voor analyse
+    // (reset prevClose zodat we erna verder kunnen).
+    if (Number.isFinite(prevClose) && prevClose > 0 && b.close >= prevClose * MAX_SINGLE_BAR_JUMP) {
+      prevClose = b.close;
+      continue;
+    }
+    prevClose = b.close;
+
+    if (b.close < minSoFar) {
+      minSoFar = b.close;
+      minBarIdx = i;
+    } else if (
+      minSoFar >= MIN_BASELINE_PRICE &&
+      b.close >= MIN_PEAK_PRICE &&
+      b.close >= minSoFar * mult &&
+      (i - minBarIdx) >= MIN_RUN_BARS
+    ) {
+      lastDate = b.date;
+    }
   }
   return lastDate;
 }
