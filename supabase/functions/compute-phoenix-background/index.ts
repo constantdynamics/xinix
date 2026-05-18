@@ -61,21 +61,42 @@ const MIN_RUN_BARS         = 4;   // ≥4 weekly bars tussen min en piek
 const MAX_SINGLE_BAR_JUMP  = 10;  // bar-to-bar mag niet >10× zijn (5000% in 1 week = data-fout)
 
 interface Bar { date: string; close: number }
-async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=10y&interval=1wk`;
+interface SplitEvent { date: string; numerator: number; denominator: number; ratio: number }
+async function fetchYahoo10y(ticker: string): Promise<{ bars: Bar[]; splits: SplitEvent[] }> {
+  // events=split → split-events erbij. Tickers met grote splits (reverse of forward
+  // ≥5:1) overslaan we — Yahoo's adjclose voor sommige beurzen (XETRA, OTC, BSE)
+  // past pre-split data niet altijd correct aan, wat valse 50× runs oplevert
+  // (zoals H2O.DE Enapter na hun 10:1 reverse split feb 2024).
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=10y&interval=1wk&events=split`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; PhoenixBot/1.0; +https://github.com)" } });
   if (!res.ok) throw new Error(`Yahoo ${ticker} HTTP ${res.status}`);
-  const json = (await res.json()) as { chart: { result?: Array<{ timestamp: number[]; indicators: { adjclose?: Array<{ adjclose?: (number | null)[] }>; quote: Array<{ close: (number | null)[] }> }; }>; error?: { description?: string } | null; }; };
+  const json = (await res.json()) as { chart: { result?: Array<{ timestamp: number[]; events?: { splits?: Record<string, { date: number; numerator: number; denominator: number }> }; indicators: { adjclose?: Array<{ adjclose?: (number | null)[] }>; quote: Array<{ close: (number | null)[] }> }; }>; error?: { description?: string } | null; }; };
   const r = json.chart.result?.[0];
   if (!r) throw new Error(`Yahoo ${ticker}: ${json.chart.error?.description ?? "no result"}`);
   const ts = r.timestamp ?? [];
-  // Gebruik adjclose: alleen die kent reverse-splits af. Zonder dit detecteert
-  // het algoritme valse "50×-runs" wanneer een aandeel een reverse-split deed
-  // (pre-split sub-penny vs post-split centen ziet eruit als 100× rise).
-  // Dividend-vertekening is voor het feniks-patroon (rare 50× runs) verwaarloosbaar.
   const adj = r.indicators.adjclose?.[0]?.adjclose;
   const closes = adj ?? r.indicators.quote[0]?.close ?? [];
-  return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
+  const bars = ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
+  const splits: SplitEvent[] = Object.values(r.events?.splits ?? {}).map((s) => ({
+    date: new Date(s.date * 1000).toISOString().slice(0, 10),
+    numerator: s.numerator,
+    denominator: s.denominator,
+    ratio: s.denominator > 0 ? s.numerator / s.denominator : 1,
+  }));
+  return { bars, splits };
+}
+
+// Skip-criterium: een ticker met een grote split (≥5:1 forward of reverse) in
+// de afgelopen 10 jaar krijgt geen phoenix-flag, ook al detecteert het algoritme
+// een 50× run. Yahoo's adjclose past niet altijd correct retroactief aan voor
+// Europese / Aziatische / OTC-tickers, dus de 50× is bijna altijd fake.
+const MAX_TRUSTED_SPLIT_RATIO = 5;
+function hasUntrustworthySplit(splits: SplitEvent[]): boolean {
+  for (const s of splits) {
+    const r = s.ratio;
+    if (r >= MAX_TRUSTED_SPLIT_RATIO || (r > 0 && r <= 1 / MAX_TRUSTED_SPLIT_RATIO)) return true;
+  }
+  return false;
 }
 
 // Vind de datum van de laatste echte 50× run. Het algoritme houdt het loop-minimum
@@ -146,11 +167,17 @@ Deno.serve(runBackground("compute-phoenix", async () => {
     let isPhoenix = false;
     let last50xDate: string | null = null;
     try {
-      const bars = await fetchYahoo10y(row.ticker);
+      const { bars, splits } = await fetchYahoo10y(row.ticker);
       if (bars.length >= 10) {
-        last50xDate = findLastPhoenixDate(bars, PHOENIX_MULT);
-        isPhoenix = last50xDate != null;
-        if (isPhoenix) phoenixFound++;
+        if (hasUntrustworthySplit(splits)) {
+          // Skip — adjclose-data is onbetrouwbaar door grote split, kans op vals positief.
+          isPhoenix = false;
+          last50xDate = null;
+        } else {
+          last50xDate = findLastPhoenixDate(bars, PHOENIX_MULT);
+          isPhoenix = last50xDate != null;
+          if (isPhoenix) phoenixFound++;
+        }
       }
     } catch (e) {
       errors++;
