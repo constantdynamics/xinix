@@ -132,6 +132,13 @@ export interface Card {
   is_phoenix?: boolean | null;
   is_hikkertje?: boolean | null;
   is_zwitserleven?: boolean | null;
+  // Status van auto-fill briefing-velden via poll-briefing.
+  //   pending = nog niet gepoged
+  //   filled = ten minste 1 veld via CT.gov gevuld
+  //   no_data = poll uitgevoerd maar niets gevonden
+  //   not_applicable = mining/other sector — briefing-velden niet relevant
+  briefing_status?: "pending" | "filled" | "no_data" | "not_applicable" | null;
+  briefing_polled_at?: string | null;
   notes?: string | null;
 }
 

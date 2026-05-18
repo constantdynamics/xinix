@@ -21,6 +21,7 @@ const JOBS = [
   "compute-phoenix-background",
   "compute-hikkertjes-background",
   "compute-zwitserleven-background",
+  "poll-briefing-background",
 ];
 
 Deno.serve(async (req) => {

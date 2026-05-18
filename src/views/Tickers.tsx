@@ -1366,6 +1366,12 @@ export function TickersView({
                   >
                     Sector-info
                   </th>
+                  <th
+                    className="text-left p-3 font-semibold cursor-help"
+                    title="Status van automatische briefing-velden invul-job (CT.gov + openFDA, alleen biotech). 🟡 wachtrij · 🟢 gevuld · ⚪ geen data · 🚫 N/A (mining/other)"
+                  >
+                    Briefing
+                  </th>
                   <th className="text-left p-3 font-semibold">Trigger</th>
                   <th className="p-3"></th>
                 </tr>
@@ -1438,6 +1444,16 @@ export function TickersView({
                           : [c.phase, c.modality, c.disease_area]
                               .filter(Boolean)
                               .join(" / ")}
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
+                        {(() => {
+                          const st = c.briefing_status;
+                          if (st === "not_applicable") return <span title="Briefing-velden niet relevant voor deze sector" className="text-neutral-600 text-xs">🚫 N/A</span>;
+                          if (st === "filled") return <span title={`Automatisch gevuld${c.briefing_polled_at ? ` op ${c.briefing_polled_at.slice(0,10)}` : ""}`} className="text-emerald-400 text-xs">🟢 gevuld</span>;
+                          if (st === "no_data") return <span title={`CT.gov gaf geen relevante data${c.briefing_polled_at ? ` (laatste poging ${c.briefing_polled_at.slice(0,10)})` : ""}`} className="text-neutral-500 text-xs">⚪ geen data</span>;
+                          if (st === "pending") return <span title="In wachtrij voor poll-briefing — wordt automatisch gevuld in volgende nachtelijke run" className="text-yellow-400 text-xs">🟡 wachtrij</span>;
+                          return <span className="text-neutral-700 text-xs">—</span>;
+                        })()}
                       </td>
                       <td className="p-3 text-neutral-500 truncate max-w-xs">
                         {c.trigger_event ?? "—"}
