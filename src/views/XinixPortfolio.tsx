@@ -1796,7 +1796,83 @@ function getSortValue(p: PhoenixRankEntry, key: PhoenixSortKey): number | null {
   }
 }
 
-type PhoenixDateFilter = "all" | "1y" | "3y" | "5y" | "older";
+// Facet-bucket: één checkbox-keuze binnen een criterium-groep.
+// Match krijgt de feniks-entry én de afgeleide numerieke waarde (zoals
+// daysAgo voor datums); een rij valt in deze bucket als match true is.
+interface FacetBucket {
+  id: string;
+  label: string;
+  match: (p: PhoenixRankEntry) => boolean;
+}
+
+interface FacetGroup {
+  key: PhoenixSortKey;
+  label: string;
+  buckets: FacetBucket[];
+}
+
+const FACET_GROUPS: FacetGroup[] = [
+  {
+    key: "phoenix_incident_count",
+    label: "Aantal feniks-incidenten",
+    buckets: [
+      { id: "1", label: "1 incident", match: (p) => p.phoenix_incident_count === 1 },
+      { id: "2", label: "2 incidenten", match: (p) => p.phoenix_incident_count === 2 },
+      { id: "3plus", label: "3 of meer", match: (p) => (p.phoenix_incident_count ?? 0) >= 3 },
+    ],
+  },
+  {
+    key: "phoenix_median_date",
+    label: "Mediaan datum (hoe lang geleden)",
+    buckets: [
+      { id: "lt1y", label: "< 1 jaar geleden", match: (p) => { const d = daysAgo(p.phoenix_median_date); return d != null && d < 365; } },
+      { id: "1to3y", label: "1 – 3 jaar geleden", match: (p) => { const d = daysAgo(p.phoenix_median_date); return d != null && d >= 365 && d < 3 * 365; } },
+      { id: "3to5y", label: "3 – 5 jaar geleden", match: (p) => { const d = daysAgo(p.phoenix_median_date); return d != null && d >= 3 * 365 && d < 5 * 365; } },
+      { id: "gt5y", label: "Ouder dan 5 jaar", match: (p) => { const d = daysAgo(p.phoenix_median_date); return d != null && d >= 5 * 365; } },
+    ],
+  },
+  {
+    key: "phoenix_max_growth_180d_pct",
+    label: "Max groei in 180 dagen",
+    buckets: [
+      { id: "lt5k", label: "< 5.000%", match: (p) => p.phoenix_max_growth_180d_pct != null && p.phoenix_max_growth_180d_pct < 5000 },
+      { id: "5kto10k", label: "5.000 – 10.000%", match: (p) => p.phoenix_max_growth_180d_pct != null && p.phoenix_max_growth_180d_pct >= 5000 && p.phoenix_max_growth_180d_pct < 10000 },
+      { id: "10kto25k", label: "10.000 – 25.000%", match: (p) => p.phoenix_max_growth_180d_pct != null && p.phoenix_max_growth_180d_pct >= 10000 && p.phoenix_max_growth_180d_pct < 25000 },
+      { id: "gt25k", label: "Meer dan 25.000%", match: (p) => p.phoenix_max_growth_180d_pct != null && p.phoenix_max_growth_180d_pct >= 25000 },
+    ],
+  },
+  {
+    key: "phoenix_days_to_50x",
+    label: "Dagen tot 50×",
+    buckets: [
+      { id: "le90", label: "≤ 90 dagen (zeer snel)", match: (p) => p.phoenix_days_to_50x != null && p.phoenix_days_to_50x <= 90 },
+      { id: "91to365", label: "91 – 365 dagen", match: (p) => p.phoenix_days_to_50x != null && p.phoenix_days_to_50x > 90 && p.phoenix_days_to_50x <= 365 },
+      { id: "1to3y", label: "1 – 3 jaar", match: (p) => p.phoenix_days_to_50x != null && p.phoenix_days_to_50x > 365 && p.phoenix_days_to_50x <= 3 * 365 },
+      { id: "gt3y", label: "Meer dan 3 jaar", match: (p) => p.phoenix_days_to_50x != null && p.phoenix_days_to_50x > 3 * 365 },
+    ],
+  },
+  {
+    key: "above_limit_pct",
+    label: "Afstand tot aankooplimiet",
+    buckets: [
+      { id: "below", label: "Onder limiet", match: (p) => p.above_limit_pct != null && p.above_limit_pct <= 0 },
+      { id: "0to10", label: "0 – 10% boven limiet", match: (p) => p.above_limit_pct != null && p.above_limit_pct > 0 && p.above_limit_pct <= 10 },
+      { id: "10to25", label: "10 – 25% boven limiet", match: (p) => p.above_limit_pct != null && p.above_limit_pct > 10 && p.above_limit_pct <= 25 },
+      { id: "25to50", label: "25 – 50% boven limiet", match: (p) => p.above_limit_pct != null && p.above_limit_pct > 25 && p.above_limit_pct <= 50 },
+      { id: "gt50", label: "Meer dan 50% boven limiet", match: (p) => p.above_limit_pct != null && p.above_limit_pct > 50 },
+    ],
+  },
+  {
+    key: "phoenix_50x_date",
+    label: "Laatste 50× datum",
+    buckets: [
+      { id: "lt1y", label: "Laatste jaar", match: (p) => { const d = daysAgo(p.phoenix_50x_date); return d != null && d < 365; } },
+      { id: "1to3y", label: "1 – 3 jaar geleden", match: (p) => { const d = daysAgo(p.phoenix_50x_date); return d != null && d >= 365 && d < 3 * 365; } },
+      { id: "3to5y", label: "3 – 5 jaar geleden", match: (p) => { const d = daysAgo(p.phoenix_50x_date); return d != null && d >= 3 * 365 && d < 5 * 365; } },
+      { id: "gt5y", label: "Ouder dan 5 jaar", match: (p) => { const d = daysAgo(p.phoenix_50x_date); return d != null && d >= 5 * 365; } },
+    ],
+  },
+];
 
 export function PhoenixView() {
   const [ranking, setRanking] = useState<PhoenixRankEntry[]>([]);
@@ -1808,11 +1884,16 @@ export function PhoenixView() {
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<PhoenixSortKey>("above_limit_pct");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [dateFilter, setDateFilter] = useState<PhoenixDateFilter>("all");
   const [visibleCols, setVisibleCols] = useState<Set<PhoenixSortKey>>(
     () => new Set(PHOENIX_COLUMNS.map((c) => c.key)),
   );
-  const [activeFilters, setActiveFilters] = useState<Set<PhoenixSortKey>>(new Set());
+  // Per facet-groep een set van geselecteerde bucket-ids. Lege set = geen
+  // filter op die groep. Binnen 1 groep = OR, tussen groepen = AND.
+  const [selectedBuckets, setSelectedBuckets] = useState<Record<PhoenixSortKey, Set<string>>>(() => {
+    const init = {} as Record<PhoenixSortKey, Set<string>>;
+    for (const g of FACET_GROUPS) init[g.key] = new Set();
+    return init;
+  });
   const [fullScanRunning, setFullScanRunning] = useState(false);
   const [fullScanBatch, setFullScanBatch] = useState(0);
   const fullScanStopRef = useRef(false);
@@ -1890,50 +1971,39 @@ export function PhoenixView() {
     });
   }
 
-  function toggleFilter(key: PhoenixSortKey) {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
+  function toggleBucket(groupKey: PhoenixSortKey, bucketId: string) {
+    setSelectedBuckets((prev) => {
+      const nextSet = new Set(prev[groupKey]);
+      if (nextSet.has(bucketId)) nextSet.delete(bucketId); else nextSet.add(bucketId);
+      return { ...prev, [groupKey]: nextSet };
     });
   }
 
-  // Gefilterde + gesorteerde ranking. Server stuurt de volledige lijst — alles
-  // client-side. Actieve criterium-filters verbergen rijen zonder waarde voor
-  // dat criterium (zo zie je alleen aandelen waarvoor het kenmerk bekend is).
+  function clearAllFilters() {
+    const cleared = {} as Record<PhoenixSortKey, Set<string>>;
+    for (const g of FACET_GROUPS) cleared[g.key] = new Set();
+    setSelectedBuckets(cleared);
+  }
+
+  // Filter: voor elke groep met ≥1 geselecteerde bucket moet de rij in
+  // tenminste 1 van die buckets vallen (OR binnen groep). Groepen worden
+  // gecombineerd met AND. Per bucket berekenen we ook live counts gebaseerd
+  // op de overige actieve filters (zoals bol.com — toont hoeveel resultaten
+  // er overblijven als je deze bucket erbij aanvinkt).
   const filteredRanking = useMemo(() => {
-    const now = Date.now();
-    const ms = 24 * 3600 * 1000;
-    const cutoffMs: Record<PhoenixDateFilter, number | null> = {
-      all: null,
-      "1y": now - 365 * ms,
-      "3y": now - 3 * 365 * ms,
-      "5y": now - 5 * 365 * ms,
-      older: 0,
-    };
-
-    let filtered = ranking;
-    if (dateFilter !== "all") {
-      filtered = filtered.filter((p) => {
-        if (!p.phoenix_50x_date) return false;
-        const t = new Date(p.phoenix_50x_date).getTime();
-        if (dateFilter === "older") {
-          const fiveYearsAgo = now - 5 * 365 * ms;
-          return t < fiveYearsAgo;
+    const filtered = ranking.filter((p) => {
+      for (const g of FACET_GROUPS) {
+        const sel = selectedBuckets[g.key];
+        if (sel.size === 0) continue;
+        let match = false;
+        for (const bid of sel) {
+          const bucket = g.buckets.find((b) => b.id === bid);
+          if (bucket && bucket.match(p)) { match = true; break; }
         }
-        const cutoff = cutoffMs[dateFilter];
-        return cutoff != null && t >= cutoff;
-      });
-    }
-
-    if (activeFilters.size > 0) {
-      filtered = filtered.filter((p) => {
-        for (const key of activeFilters) {
-          if (getSortValue(p, key) == null) return false;
-        }
-        return true;
-      });
-    }
+        if (!match) return false;
+      }
+      return true;
+    });
 
     const sorted = [...filtered].sort((a, b) => {
       const av = getSortValue(a, sortKey);
@@ -1945,7 +2015,35 @@ export function PhoenixView() {
     });
 
     return sorted;
-  }, [ranking, sortKey, sortDir, dateFilter, activeFilters]);
+  }, [ranking, sortKey, sortDir, selectedBuckets]);
+
+  // Live count per bucket: hoeveel rijen vallen erin als je ALLE andere
+  // facet-groepen toepast (de eigen groep wordt genegeerd, zoals bol.com).
+  const bucketCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const g of FACET_GROUPS) {
+      const baseFiltered = ranking.filter((p) => {
+        for (const og of FACET_GROUPS) {
+          if (og.key === g.key) continue;
+          const sel = selectedBuckets[og.key];
+          if (sel.size === 0) continue;
+          let match = false;
+          for (const bid of sel) {
+            const bucket = og.buckets.find((b) => b.id === bid);
+            if (bucket && bucket.match(p)) { match = true; break; }
+          }
+          if (!match) return false;
+        }
+        return true;
+      });
+      for (const b of g.buckets) {
+        counts[`${g.key}::${b.id}`] = baseFiltered.filter((p) => b.match(p)).length;
+      }
+    }
+    return counts;
+  }, [ranking, selectedBuckets]);
+
+  const activeFilterCount = Object.values(selectedBuckets).reduce((s, set) => s + set.size, 0);
 
   if (loading) return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
   if (error) return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
@@ -2003,65 +2101,185 @@ export function PhoenixView() {
         )}
       </div>
 
-      {/* Kolom-checkboxes + filter-checkboxes + datumfilter */}
+      {/* Layout: links facet-filters, rechts tabel */}
       {ranking.length > 0 && (
-        <Card className="p-3 space-y-3">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
-              Kolommen tonen
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+          {/* Facet-filters */}
+          <Card className="p-4 space-y-5 lg:sticky lg:top-3 lg:self-start lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] uppercase tracking-wider text-neutral-400 font-bold">
+                Filters {activeFilterCount > 0 && <span className="text-fog-pink">({activeFilterCount})</span>}
+              </div>
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={clearAllFilters}
+                  className="text-[11px] text-fog-lime hover:underline"
+                >
+                  wissen
+                </button>
+              )}
             </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {PHOENIX_COLUMNS.map((c) => (
-                <label key={c.key} className="flex items-center gap-1.5 text-xs text-neutral-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={visibleCols.has(c.key)}
-                    onChange={() => toggleCol(c.key)}
-                    className="accent-fog-lime"
-                  />
-                  <span>{c.short}</span>
-                </label>
-              ))}
+
+            {FACET_GROUPS.map((g) => (
+              <div key={g.key}>
+                <div className="text-[11px] font-bold text-neutral-200 mb-1.5">{g.label}</div>
+                <div className="space-y-1">
+                  {g.buckets.map((b) => {
+                    const count = bucketCounts[`${g.key}::${b.id}`] ?? 0;
+                    const checked = selectedBuckets[g.key].has(b.id);
+                    const disabled = count === 0 && !checked;
+                    return (
+                      <label
+                        key={b.id}
+                        className={`flex items-center gap-2 text-[11px] ${disabled ? "text-neutral-600 cursor-not-allowed" : "text-neutral-300 cursor-pointer hover:text-neutral-100"}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggleBucket(g.key, b.id)}
+                          className="accent-fog-pink"
+                        />
+                        <span className="flex-1">{b.label}</span>
+                        <span className="text-[10px] text-neutral-500 font-mono tabular-nums">{count}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            <div className="pt-3 border-t border-ink-5/40">
+              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+                Kolommen tonen
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                {PHOENIX_COLUMNS.map((c) => (
+                  <label key={c.key} className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleCols.has(c.key)}
+                      onChange={() => toggleCol(c.key)}
+                      className="accent-fog-lime"
+                    />
+                    <span>{c.short}</span>
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
-              Filter op criterium (alleen rijen met waarde)
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {PHOENIX_COLUMNS.map((c) => (
-                <label key={c.key} className="flex items-center gap-1.5 text-xs text-neutral-300 cursor-pointer" title={c.hint}>
-                  <input
-                    type="checkbox"
-                    checked={activeFilters.has(c.key)}
-                    onChange={() => toggleFilter(c.key)}
-                    className="accent-fog-pink"
-                  />
-                  <span>{c.short}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-3 pt-1 border-t border-ink-5/40">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-neutral-500 font-bold uppercase tracking-wide text-[10px]">50× datum</span>
-              <select
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value as PhoenixDateFilter)}
-                className="bg-ink-3 border border-ink-5 rounded px-2 py-1 text-xs text-neutral-200"
-              >
-                <option value="all">Alle</option>
-                <option value="1y">Laatste jaar</option>
-                <option value="3y">Laatste 3 jaar</option>
-                <option value="5y">Laatste 5 jaar</option>
-                <option value="older">Ouder dan 5 jaar</option>
-              </select>
-            </div>
-            <div className="ml-auto text-[11px] text-neutral-500">
+
+            <div className="pt-2 border-t border-ink-5/40 text-[11px] text-neutral-500">
               {filteredRanking.length} van {ranking.length} getoond
             </div>
-          </div>
-        </Card>
+          </Card>
+
+          {/* Tabel */}
+          <Card className="p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                    <th className="px-3 py-2 text-left w-10">#</th>
+                    <th className="px-3 py-2 text-left">Ticker</th>
+                    {PHOENIX_COLUMNS.map((c) => visibleCols.has(c.key) ? (
+                      <th
+                        key={c.key}
+                        className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+                        onClick={() => toggleSort(c.key)}
+                        title={c.hint}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {c.short}
+                          <span className="text-fog-lime text-[9px]">{sortArrow(c.key)}</span>
+                        </span>
+                      </th>
+                    ) : null)}
+                    <th className="px-3 py-2 text-right">Koers</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-5/40">
+                  {filteredRanking.map((p, i) => {
+                    const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
+                    const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
+                    return (
+                      <tr key={p.ticker} className={atOrBelow ? "bg-fog-lime/[0.05]" : ""}>
+                        <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <a
+                              href={googleFinanceUrl(p.ticker, p.exchange)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-mono text-sm font-semibold text-fog-lime hover:underline"
+                            >
+                              {p.ticker}
+                            </a>
+                            {p.company && (
+                              <span className="text-xs text-neutral-400 truncate max-w-[140px]">{p.company}</span>
+                            )}
+                            {p.sector && <Pill>{p.sector}</Pill>}
+                          </div>
+                          <div className="mt-0.5 text-[10px] text-neutral-500 flex items-center gap-1.5">
+                            {(p.medal_gold ?? 0) > 0 && <span>🏆{p.medal_gold}</span>}
+                            {(p.medal_silver ?? 0) > 0 && <span>🥈{p.medal_silver}</span>}
+                            {(p.medal_bronze ?? 0) > 0 && <span>🥉{p.medal_bronze}</span>}
+                          </div>
+                        </td>
+                        {visibleCols.has("above_limit_pct") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums">
+                            {p.above_limit_pct != null ? (
+                              <span className={atOrBelow ? "text-fog-lime font-semibold" : near ? "text-fog-warn" : "text-neutral-300"}>
+                                {atOrBelow ? "✓ onder" : `+${p.above_limit_pct.toFixed(1)}%`}
+                              </span>
+                            ) : (
+                              <span className="text-neutral-600">—</span>
+                            )}
+                          </td>
+                        )}
+                        {visibleCols.has("phoenix_incident_count") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                            {p.phoenix_incident_count ?? <span className="text-neutral-600">—</span>}
+                          </td>
+                        )}
+                        {visibleCols.has("phoenix_median_date") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                            {(() => {
+                              const d = daysAgo(p.phoenix_median_date);
+                              return d != null ? `${d}d` : <span className="text-neutral-600">—</span>;
+                            })()}
+                          </td>
+                        )}
+                        {visibleCols.has("phoenix_max_growth_180d_pct") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                            {p.phoenix_max_growth_180d_pct != null
+                              ? `+${p.phoenix_max_growth_180d_pct.toFixed(0)}%`
+                              : <span className="text-neutral-600">—</span>}
+                          </td>
+                        )}
+                        {visibleCols.has("phoenix_days_to_50x") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                            {p.phoenix_days_to_50x != null
+                              ? `${p.phoenix_days_to_50x}d`
+                              : <span className="text-neutral-600">—</span>}
+                          </td>
+                        )}
+                        {visibleCols.has("phoenix_50x_date") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums text-fog-pink/80">
+                            {p.phoenix_50x_date ? fmtDate(p.phoenix_50x_date) : <span className="text-neutral-600">—</span>}
+                          </td>
+                        )}
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
+                          {p.buy_limit != null && <div className="text-[10px] text-neutral-500">lim {fmtPrice(p.buy_limit)}</div>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
 
       {/* Tabel */}

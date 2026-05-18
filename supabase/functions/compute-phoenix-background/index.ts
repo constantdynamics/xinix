@@ -1,6 +1,17 @@
 // compute-phoenix-background — scant de bestaande watchlist op het feniks-profiel:
-// aandelen die in de afgelopen 10 jaar minimaal 50× zijn gegaan.
-// Verwerkt max ~100 tickers per run (is_phoenix IS NULL); draait daily of op verzoek.
+// aandelen die in de afgelopen 10 jaar een EXPLOSIEVE 50× of 100× run hadden.
+//
+// Criteria (strikt):
+//   • 50× run binnen 10-60 dagen, OF
+//   • 100× run binnen 10-120 dagen
+//   • Minimum run-duur: 10 dagen (anders is het bijna altijd een data-artefact)
+//   • Historische piek-cap: $10.000 — aandelen die ooit boven die prijs noteerden
+//     zijn meestal extreem verwaterd (reverse-split artefact in Yahoo's adjclose)
+//   • Single-bar jump-cap: een dag mag niet >5× de vorige dag zijn
+//   • Skip tickers met grote splits (≥5:1) — Yahoo's adjclose voor sommige
+//     beurzen past pre-split data niet altijd correct aan
+//
+// Verwerkt max ~80 tickers per run; draait dagelijks of op verzoek.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -42,36 +53,28 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
   };
 }
 
-const PHOENIX_MULT = 50;
-const BATCH_SIZE = 100;
+// Strikte criteria — explosieve runs binnen krap tijdvenster
+const RUN_50X_MULT          = 50;
+const RUN_100X_MULT         = 100;
+const RUN_MIN_DAYS          = 10;   // anders bijna altijd data-artefact
+const RUN_50X_MAX_DAYS      = 60;   // 50× moet binnen 60 dagen
+const RUN_100X_MAX_DAYS     = 120;  // 100× mag tot 120 dagen
+const MAX_HISTORICAL_PEAK   = 10_000; // verwaterde tickers met "$50.000 ooit" overslaan
+const MIN_BASELINE_PRICE    = 0.05; // sub-penny noise eruit
+const MIN_PEAK_PRICE        = 1.0;  // echte piek moet bovenwaarde hebben
+const MAX_SINGLE_BAR_JUMP   = 5;    // daily bar mag niet >5× de vorige (split-artefact)
+const MAX_TRUSTED_SPLIT_RATIO = 5;
+
+const BATCH_SIZE = 80;
 const RESCAN_DAYS = 90;
-const BUDGET_MS = 128_000;
-const SLEEP_MS = 280;
-// Anti-noise / anti-split-artefact criteria. Vier lagen verdediging:
-//  1. adjclose (i.p.v. raw close): kent reverse-/forward-splits af
-//  2. MIN_BASELINE: minimum baseline om sub-penny noise uit te sluiten
-//  3. MIN_PEAK: minimum top — een echte feniks raakt absolute hoogtes
-//  4. MIN_RUN_BARS: 50× run moet zich over meerdere bars ontwikkelen
-//     (1-bar jumps = altijd split-data-fout, geen organische run)
-//  5. MAX_SINGLE_BAR_JUMP: één bar mag niet >MAX×-jumpen t.o.v. de vorige
-//     (vangst van overgebleven split-artefacten in adjclose-data)
-const MIN_BASELINE_PRICE   = 0.05;
-const MIN_PEAK_PRICE       = 1.0;
-const MIN_RUN_BARS         = 4;   // ≥4 weekly bars tussen min en piek
-const MAX_SINGLE_BAR_JUMP  = 10;  // bar-to-bar mag niet >10× zijn (5000% in 1 week = data-fout)
-// Na een gerecord 50×-incident vereist een nieuw incident dat de koers eerst
-// minimaal terugzakt naar peak/POST_PEAK_CRASH_DIV. Dit voorkomt dat 1 lange
-// rally als meerdere incidenten wordt geteld.
-const POST_PEAK_CRASH_DIV  = 10;
+const BUDGET_MS = 130_000;
+const SLEEP_MS = 350;
 
 interface Bar { date: string; close: number }
 interface SplitEvent { date: string; numerator: number; denominator: number; ratio: number }
 async function fetchYahoo10y(ticker: string): Promise<{ bars: Bar[]; splits: SplitEvent[] }> {
-  // events=split → split-events erbij. Tickers met grote splits (reverse of forward
-  // ≥5:1) overslaan we — Yahoo's adjclose voor sommige beurzen (XETRA, OTC, BSE)
-  // past pre-split data niet altijd correct aan, wat valse 50× runs oplevert
-  // (zoals H2O.DE Enapter na hun 10:1 reverse split feb 2024).
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=10y&interval=1wk&events=split`;
+  // Daily bars — granulariteit nodig voor "10 dagen minimum" en "60 dagen maximum"
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=10y&interval=1d&events=split`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; PhoenixBot/1.0; +https://github.com)" } });
   if (!res.ok) throw new Error(`Yahoo ${ticker} HTTP ${res.status}`);
   const json = (await res.json()) as { chart: { result?: Array<{ timestamp: number[]; events?: { splits?: Record<string, { date: number; numerator: number; denominator: number }> }; indicators: { adjclose?: Array<{ adjclose?: (number | null)[] }>; quote: Array<{ close: (number | null)[] }> }; }>; error?: { description?: string } | null; }; };
@@ -90,7 +93,6 @@ async function fetchYahoo10y(ticker: string): Promise<{ bars: Bar[]; splits: Spl
   return { bars, splits };
 }
 
-const MAX_TRUSTED_SPLIT_RATIO = 5;
 function hasUntrustworthySplit(splits: SplitEvent[]): boolean {
   for (const s of splits) {
     const r = s.ratio;
@@ -102,71 +104,83 @@ function hasUntrustworthySplit(splits: SplitEvent[]): boolean {
 interface PhoenixIncident {
   baseline_date: string;
   peak_date: string;
-  days_to_50x: number;
-  growth_180d_pct: number;
+  days_to_50x: number;        // werkelijk aantal dagen voor deze run
+  peak_mult: number;           // hoeveel × de run uiteindelijk haalde
+  growth_180d_pct: number;     // max groei vanaf baseline binnen 180 dagen
 }
 
-// Vind alle 50× incidenten. Een incident telt als: vanaf een lokaal minimum
-// stijgt de koers ≥ mult×, met de gebruikelijke anti-noise filters. Na een
-// geregistreerd incident eist het algoritme een echte crash (koers ≤ peak/10)
-// voordat een nieuw incident geteld kan worden — anders zou één lange rally
-// meerdere keren tellen.
-function findPhoenixIncidents(bars: Bar[], mult: number): PhoenixIncident[] {
+// Bar-to-bar jump cap: één dag mag niet >MAX× de vorige zijn (organisch
+// stijgt zelfs een biotech zelden >3× per dag). Grotere jumps zijn vrijwel
+// altijd Yahoo-adjclose-artefacten van splits of dividenden. Filter ze eruit.
+function cleanBars(bars: Bar[]): Bar[] {
+  const out: Bar[] = [];
+  let prev = NaN;
+  for (const b of bars) {
+    if (Number.isFinite(prev) && prev > 0 && b.close >= prev * MAX_SINGLE_BAR_JUMP) {
+      // skip artefact-bar, reset baseline naar deze bar zodat we erna verder kunnen
+      prev = b.close;
+      continue;
+    }
+    out.push(b);
+    prev = b.close;
+  }
+  return out;
+}
+
+// Vind alle explosieve 50× / 100× incidenten in de gegeven bars.
+// Strategie: walk through bars; voor elke baseline-bar zoek de beste piek
+// binnen [10, 120] dagen die voldoet aan de criteria. Bij een hit: registreer
+// het incident en spring voorbij de piek om dezelfde run niet dubbel te tellen.
+function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
+  // Pre-filter: extreem verwaterde tickers volledig uitsluiten
+  for (const b of bars) {
+    if (b.close > MAX_HISTORICAL_PEAK) return [];
+  }
+  const clean = cleanBars(bars);
+  if (clean.length < 20) return [];
+
   const incidents: PhoenixIncident[] = [];
-  let minSoFar = Infinity;
-  let minBarIdx = -1;
-  let lastPeak: number | null = null;
-  let prevClose = NaN;
+  let i = 0;
+  while (i < clean.length) {
+    const baseline = clean[i].close;
+    if (baseline < MIN_BASELINE_PRICE) { i++; continue; }
+    const baselineMs = new Date(clean[i].date).getTime();
 
-  for (let i = 0; i < bars.length; i++) {
-    const b = bars[i];
-    if (Number.isFinite(prevClose) && prevClose > 0 && b.close >= prevClose * MAX_SINGLE_BAR_JUMP) {
-      prevClose = b.close;
-      continue;
-    }
-    prevClose = b.close;
-
-    if (lastPeak !== null) {
-      // Wachten tot een echte crash voordat we een nieuw incident accepteren
-      if (b.close <= lastPeak / POST_PEAK_CRASH_DIV) {
-        lastPeak = null;
-        minSoFar = b.close;
-        minBarIdx = i;
-      } else {
-        if (b.close > lastPeak) lastPeak = b.close;
-      }
-      continue;
+    // Zoek de hoogste valide piek binnen het toegestane venster
+    let best: { idx: number; days: number; mult: number } | null = null;
+    for (let j = i + 1; j < clean.length; j++) {
+      const ms = new Date(clean[j].date).getTime();
+      const days = Math.round((ms - baselineMs) / 86400000);
+      if (days > RUN_100X_MAX_DAYS) break;       // venster verlaten
+      if (days < RUN_MIN_DAYS) continue;          // te kort
+      if (clean[j].close < MIN_PEAK_PRICE) continue;
+      const mult = clean[j].close / baseline;
+      const valid50  = mult >= RUN_50X_MULT  && days <= RUN_50X_MAX_DAYS;
+      const valid100 = mult >= RUN_100X_MULT && days <= RUN_100X_MAX_DAYS;
+      if (!valid50 && !valid100) continue;
+      if (!best || mult > best.mult) best = { idx: j, days, mult };
     }
 
-    if (b.close < minSoFar) {
-      minSoFar = b.close;
-      minBarIdx = i;
-    } else if (
-      minSoFar >= MIN_BASELINE_PRICE &&
-      b.close >= MIN_PEAK_PRICE &&
-      b.close >= minSoFar * mult &&
-      (i - minBarIdx) >= MIN_RUN_BARS
-    ) {
-      const baselineDate = bars[minBarIdx].date;
-      const baselineMs = new Date(baselineDate).getTime();
-      const cutoffMs = baselineMs + 180 * 86400 * 1000;
-      // Maximale prijs binnen 180 dagen na baseline (incl. de peak-bar zelf)
-      let maxClose = b.close;
-      for (let j = minBarIdx + 1; j < bars.length; j++) {
-        const jms = new Date(bars[j].date).getTime();
-        if (jms > cutoffMs) break;
-        if (bars[j].close > maxClose) maxClose = bars[j].close;
+    if (best) {
+      // Max prijs binnen 180 dagen na baseline (voor growth_180d_pct)
+      const cutoffMs = baselineMs + 180 * 86400000;
+      let maxClose = clean[best.idx].close;
+      for (let k = i + 1; k < clean.length; k++) {
+        const kms = new Date(clean[k].date).getTime();
+        if (kms > cutoffMs) break;
+        if (clean[k].close > maxClose) maxClose = clean[k].close;
       }
-      const growthPct = ((maxClose - minSoFar) / minSoFar) * 100;
-      const daysTo50x = Math.round((new Date(b.date).getTime() - baselineMs) / 86400000);
-
+      const growthPct = ((maxClose - baseline) / baseline) * 100;
       incidents.push({
-        baseline_date: baselineDate,
-        peak_date: b.date,
-        days_to_50x: daysTo50x,
+        baseline_date: clean[i].date,
+        peak_date: clean[best.idx].date,
+        days_to_50x: best.days,
+        peak_mult: Math.round(best.mult * 10) / 10,
         growth_180d_pct: Math.round(growthPct * 10) / 10,
       });
-      lastPeak = b.close;
+      i = best.idx + 1;  // ga verder na de piek — voorkomt dubbele detectie
+    } else {
+      i++;
     }
   }
   return incidents;
@@ -202,7 +216,7 @@ Deno.serve(runBackground("compute-phoenix", async () => {
   if (fetchError) throw new Error(fetchError.message);
   const batch = (tickers ?? []) as { ticker: string }[];
 
-  let checked = 0, phoenixFound = 0, errors = 0;
+  let checked = 0, phoenixFound = 0, errors = 0, dilutedSkipped = 0, splitSkipped = 0;
   const errMsgs: string[] = [];
 
   for (const row of batch) {
@@ -218,18 +232,26 @@ Deno.serve(runBackground("compute-phoenix", async () => {
 
     try {
       const { bars, splits } = await fetchYahoo10y(row.ticker);
-      if (bars.length >= 10) {
-        if (!hasUntrustworthySplit(splits)) {
-          incidents = findPhoenixIncidents(bars, PHOENIX_MULT);
-          if (incidents.length > 0) {
-            isPhoenix = true;
-            phoenixFound++;
-            last50xDate = incidents[incidents.length - 1].peak_date;
-            incidentCount = incidents.length;
-            medianPeakDate = medianDate(incidents.map((i) => i.peak_date));
-            maxGrowth180d = Math.max(...incidents.map((i) => i.growth_180d_pct));
-            const md = median(incidents.map((i) => i.days_to_50x));
-            medianDaysTo50x = md != null ? Math.round(md) : null;
+      if (bars.length >= 20) {
+        if (hasUntrustworthySplit(splits)) {
+          splitSkipped++;
+        } else {
+          // Check historical peak cap
+          const histPeak = Math.max(...bars.map((b) => b.close));
+          if (histPeak > MAX_HISTORICAL_PEAK) {
+            dilutedSkipped++;
+          } else {
+            incidents = findPhoenixIncidents(bars);
+            if (incidents.length > 0) {
+              isPhoenix = true;
+              phoenixFound++;
+              last50xDate = incidents[incidents.length - 1].peak_date;
+              incidentCount = incidents.length;
+              medianPeakDate = medianDate(incidents.map((i) => i.peak_date));
+              maxGrowth180d = Math.max(...incidents.map((i) => i.growth_180d_pct));
+              const md = median(incidents.map((i) => i.days_to_50x));
+              medianDaysTo50x = md != null ? Math.round(md) : null;
+            }
           }
         }
       }
@@ -256,7 +278,7 @@ Deno.serve(runBackground("compute-phoenix", async () => {
   const remaining = batch.length - checked;
   return {
     ok: errors < Math.max(1, checked),
-    message: `batch ${batch.length}, gecheckt ${checked}, feniks ${phoenixFound}, fouten ${errors}` + (errMsgs.length ? `; ${errMsgs.slice(0, 3).join("; ")}` : "") + (remaining > 0 ? `; ${remaining} overgeslagen (tijdslimiet)` : ""),
-    metrics: { batch_size: batch.length, checked, phoenix_found: phoenixFound, errors },
+    message: `batch ${batch.length}, gecheckt ${checked}, feniks ${phoenixFound}, verwaterd-skip ${dilutedSkipped}, split-skip ${splitSkipped}, fouten ${errors}` + (errMsgs.length ? `; ${errMsgs.slice(0, 3).join("; ")}` : "") + (remaining > 0 ? `; ${remaining} overgeslagen (tijdslimiet)` : ""),
+    metrics: { batch_size: batch.length, checked, phoenix_found: phoenixFound, diluted_skipped: dilutedSkipped, split_skipped: splitSkipped, errors },
   };
 }));
