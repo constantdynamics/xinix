@@ -110,7 +110,7 @@ export function HikkertjesView() {
           <div className="flex-1">
             <div className="font-semibold text-yellow-400 mb-1">Hikkertjes</div>
             <p className="text-sm text-neutral-300 leading-relaxed">
-              Aandelen die in het afgelopen jaar minimaal <strong>2×</strong> op één dag <strong>≥50%</strong> gestegen zijn
+              Aandelen die in het afgelopen jaar minimaal <strong>2×</strong> op één dag <strong>≥55%</strong> gestegen zijn
               en die stijging minimaal <strong>3 handelsdagen</strong> vasthielden. Dit patroon duidt op extreme
               volatiliteit en explosief koerspotentieel — maar ook hoog risico.
             </p>
