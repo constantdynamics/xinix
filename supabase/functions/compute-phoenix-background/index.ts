@@ -67,17 +67,28 @@ const LOOSE_MAX_DAYS  = 180;
 const LOOSE_MIN_MULT  = 50;     // start bij echte 50× (geen kleinere runs)
 const LOOSE_MAX_CANDIDATES = 20;
 
-const BATCH_SIZE = 80;
+const BATCH_SIZE = 50;
 const RESCAN_DAYS = 90;
-const BUDGET_MS = 130_000;
-const SLEEP_MS = 350;
+const BUDGET_MS = 100_000;
+const SLEEP_MS = 400;
 
-interface Bar { date: string; adjClose: number; rawClose: number }
+interface Bar { date: string; adjClose: number; rawClose: number; ms: number }
 interface SplitEvent { date: string; numerator: number; denominator: number; ratio: number }
 
 async function fetchYahoo10y(ticker: string): Promise<{ bars: Bar[]; splits: SplitEvent[]; firstTradeDate: string | null }> {
+  // Daily bars — granulariteit nodig voor "10 dagen minimum" en "60 dagen maximum"
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=10y&interval=1d&events=split`;
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; PhoenixBot/1.0; +https://github.com)" } });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout per ticker
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; PhoenixBot/1.0; +https://github.com)" },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (!res.ok) throw new Error(`Yahoo ${ticker} HTTP ${res.status}`);
   const json = (await res.json()) as { chart: { result?: Array<{ meta?: { firstTradeDate?: number | null }; timestamp: number[]; events?: { splits?: Record<string, { date: number; numerator: number; denominator: number }> }; indicators: { adjclose?: Array<{ adjclose?: (number | null)[] }>; quote: Array<{ close: (number | null)[] }> }; }>; error?: { description?: string } | null; }; };
   const r = json.chart.result?.[0];
@@ -93,9 +104,10 @@ async function fetchYahoo10y(ticker: string): Promise<{ bars: Bar[]; splits: Spl
     const c = raw[i];
     if (!Number.isFinite(a as number) || !Number.isFinite(c as number)) continue;
     if (!(a! > 0) || !(c! > 0)) continue;
-    const date = new Date(ts[i] * 1000).toISOString().slice(0, 10);
+    const ms = ts[i] * 1000;
+    const date = new Date(ms).toISOString().slice(0, 10);
     if (firstTradeDate && date < firstTradeDate) continue;
-    bars.push({ date, adjClose: a as number, rawClose: c as number });
+    bars.push({ date, adjClose: a as number, rawClose: c as number, ms });
   }
 
   const splits: SplitEvent[] = Object.values(r.events?.splits ?? {}).map((s) => ({
@@ -173,11 +185,11 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
     const baseAdj = clean[i].adjClose;
     const baseRaw = clean[i].rawClose;
     if (baseAdj < MIN_BASELINE_PRICE) { i++; continue; }
-    const baselineMs = new Date(clean[i].date).getTime();
+    const baselineMs = clean[i].ms;
 
     let best: { idx: number; days: number; mult: number; rawMult: number } | null = null;
     for (let j = i + 1; j < clean.length; j++) {
-      const ms = new Date(clean[j].date).getTime();
+      const ms = clean[j].ms;
       const days = Math.round((ms - baselineMs) / 86400000);
       if (days > RUN_100X_MAX_DAYS) break;
       if (days < RUN_MIN_DAYS) continue;
@@ -199,7 +211,7 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
       const cutoffMs = baselineMs + 180 * 86400000;
       let maxClose = clean[best.idx].adjClose;
       for (let k = i + 1; k < clean.length; k++) {
-        const kms = new Date(clean[k].date).getTime();
+        const kms = clean[k].ms;
         if (kms > cutoffMs) break;
         if (clean[k].adjClose > maxClose) maxClose = clean[k].adjClose;
       }
@@ -234,11 +246,11 @@ function findLooseCandidates(bars: Bar[]): LooseCandidate[] {
     const baseAdj = clean[i].adjClose;
     const baseRaw = clean[i].rawClose;
     if (baseAdj < MIN_BASELINE_PRICE) { i++; continue; }
-    const baselineMs = new Date(clean[i].date).getTime();
+    const baselineMs = clean[i].ms;
 
     let best: { idx: number; days: number; mult: number; rawMult: number } | null = null;
     for (let j = i + 1; j < clean.length; j++) {
-      const ms = new Date(clean[j].date).getTime();
+      const ms = clean[j].ms;
       const days = Math.round((ms - baselineMs) / 86400000);
       if (days > LOOSE_MAX_DAYS) break;
       if (days < LOOSE_MIN_DAYS) continue;
