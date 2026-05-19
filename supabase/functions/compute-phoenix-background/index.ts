@@ -1,23 +1,9 @@
-// compute-phoenix-background — scant de bestaande watchlist op het feniks-profiel:
-// aandelen die in de afgelopen 10 jaar een EXPLOSIEVE 50× of 100× run hadden.
+// compute-phoenix-background v12 — strict detection + loose-data exploration.
 //
-// Criteria (strikt):
-//   • 50× run binnen 10-60 dagen, OF
-//   • 100× run binnen 10-120 dagen
-//   • Minimum run-duur: 10 dagen (anders is het bijna altijd een data-artefact)
-//   • Alleen bars na meta.firstTradeDate tellen (pre-IPO / pre-reorg stub-data
-//     uit Yahoo wordt zo automatisch genegeerd — fixt AMPY-achtige cases)
-//   • RAW close moet óók minimaal 25× zijn — Yahoo's adjclose discontinuïteiten
-//     komen niet voor in raw close, dus dit filtert fake runs eruit
-//   • Historische piek-cap: $10.000 — aandelen die ooit boven die prijs noteerden
-//     zijn meestal extreem verwaterd (reverse-split artefact)
-//   • Skip tickers met grote splits (≥3:1) — adjclose voor sommige beurzen
-//     onbetrouwbaar bij splits
-//   • Single-bar jump-cap: een dag mag niet >5× de vorige zijn
-//   • Max 3 incidenten per ticker — meer dan dat = data-corruptie
-//
-// Verwerkt max ~80 tickers per run; draait elke minuut tijdens catchup,
-// daarna terug naar 2-uurs schema.
+// Naast de strikte criteria slaat deze versie ook ruwe metrics op in
+// phoenix_loose_data (JSONB). Dat maakt SQL-queries mogelijk waarmee per
+// versoepeling van één criterium getoond kan worden welke tickers er
+// bijkomen — zonder elke keer opnieuw te moeten scannen.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -59,16 +45,13 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
   };
 }
 
+// Strikte criteria
 const RUN_50X_MULT          = 50;
 const RUN_100X_MULT         = 100;
 const RUN_MIN_DAYS          = 10;
 const RUN_50X_MAX_DAYS      = 60;
 const RUN_100X_MAX_DAYS     = 120;
 const RAW_CLOSE_MIN_MULT    = 25;
-// Recovery-check: een echte feniks staat "nu laag" — de huidige koers moet
-// dichter bij de baseline liggen dan bij de piek. Als current > baseline × 3
-// is het aandeel niet gecrashed, of erger: ghost-data uit een reorg/Chapter
-// 11 waar de "baseline" een prereorg-prijs is die niet meer bestaat (AMPY).
 const MAX_CURRENT_VS_BASELINE = 3;
 const MAX_DEACTIVATE_PEAK   = 100_000;
 const MAX_HISTORICAL_PEAK   = 10_000;
@@ -77,6 +60,12 @@ const MIN_PEAK_PRICE        = 1.0;
 const MAX_SINGLE_BAR_JUMP   = 5;
 const MAX_TRUSTED_SPLIT_RATIO = 3;
 const MAX_INCIDENTS         = 3;
+
+// Loose-data: brede zoekvenster voor exploratie
+const LOOSE_MIN_DAYS  = 5;
+const LOOSE_MAX_DAYS  = 180;
+const LOOSE_MIN_MULT  = 50;     // start bij echte 50× (geen kleinere runs)
+const LOOSE_MAX_CANDIDATES = 20;
 
 const BATCH_SIZE = 80;
 const RESCAN_DAYS = 90;
@@ -96,9 +85,7 @@ async function fetchYahoo10y(ticker: string): Promise<{ bars: Bar[]; splits: Spl
   const ts = r.timestamp ?? [];
   const adj = r.indicators.adjclose?.[0]?.adjclose ?? [];
   const raw = r.indicators.quote[0]?.close ?? [];
-  const firstTradeDate = r.meta?.firstTradeDate
-    ? new Date(r.meta.firstTradeDate * 1000).toISOString().slice(0, 10)
-    : null;
+  const firstTradeDate = r.meta?.firstTradeDate ? new Date(r.meta.firstTradeDate * 1000).toISOString().slice(0, 10) : null;
 
   const bars: Bar[] = [];
   for (let i = 0; i < ts.length; i++) {
@@ -107,7 +94,7 @@ async function fetchYahoo10y(ticker: string): Promise<{ bars: Bar[]; splits: Spl
     if (!Number.isFinite(a as number) || !Number.isFinite(c as number)) continue;
     if (!(a! > 0) || !(c! > 0)) continue;
     const date = new Date(ts[i] * 1000).toISOString().slice(0, 10);
-    if (firstTradeDate && date < firstTradeDate) continue; // pre-listing stub-data overslaan
+    if (firstTradeDate && date < firstTradeDate) continue;
     bars.push({ date, adjClose: a as number, rawClose: c as number });
   }
 
@@ -128,6 +115,16 @@ function hasUntrustworthySplit(splits: SplitEvent[]): boolean {
   return false;
 }
 
+function maxSplitRatio(splits: SplitEvent[]): number {
+  let max = 1;
+  for (const s of splits) {
+    const r = s.ratio;
+    const effective = r >= 1 ? r : (r > 0 ? 1 / r : 1);
+    if (effective > max) max = effective;
+  }
+  return max;
+}
+
 interface PhoenixIncident {
   baseline_date: string;
   baseline_close: number;
@@ -138,8 +135,16 @@ interface PhoenixIncident {
   growth_180d_pct: number;
 }
 
-// Bar-to-bar jump cap toepassen op adjClose. Bars die >MAX× springen worden
-// uitgefilterd (vrijwel altijd Yahoo-adjclose-artefacten).
+interface LooseCandidate {
+  baseline_date: string;
+  baseline_adj: number;
+  peak_date: string;
+  peak_adj: number;
+  days: number;
+  peak_mult: number;
+  raw_mult: number;
+}
+
 function cleanBars(bars: Bar[]): Bar[] {
   const out: Bar[] = [];
   let prev = NaN;
@@ -154,10 +159,6 @@ function cleanBars(bars: Bar[]): Bar[] {
   return out;
 }
 
-// Vind alle explosieve 50× / 100× incidenten. Voor elk valide incident
-// moet zowel adjClose-ratio als rawClose-ratio voldoen — dat filtert
-// Yahoo-adjclose-artefacten eruit (waar de adjusted koers springt maar
-// de daadwerkelijk verhandelde koers niet).
 function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
   for (const b of bars) {
     if (b.adjClose > MAX_HISTORICAL_PEAK || b.rawClose > MAX_HISTORICAL_PEAK) return [];
@@ -183,7 +184,6 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
       if (clean[j].adjClose < MIN_PEAK_PRICE) continue;
       const mult = clean[j].adjClose / baseAdj;
       const rawMult = baseRaw > 0 ? clean[j].rawClose / baseRaw : 0;
-      // Beide moeten ≥ drempel. raw cross-check vangt adjclose-artefacten.
       if (rawMult < RAW_CLOSE_MIN_MULT) continue;
       const valid50  = mult >= RUN_50X_MULT  && days <= RUN_50X_MAX_DAYS;
       const valid100 = mult >= RUN_100X_MULT && days <= RUN_100X_MAX_DAYS;
@@ -192,10 +192,6 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
     }
 
     if (best) {
-      // Recovery-check: een feniks-aandeel staat NU laag. Als de huidige
-      // koers nog steeds veel hoger staat dan de baseline (>3× baseline)
-      // dan is het aandeel niet teruggekrast — ofwel het is geen feniks,
-      // ofwel de "baseline" is prereorg ghost-data (AMPY-pattern).
       if (currentClose > baseAdj * MAX_CURRENT_VS_BASELINE) {
         i = best.idx + 1;
         continue;
@@ -217,7 +213,6 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
         peak_mult: Math.round(best.mult * 10) / 10,
         growth_180d_pct: Math.round(growthPct * 10) / 10,
       });
-      // > MAX_INCIDENTS = vrijwel altijd data-corruptie → ticker volledig afkeuren
       if (incidents.length > MAX_INCIDENTS) return [];
       i = best.idx + 1;
     } else {
@@ -225,6 +220,51 @@ function findPhoenixIncidents(bars: Bar[]): PhoenixIncident[] {
     }
   }
   return incidents;
+}
+
+// Loose detectie: alle 50× kandidaten in een breder venster zonder strikte
+// raw-mult/current/incident-cap. Output gebruikt voor variant-analyse.
+function findLooseCandidates(bars: Bar[]): LooseCandidate[] {
+  const clean = cleanBars(bars);
+  if (clean.length < 20) return [];
+
+  const candidates: LooseCandidate[] = [];
+  let i = 0;
+  while (i < clean.length && candidates.length < LOOSE_MAX_CANDIDATES) {
+    const baseAdj = clean[i].adjClose;
+    const baseRaw = clean[i].rawClose;
+    if (baseAdj < MIN_BASELINE_PRICE) { i++; continue; }
+    const baselineMs = new Date(clean[i].date).getTime();
+
+    let best: { idx: number; days: number; mult: number; rawMult: number } | null = null;
+    for (let j = i + 1; j < clean.length; j++) {
+      const ms = new Date(clean[j].date).getTime();
+      const days = Math.round((ms - baselineMs) / 86400000);
+      if (days > LOOSE_MAX_DAYS) break;
+      if (days < LOOSE_MIN_DAYS) continue;
+      if (clean[j].adjClose < MIN_PEAK_PRICE) continue;
+      const mult = clean[j].adjClose / baseAdj;
+      if (mult < LOOSE_MIN_MULT) continue;
+      const rawMult = baseRaw > 0 ? clean[j].rawClose / baseRaw : 0;
+      if (!best || mult > best.mult) best = { idx: j, days, mult, rawMult };
+    }
+
+    if (best) {
+      candidates.push({
+        baseline_date: clean[i].date,
+        baseline_adj: Math.round(baseAdj * 10000) / 10000,
+        peak_date: clean[best.idx].date,
+        peak_adj: Math.round(clean[best.idx].adjClose * 100) / 100,
+        days: best.days,
+        peak_mult: Math.round(best.mult * 10) / 10,
+        raw_mult: Math.round(best.rawMult * 10) / 10,
+      });
+      i = best.idx + 1;
+    } else {
+      i++;
+    }
+  }
+  return candidates;
 }
 
 function median(nums: number[]): number | null {
@@ -271,19 +311,31 @@ Deno.serve(runBackground("compute-phoenix", async () => {
     let medianPeakDate: string | null = null;
     let maxGrowth180d: number | null = null;
     let medianDaysTo50x: number | null = null;
+    let looseData: Json | null = null;
 
     try {
       const { bars, splits } = await fetchYahoo10y(row.ticker);
       if (bars.length >= 20) {
-        // Hoogste prijs (adj én raw) — bepaalt of we deactiveren of alleen
-        // feniks-detectie overslaan.
-        let histPeak = 0;
+        let histPeakAdj = 0;
+        let histPeakRaw = 0;
         for (const b of bars) {
-          if (b.adjClose > histPeak) histPeak = b.adjClose;
-          if (b.rawClose > histPeak) histPeak = b.rawClose;
+          if (b.adjClose > histPeakAdj) histPeakAdj = b.adjClose;
+          if (b.rawClose > histPeakRaw) histPeakRaw = b.rawClose;
         }
+        const histPeak = Math.max(histPeakAdj, histPeakRaw);
+        const splitRatio = maxSplitRatio(splits);
+        const currentClose = bars[bars.length - 1].adjClose;
+        const looseCandidates = findLooseCandidates(bars);
+
+        looseData = {
+          current_close: Math.round(currentClose * 10000) / 10000,
+          hist_peak_adj: Math.round(histPeakAdj * 100) / 100,
+          hist_peak_raw: Math.round(histPeakRaw * 100) / 100,
+          max_split_ratio: Math.round(splitRatio * 100) / 100,
+          candidates: looseCandidates,
+        };
+
         if (histPeak > MAX_DEACTIVATE_PEAK) {
-          // Te ver verwaterd — uit watchlist halen
           deactivate = true;
           deactivated++;
         } else if (hasUntrustworthySplit(splits)) {
@@ -318,6 +370,7 @@ Deno.serve(runBackground("compute-phoenix", async () => {
       phoenix_max_growth_180d_pct: maxGrowth180d != null ? Math.round(maxGrowth180d * 10) / 10 : null,
       phoenix_days_to_50x: medianDaysTo50x,
       phoenix_incidents: isPhoenix ? incidents : null,
+      phoenix_loose_data: looseData,
     };
     if (deactivate) {
       updateFields.active = false;
