@@ -9,6 +9,7 @@ import { TrackRecordView } from "./views/TrackRecord";
 import { SignalLogView } from "./views/SignalLog";
 import { ScansView } from "./views/Scans";
 import { XinixPortfolioView, PhoenixView } from "./views/XinixPortfolio";
+import { PoefiesView } from "./views/Poefies";
 import { HikkertjesView } from "./views/Hikkertjes";
 import { ZwitserlevenView } from "./views/Zwitserleven";
 import { HealthView } from "./views/Health";
@@ -30,6 +31,7 @@ const HELP_PAGE: Record<Tab, string> = {
   scans: "scans",
   xinix: "xinix",
   feniks: "feniks",
+  poefies: "poefies",
   hikkertjes: "hikkertjes",
   zwitserleven: "zwitserleven",
   status: "status",
@@ -290,6 +292,7 @@ export function App() {
         {tab === "scans" && <ScansView />}
         {tab === "xinix" && <XinixPortfolioView />}
         {tab === "feniks" && <PhoenixView />}
+        {tab === "poefies" && <PoefiesView />}
         {tab === "hikkertjes" && <HikkertjesView />}
         {tab === "zwitserleven" && <ZwitserlevenView />}
         {tab === "status" && <HealthView />}

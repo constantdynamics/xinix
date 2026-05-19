@@ -275,6 +275,28 @@ export interface ScanRun {
   metrics: Record<string, unknown> | null;
 }
 
+export interface PoefieRankEntry {
+  ticker: string;
+  company: string | null;
+  sector: string | null;
+  medal_gold: number | null;
+  medal_silver: number | null;
+  medal_bronze: number | null;
+  buy_limit: number | null;
+  last_close: number | null;
+  exchange: string | null;
+  above_limit_pct: number | null;
+  poefie_last_date: string | null;
+  poefie_incident_count: number | null;
+  poefie_median_date: string | null;
+  poefie_max_growth_pct: number | null;
+  poefie_days_to_peak: number | null;
+  poefie_count_6m: number | null;
+  poefie_count_1y: number | null;
+  poefie_count_2y: number | null;
+  poefie_count_5y: number | null;
+}
+
 export interface HikkertjeRankEntry {
   ticker: string;
   company: string | null;
@@ -298,6 +320,9 @@ export interface ScanResults {
   hikkertje_ranking: HikkertjeRankEntry[];
   hikkertje_count: number;
   hikkertje_unscanned: number;
+  poefie_ranking: PoefieRankEntry[];
+  poefie_count: number;
+  poefie_unscanned: number;
 }
 
 export async function fetchScanResults(): Promise<ScanResults> {

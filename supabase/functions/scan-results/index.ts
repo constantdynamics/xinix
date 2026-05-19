@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
   try {
     const sb = getServiceClient();
 
-    const [tickersResult, runsResult, summariesResult, phoenixResult, phoenixCountResult, unscannedCountResult, hikkertjeResult, hikkertjeCountResult, hikkertjeUnscannedResult] = await Promise.all([
+    const [tickersResult, runsResult, summariesResult, phoenixResult, phoenixCountResult, unscannedCountResult, hikkertjeResult, hikkertjeCountResult, hikkertjeUnscannedResult, poefieResult, poefieCountResult, poefieUnscannedResult] = await Promise.all([
       // Alle auto-toegevoegde tickers, nieuwste eerst
       sb
         .from("signal_tickers")
@@ -86,6 +86,24 @@ Deno.serve(async (req) => {
         .from("signal_tickers")
         .select("*", { count: "exact", head: true })
         .is("is_hikkertje", null)
+        .eq("active", true),
+      // Alle poefie-aandelen (voor ranking)
+      sb
+        .from("signal_tickers")
+        .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, buy_limit, exchange, poefie_last_date, poefie_incident_count, poefie_median_date, poefie_max_growth_pct, poefie_days_to_peak, poefie_count_6m, poefie_count_1y, poefie_count_2y, poefie_count_5y")
+        .eq("is_poefie", true)
+        .eq("active", true),
+      // Totaal poefies
+      sb
+        .from("signal_tickers")
+        .select("*", { count: "exact", head: true })
+        .eq("is_poefie", true)
+        .eq("active", true),
+      // Nog te scannen (poefies)
+      sb
+        .from("signal_tickers")
+        .select("*", { count: "exact", head: true })
+        .is("is_poefie", null)
         .eq("active", true),
     ]);
 
@@ -189,6 +207,45 @@ Deno.serve(async (req) => {
 
     const hikkertjeRanking = hikkertjeWithPrice.slice(0, 25);
 
+    // Poefie ranking: zelfde structuur als feniks. Standaard sortering:
+    // dichtstbij de aankooplimiet eerst (zelfde principe als feniks).
+    const poefieTickers = (poefieResult.data ?? []) as Array<{
+      ticker: string;
+      company: string | null;
+      sector: string | null;
+      medal_gold: number | null;
+      medal_silver: number | null;
+      medal_bronze: number | null;
+      buy_limit: number | null;
+      exchange: string | null;
+      poefie_last_date: string | null;
+      poefie_incident_count: number | null;
+      poefie_median_date: string | null;
+      poefie_max_growth_pct: number | null;
+      poefie_days_to_peak: number | null;
+      poefie_count_6m: number | null;
+      poefie_count_1y: number | null;
+      poefie_count_2y: number | null;
+      poefie_count_5y: number | null;
+    }>;
+
+    const poefieWithPrice = poefieTickers.map((p) => {
+      const lastClose = closeByTicker.get(p.ticker) ?? null;
+      const aboveLimitPct = p.buy_limit && p.buy_limit > 0 && lastClose != null
+        ? ((lastClose - p.buy_limit) / p.buy_limit) * 100
+        : null;
+      return { ...p, last_close: lastClose, above_limit_pct: aboveLimitPct };
+    });
+
+    poefieWithPrice.sort((a, b) => {
+      if (a.above_limit_pct == null && b.above_limit_pct == null) return 0;
+      if (a.above_limit_pct == null) return 1;
+      if (b.above_limit_pct == null) return -1;
+      return a.above_limit_pct - b.above_limit_pct;
+    });
+
+    const poefieRanking = poefieWithPrice;
+
     // Runs per job groeperen (max 20 per job)
     const byJob: Record<string, typeof runsResult.data> = { "scan-losers": [], "scan-bottoms": [] };
     for (const r of (runsResult.data ?? [])) {
@@ -206,6 +263,9 @@ Deno.serve(async (req) => {
         hikkertje_ranking: hikkertjeRanking,
         hikkertje_count: hikkertjeCountResult.count ?? 0,
         hikkertje_unscanned: hikkertjeUnscannedResult.count ?? 0,
+        poefie_ranking: poefieRanking,
+        poefie_count: poefieCountResult.count ?? 0,
+        poefie_unscanned: poefieUnscannedResult.count ?? 0,
       }),
       { status: 200, headers: { ...cors(req), "content-type": "application/json" } }
     );
