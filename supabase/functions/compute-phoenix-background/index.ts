@@ -55,7 +55,7 @@ const RAW_CLOSE_MIN_MULT    = 20;   // proportioneel verlaagd (40 / 2)
 const MAX_CURRENT_VS_BASELINE = 3;
 const MAX_DEACTIVATE_PEAK   = 100_000;
 const MAX_HISTORICAL_PEAK   = 10_000;
-const MIN_BASELINE_PRICE    = 0.05;
+const MIN_BASELINE_PRICE    = 0.01;  // was 0.05 — verlaagd voor nano-cap runs
 const MIN_PEAK_PRICE        = 1.0;
 const MAX_SINGLE_BAR_JUMP   = 5;
 const MAX_TRUSTED_SPLIT_RATIO = 3;
@@ -67,7 +67,7 @@ const LOOSE_MAX_DAYS  = 365;    // was 180 — verlengd naar 1 jaar
 const LOOSE_MIN_MULT  = 40;     // verlaagd van 50 → 40 op gebruikersverzoek
 const LOOSE_MAX_CANDIDATES = 20;
 
-const BATCH_SIZE = 30;          // verlaagd want 365d venster = 2-3× meer CPU per ticker
+const BATCH_SIZE = 25;          // verlaagd want 365d venster + findBestRun diagnostiek = ~2× CPU
 const RESCAN_DAYS = 90;
 const BUDGET_MS = 100_000;
 const SLEEP_MS = 400;
@@ -295,6 +295,49 @@ function findLooseCandidates(bars: Bar[]): LooseCandidate[] {
   return candidates;
 }
 
+// Diagnostiek: vindt de ABSOLUUT beste run binnen het 365d-venster,
+// ongeacht of die de drempel haalt. Hiermee kunnen we exact zien
+// waarom een ticker geen kandidaat is (bv MPU: beste run = 12× over
+// 300 dagen — kwalificeert niet).
+interface BestRun {
+  baseline_date: string;
+  baseline_adj: number;
+  peak_date: string;
+  peak_adj: number;
+  days: number;
+  mult: number;
+}
+function findBestRun(bars: Bar[]): BestRun | null {
+  const clean = cleanBars(bars);
+  if (clean.length < 20) return null;
+  let bestMult = 0;
+  let best: BestRun | null = null;
+  for (let i = 0; i < clean.length; i++) {
+    const baseAdj = clean[i].adjClose;
+    if (baseAdj < MIN_BASELINE_PRICE) continue;
+    const baselineMs = clean[i].ms;
+    for (let j = i + 1; j < clean.length; j++) {
+      const days = Math.round((clean[j].ms - baselineMs) / 86400000);
+      if (days > LOOSE_MAX_DAYS) break;
+      if (days < LOOSE_MIN_DAYS) continue;
+      if (clean[j].adjClose < MIN_PEAK_PRICE) continue;
+      const mult = clean[j].adjClose / baseAdj;
+      if (mult > bestMult) {
+        bestMult = mult;
+        best = {
+          baseline_date: clean[i].date,
+          baseline_adj: Math.round(baseAdj * 10000) / 10000,
+          peak_date: clean[j].date,
+          peak_adj: Math.round(clean[j].adjClose * 100) / 100,
+          days,
+          mult: Math.round(mult * 10) / 10,
+        };
+      }
+    }
+  }
+  return best;
+}
+
 function median(nums: number[]): number | null {
   if (nums.length === 0) return null;
   const sorted = [...nums].sort((a, b) => a - b);
@@ -360,6 +403,7 @@ Deno.serve(runBackground("compute-phoenix", async () => {
         const usedBars = splitCutoffMs > 0 ? bars.filter((b) => b.ms > splitCutoffMs) : bars;
         const currentClose = bars[bars.length - 1].adjClose;
         const looseCandidates = usedBars.length >= 20 ? findLooseCandidates(usedBars) : [];
+        const bestRun = usedBars.length >= 20 ? findBestRun(usedBars) : null;
 
         looseData = {
           current_close: Math.round(currentClose * 10000) / 10000,
@@ -368,6 +412,7 @@ Deno.serve(runBackground("compute-phoenix", async () => {
           max_split_ratio: Math.round(splitRatio * 100) / 100,
           post_split_bars: usedBars.length,
           post_split_only: splitCutoffMs > 0,
+          best_run: bestRun,
           candidates: looseCandidates,
         };
 
