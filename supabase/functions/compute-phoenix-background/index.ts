@@ -49,8 +49,8 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
 const RUN_50X_MULT          = 40;   // was 50 — gebruiker wenst 40× als drempel
 const RUN_100X_MULT         = 80;   // was 100 — proportioneel verlaagd
 const RUN_MIN_DAYS          = 10;
-const RUN_50X_MAX_DAYS      = 60;
-const RUN_100X_MAX_DAYS     = 120;
+const RUN_50X_MAX_DAYS      = 365;  // was 60 — verlengd naar 1 jaar voor gradual climbers
+const RUN_100X_MAX_DAYS     = 365;  // was 120 — gelijk getrokken
 const RAW_CLOSE_MIN_MULT    = 20;   // proportioneel verlaagd (40 / 2)
 const MAX_CURRENT_VS_BASELINE = 3;
 const MAX_DEACTIVATE_PEAK   = 100_000;
@@ -63,11 +63,11 @@ const MAX_INCIDENTS         = 3;
 
 // Loose-data: brede zoekvenster voor exploratie
 const LOOSE_MIN_DAYS  = 5;
-const LOOSE_MAX_DAYS  = 180;
+const LOOSE_MAX_DAYS  = 365;    // was 180 — verlengd naar 1 jaar
 const LOOSE_MIN_MULT  = 40;     // verlaagd van 50 → 40 op gebruikersverzoek
 const LOOSE_MAX_CANDIDATES = 20;
 
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 30;          // verlaagd want 365d venster = 2-3× meer CPU per ticker
 const RESCAN_DAYS = 90;
 const BUDGET_MS = 100_000;
 const SLEEP_MS = 400;
