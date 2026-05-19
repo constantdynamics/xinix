@@ -7,6 +7,8 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
+import { useMarks } from "../hooks/useMarks";
+import { HeartInline, SeenInline, ShowSeenToggle } from "../components/MarkCells";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -36,6 +38,8 @@ export function HikkertjesView() {
   const [fullScanRunning, setFullScanRunning] = useState(false);
   const [fullScanBatch, setFullScanBatch] = useState(0);
   const fullScanStopRef = useRef(false);
+  const [showSeen, setShowSeen] = useState(false);
+  const marks = useMarks();
 
   async function refreshData() {
     const r = await fetchScanResults();
@@ -171,6 +175,7 @@ export function HikkertjesView() {
             </button>
           );
         })}
+        <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
         <div className="ml-auto flex items-center gap-1 text-xs">
           <span className="text-neutral-500">Sorteer:</span>
           <button
@@ -197,6 +202,7 @@ export function HikkertjesView() {
         </Card>
       ) : (() => {
           const filtered = ranking.filter((h) => {
+            if (!showSeen && marks.isSeen(h.ticker)) return false;
             if (limitFilter === "below") return h.above_limit_pct != null && h.above_limit_pct <= 0;
             if (limitFilter === "near") return h.above_limit_pct != null && h.above_limit_pct <= 10;
             return true;
@@ -224,11 +230,14 @@ export function HikkertjesView() {
               const belowLimit = h.above_limit_pct != null && h.above_limit_pct <= 0;
               const nearLimit = h.above_limit_pct != null && h.above_limit_pct > 0 && h.above_limit_pct <= 10;
 
+              const seen = marks.isSeen(h.ticker);
               return (
                 <div
                   key={h.ticker}
-                  className={`px-4 py-3 flex items-center gap-3 text-sm ${belowLimit ? "bg-yellow-500/[0.06]" : ""}`}
+                  className={`px-4 py-3 flex items-center gap-3 text-sm ${belowLimit ? "bg-yellow-500/[0.06]" : ""} ${seen ? "opacity-50" : ""}`}
                 >
+                  <SeenInline ticker={h.ticker} />
+                  <HeartInline ticker={h.ticker} />
                   <span className="text-neutral-600 w-6 text-right tabular shrink-0">{idx + 1}</span>
 
                   <div className="w-24 shrink-0">

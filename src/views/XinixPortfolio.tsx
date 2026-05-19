@@ -31,6 +31,14 @@ import {
   Sparkline,
   Stat,
 } from "../components/ui";
+import { useMarks } from "../hooks/useMarks";
+import {
+  HeartCell,
+  HeartHeader,
+  SeenCell,
+  SeenHeader,
+  ShowSeenToggle,
+} from "../components/MarkCells";
 
 const SIGNAL_LABELS: Record<string, string> = {
   near_90d_low: "Bij 90d-bodem",
@@ -1897,6 +1905,8 @@ export function PhoenixView() {
   const [fullScanRunning, setFullScanRunning] = useState(false);
   const [fullScanBatch, setFullScanBatch] = useState(0);
   const fullScanStopRef = useRef(false);
+  const [showSeen, setShowSeen] = useState(false);
+  const marks = useMarks();
   const isAdmin = !!getToken();
 
   async function refreshData() {
@@ -1992,6 +2002,7 @@ export function PhoenixView() {
   // er overblijven als je deze bucket erbij aanvinkt).
   const filteredRanking = useMemo(() => {
     const filtered = ranking.filter((p) => {
+      if (!showSeen && marks.isSeen(p.ticker)) return false;
       for (const g of FACET_GROUPS) {
         const sel = selectedBuckets[g.key];
         if (sel.size === 0) continue;
@@ -2015,7 +2026,7 @@ export function PhoenixView() {
     });
 
     return sorted;
-  }, [ranking, sortKey, sortDir, selectedBuckets]);
+  }, [ranking, sortKey, sortDir, selectedBuckets, showSeen, marks]);
 
   // Live count per bucket: hoeveel rijen vallen erin als je ALLE andere
   // facet-groepen toepast (de eigen groep wordt genegeerd, zoals bol.com).
@@ -2120,6 +2131,13 @@ export function PhoenixView() {
               )}
             </div>
 
+            <div>
+              <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+              <div className="mt-1 text-[10px] text-neutral-500">
+                {marks.seen.size} gezien · standaard verborgen
+              </div>
+            </div>
+
             {FACET_GROUPS.map((g) => (
               <div key={g.key}>
                 <div className="text-[11px] font-bold text-neutral-200 mb-1.5">{g.label}</div>
@@ -2179,6 +2197,8 @@ export function PhoenixView() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                    <SeenHeader />
+                    <HeartHeader />
                     <th className="px-3 py-2 text-left w-10">#</th>
                     <th className="px-3 py-2 text-left">Ticker</th>
                     {PHOENIX_COLUMNS.map((c) => visibleCols.has(c.key) ? (
@@ -2201,8 +2221,11 @@ export function PhoenixView() {
                   {filteredRanking.map((p, i) => {
                     const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
                     const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
+                    const seen = marks.isSeen(p.ticker);
                     return (
-                      <tr key={p.ticker} className={atOrBelow ? "bg-fog-lime/[0.05]" : ""}>
+                      <tr key={p.ticker} className={(atOrBelow ? "bg-fog-lime/[0.05] " : "") + (seen ? "opacity-50" : "")}>
+                        <SeenCell ticker={p.ticker} />
+                        <HeartCell ticker={p.ticker} />
                         <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -2299,6 +2322,8 @@ export function PhoenixView() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                  <SeenHeader />
+                  <HeartHeader />
                   <th className="px-3 py-2 text-left w-10">#</th>
                   <th className="px-3 py-2 text-left">Ticker</th>
                   {PHOENIX_COLUMNS.map((c) => visibleCols.has(c.key) ? (
@@ -2321,8 +2346,11 @@ export function PhoenixView() {
                 {filteredRanking.map((p, i) => {
                   const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
                   const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
+                  const seen = marks.isSeen(p.ticker);
                   return (
-                    <tr key={p.ticker} className={atOrBelow ? "bg-fog-lime/[0.05]" : ""}>
+                    <tr key={p.ticker} className={(atOrBelow ? "bg-fog-lime/[0.05] " : "") + (seen ? "opacity-50" : "")}>
+                      <SeenCell ticker={p.ticker} />
+                      <HeartCell ticker={p.ticker} />
                       <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2 flex-wrap">

@@ -695,3 +695,36 @@ export async function triggerEvolve(force = false): Promise<unknown> {
   if (!res.ok) throw new Error(`evolve ${res.status}`);
   return res.json();
 }
+
+// Markeringen per ticker: favoriet (hartje) en gezien (verrekijker).
+// Bewaard in de DB (xinix_favorites / xinix_seen) zodat ze cross-device zijn.
+export type MarkKind = "favorite" | "seen";
+
+export interface MarksResponse {
+  favorites: string[];
+  seen: string[];
+}
+
+export async function fetchMarks(): Promise<MarksResponse> {
+  const res = await fetch(apiUrl("/api/marks"), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`marks ${res.status}`);
+  return (await res.json()) as MarksResponse;
+}
+
+export async function addMark(kind: MarkKind, ticker: string): Promise<void> {
+  const res = await fetch(apiUrl("/api/marks"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kind, ticker }),
+  });
+  if (!res.ok) throw new Error(`add mark ${res.status}: ${await res.text()}`);
+}
+
+export async function removeMark(kind: MarkKind, ticker: string): Promise<void> {
+  const res = await fetch(apiUrl("/api/marks"), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kind, ticker }),
+  });
+  if (!res.ok) throw new Error(`remove mark ${res.status}: ${await res.text()}`);
+}

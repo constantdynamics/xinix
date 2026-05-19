@@ -22,6 +22,14 @@ import {
   SectionHeader,
   InlineConfirm,
 } from "../components/ui";
+import { useMarks } from "../hooks/useMarks";
+import {
+  HeartCell,
+  HeartHeader,
+  SeenCell,
+  SeenHeader,
+  ShowSeenToggle,
+} from "../components/MarkCells";
 
 const EXCHANGE_SUFFIXES = [
   { value: "", label: "Geen (US)" },
@@ -251,6 +259,8 @@ export function TickersView({
   const extrasRef = useRef<Map<string, Partial<TickerInput>>>(new Map());
 
   // Watchlist cleanup state
+  const [showSeen, setShowSeen] = useState(false);
+  const marks = useMarks();
   const [wlSelected, setWlSelected] = useState<Set<string>>(new Set());
   const [wlUnrecognized, setWlUnrecognized] = useState<Set<string> | null>(null);
   const [wlValidating, setWlValidating] = useState(false);
@@ -276,6 +286,9 @@ export function TickersView({
   const wlFiltered = useMemo(() => {
     const q = wlQuery.trim().toLowerCase();
     let rows = data.cards;
+    if (!showSeen) {
+      rows = rows.filter((c) => !marks.isSeen(c.ticker));
+    }
     if (scanFilter.size > 0) {
       rows = rows.filter((c) =>
         (scanFilter.has("hikkertje")    && c.is_hikkertje    === true) ||
@@ -291,7 +304,7 @@ export function TickersView({
       );
     }
     return rows;
-  }, [data.cards, wlQuery, scanFilter]);
+  }, [data.cards, wlQuery, scanFilter, showSeen, marks]);
 
   // Reset naar pagina 0 als de filter de huidige pagina overbodig maakt.
   useEffect(() => {
@@ -1212,6 +1225,7 @@ export function TickersView({
                 onChange={(e) => setWlQuery(e.target.value)}
                 className="w-48 sm:w-64 h-8 text-xs"
               />
+              <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
             </div>
           }
         />
@@ -1336,6 +1350,8 @@ export function TickersView({
             <table className="w-full text-sm">
               <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/40">
                 <tr>
+                  <SeenHeader />
+                  <HeartHeader />
                   <th className="p-3 w-8">
                     <input
                       type="checkbox"
@@ -1381,6 +1397,7 @@ export function TickersView({
                   const isSelected = wlSelected.has(c.ticker);
                   const isUnrecognized = wlUnrecognized?.has(c.ticker) ?? false;
                   const isDuplicate = wlDuplicates.has(c.ticker);
+                  const seen = marks.isSeen(c.ticker);
                   const accent = isSelected
                     ? "bg-fog-pink/[0.06]"
                     : isUnrecognized
@@ -1391,8 +1408,10 @@ export function TickersView({
                   return (
                     <tr
                       key={c.ticker}
-                      className={`border-t border-ink-5 hover:bg-ink-3/40 transition ${accent}`}
+                      className={`border-t border-ink-5 hover:bg-ink-3/40 transition ${accent} ${seen ? "opacity-50" : ""}`}
                     >
+                      <SeenCell ticker={c.ticker} />
+                      <HeartCell ticker={c.ticker} />
                       <td className="p-3 text-center">
                         <input
                           type="checkbox"

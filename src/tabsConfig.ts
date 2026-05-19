@@ -15,6 +15,7 @@ export type Tab =
   | "poefies"
   | "hikkertjes"
   | "zwitserleven"
+  | "favorieten"
   | "status"
   | "settings";
 
@@ -37,6 +38,7 @@ export const DEFAULT_TABS: TabDef[] = [
   { key: "poefies", label: "🎆 Poefies" },
   { key: "hikkertjes", label: "⚡ Hikkertjes" },
   { key: "zwitserleven", label: "🌴 Zwitserleven" },
+  { key: "favorieten", label: "♥ Favorieten" },
   { key: "status", label: "Status" },
   { key: "settings", label: "Instellingen" },
 ];
