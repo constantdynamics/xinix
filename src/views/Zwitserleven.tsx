@@ -8,6 +8,14 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
+import { useMarks } from "../hooks/useMarks";
+import {
+  HeartCell,
+  HeartHeader,
+  SeenCell,
+  SeenHeader,
+  ShowSeenToggle,
+} from "../components/MarkCells";
 
 function fmtPct(v: number | null, decimals = 1): string {
   if (v == null) return "—";
@@ -153,6 +161,8 @@ export function ZwitserlevenView() {
   const [autoRun, setAutoRun] = useState(false);
   const [autoStep, setAutoStep] = useState(0);
   const [autoFoundDelta, setAutoFoundDelta] = useState(0);
+  const [showSeen, setShowSeen] = useState(false);
+  const marks = useMarks();
   const stopRef = useRef(false);
 
   function refresh() {
@@ -276,6 +286,7 @@ export function ZwitserlevenView() {
   const filtered = useMemo<ZwitserlevenStock[]>(() => {
     if (!data) return [];
     let list = data.stocks.filter((s) => {
+      if (!showSeen && marks.isSeen(s.ticker)) return false;
       if (showFilter === "meets") return s.meets_criteria === true || s.is_manual === true;
       if (showFilter === "near") {
         return (s.dividend_yield_pct ?? 0) >= 4 && (s.pct_under_5y_high ?? 0) >= 30;
@@ -309,7 +320,7 @@ export function ZwitserlevenView() {
       return sortAsc ? diff : -diff;
     });
     return list;
-  }, [data, showFilter, sortKey, sortAsc]);
+  }, [data, showFilter, sortKey, sortAsc, showSeen, marks]);
 
   const currentYear = new Date().getFullYear();
   const yearLabels = [1, 2, 3, 4, 5].map((offset) => String(currentYear - offset));
@@ -431,6 +442,7 @@ export function ZwitserlevenView() {
             </button>
           );
         })}
+        <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
         <div className="relative ml-auto">
           <Button size="sm" variant="secondary" onClick={() => setShowColPicker((v) => !v)}>
             Kolommen ({visibleCols.size}/{COLUMNS_BASE.length})
@@ -497,6 +509,8 @@ export function ZwitserlevenView() {
             <table className="w-full text-sm min-w-[800px]">
               <thead className="border-b border-ink-5 bg-ink-2/40">
                 <tr>
+                  <SeenHeader />
+                  <HeartHeader />
                   {isVis("idx") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>}
                   {isVis("ticker") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Ticker</th>}
                   {isVis("company") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Naam</th>}
@@ -534,13 +548,16 @@ export function ZwitserlevenView() {
                     ? s.dividend_yield_pct * (1 - tax.rate / 100)
                     : s.dividend_yield_pct;
 
+                  const seen = marks.isSeen(s.ticker);
                   return (
                     <tr
                       key={s.ticker}
                       className={`hover:bg-ink-3/30 transition-colors ${
                         s.is_manual ? "bg-amber-500/[0.05]" : s.meets_criteria ? "bg-emerald-500/[0.03]" : ""
-                      }`}
+                      } ${seen ? "opacity-50" : ""}`}
                     >
+                      <SeenCell ticker={s.ticker} />
+                      <HeartCell ticker={s.ticker} />
                       {isVis("idx") && <td className="px-3 py-2.5 text-neutral-600 tabular text-xs">{idx + 1}</td>}
 
                       {isVis("ticker") && (

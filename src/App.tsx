@@ -12,6 +12,7 @@ import { XinixPortfolioView, PhoenixView } from "./views/XinixPortfolio";
 import { PoefiesView } from "./views/Poefies";
 import { HikkertjesView } from "./views/Hikkertjes";
 import { ZwitserlevenView } from "./views/Zwitserleven";
+import { FavorietenView } from "./views/Favorieten";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, fetchUiSettings, getToken, setToken, type UiSettings } from "./api";
@@ -34,6 +35,7 @@ const HELP_PAGE: Record<Tab, string> = {
   poefies: "poefies",
   hikkertjes: "hikkertjes",
   zwitserleven: "zwitserleven",
+  favorieten: "favorieten",
   status: "status",
   settings: "settings",
 };
@@ -295,6 +297,7 @@ export function App() {
         {tab === "poefies" && <PoefiesView />}
         {tab === "hikkertjes" && <HikkertjesView />}
         {tab === "zwitserleven" && <ZwitserlevenView />}
+        {tab === "favorieten" && <FavorietenView />}
         {tab === "status" && <HealthView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>
