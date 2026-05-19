@@ -728,3 +728,13 @@ export async function removeMark(kind: MarkKind, ticker: string): Promise<void> 
   });
   if (!res.ok) throw new Error(`remove mark ${res.status}: ${await res.text()}`);
 }
+
+export async function addMarksBulk(kind: MarkKind, tickers: string[]): Promise<void> {
+  if (tickers.length === 0) return;
+  const res = await fetch(apiUrl("/api/marks"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kind, tickers }),
+  });
+  if (!res.ok) throw new Error(`bulk add mark ${res.status}: ${await res.text()}`);
+}

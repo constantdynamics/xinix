@@ -15,6 +15,7 @@ import {
   SeenCell,
   SeenHeader,
   ShowSeenToggle,
+  MarkAllSeenButton,
 } from "../components/MarkCells";
 
 function fmtPct(v: number | null, decimals = 1): string {
@@ -443,6 +444,7 @@ export function ZwitserlevenView() {
           );
         })}
         <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+        <MarkAllSeenButton tickers={filtered.map((s) => s.ticker)} />
         <div className="relative ml-auto">
           <Button size="sm" variant="secondary" onClick={() => setShowColPicker((v) => !v)}>
             Kolommen ({visibleCols.size}/{COLUMNS_BASE.length})

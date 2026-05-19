@@ -8,7 +8,7 @@ import {
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
-import { HeartInline, SeenInline, ShowSeenToggle } from "../components/MarkCells";
+import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton } from "../components/MarkCells";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -176,6 +176,7 @@ export function HikkertjesView() {
           );
         })}
         <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+        <MarkAllSeenButton tickers={ranking.map((h) => h.ticker)} />
         <div className="ml-auto flex items-center gap-1 text-xs">
           <span className="text-neutral-500">Sorteer:</span>
           <button
