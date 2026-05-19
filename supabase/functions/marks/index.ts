@@ -51,11 +51,35 @@ Deno.serve(async (req) => {
       return textResponse(req, "Invalid JSON body", { status: 400 });
     }
     const kind = parseKind(body.kind);
-    const ticker = typeof body.ticker === "string" ? body.ticker.trim().toUpperCase() : "";
-    if (!kind || !ticker) {
-      return textResponse(req, "Missing kind or ticker", { status: 400 });
+    if (!kind) {
+      return textResponse(req, "Missing or invalid kind", { status: 400 });
     }
     const table = tableFor(kind);
+
+    // Bulk-variant: body.tickers = string[] — voor "alles aanvinken" knop bij gezien-kolom
+    if (Array.isArray(body.tickers)) {
+      const tickers = body.tickers
+        .filter((t): t is string => typeof t === "string")
+        .map((t) => t.trim().toUpperCase())
+        .filter((t) => t.length > 0);
+      if (tickers.length === 0) return jsonResponse(req, { ok: true, kind, action: "noop", count: 0 });
+
+      if (req.method === "POST") {
+        const rows = tickers.map((t) => ({ ticker: t }));
+        const { error } = await supabase.from(table).upsert(rows, { onConflict: "ticker" });
+        if (error) return textResponse(req, error.message, { status: 500 });
+        return jsonResponse(req, { ok: true, kind, action: "added", count: tickers.length });
+      }
+      const { error } = await supabase.from(table).delete().in("ticker", tickers);
+      if (error) return textResponse(req, error.message, { status: 500 });
+      return jsonResponse(req, { ok: true, kind, action: "removed", count: tickers.length });
+    }
+
+    // Single ticker
+    const ticker = typeof body.ticker === "string" ? body.ticker.trim().toUpperCase() : "";
+    if (!ticker) {
+      return textResponse(req, "Missing ticker or tickers", { status: 400 });
+    }
 
     if (req.method === "POST") {
       const { error } = await supabase.from(table).upsert({ ticker }, { onConflict: "ticker" });

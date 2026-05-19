@@ -38,6 +38,7 @@ import {
   SeenCell,
   SeenHeader,
   ShowSeenToggle,
+  MarkAllSeenButton,
 } from "../components/MarkCells";
 
 const SIGNAL_LABELS: Record<string, string> = {
@@ -2132,7 +2133,10 @@ export function PhoenixView() {
             </div>
 
             <div>
-              <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+                <MarkAllSeenButton tickers={filteredRanking.map((p) => p.ticker)} />
+              </div>
               <div className="mt-1 text-[10px] text-neutral-500">
                 {marks.seen.size} gezien · standaard verborgen
               </div>

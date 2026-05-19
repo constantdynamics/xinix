@@ -4,6 +4,7 @@
 //
 // Plus de bijbehorende headers en een herbruikbare "Toon gezien" knop.
 
+import { useState } from "react";
 import { useMarks } from "../hooks/useMarks";
 
 export function SeenHeader() {
@@ -123,6 +124,65 @@ export function ShowSeenToggle({
       title={showSeen ? "Verberg gezien rijen" : "Toon ook gezien rijen"}
     >
       🔭 {showSeen ? "Verberg gezien" : "Toon gezien"}
+    </button>
+  );
+}
+
+// Markeert alle zichtbare rijen als gezien — behalve favorieten. Wordt naast
+// het verrekijker-icoon getoond zodat je in één klik de hele tabel kunt
+// "afstrepen". Vraagt om bevestiging als er meer dan 10 rijen aangevinkt
+// zouden worden, om ongelukken te voorkomen.
+export function MarkAllSeenButton({
+  tickers,
+  label = "Alles aanvinken",
+}: {
+  tickers: string[];
+  label?: string;
+}) {
+  const { markManySeen, favorites, seen } = useMarks();
+  const [busy, setBusy] = useState(false);
+
+  // Hoeveel rijen zouden er daadwerkelijk gemarkeerd worden? (alleen niet-favoriet, niet-al-gezien)
+  const candidates = tickers.filter((t) => {
+    const T = t.toUpperCase();
+    return !favorites.has(T) && !seen.has(T);
+  });
+
+  async function onClick() {
+    if (candidates.length === 0) return;
+    if (candidates.length > 10) {
+      const ok = window.confirm(
+        `${candidates.length} aandelen aanvinken als gezien? Favorieten worden overgeslagen.`,
+      );
+      if (!ok) return;
+    }
+    setBusy(true);
+    try {
+      await markManySeen(candidates);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const disabled = busy || candidates.length === 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={
+        "px-2 py-1 rounded text-[11px] border transition-colors " +
+        (disabled
+          ? "border-ink-5 text-neutral-600 cursor-not-allowed"
+          : "border-ink-5 text-neutral-400 hover:text-neutral-200 hover:border-neutral-500")
+      }
+      title={
+        candidates.length === 0
+          ? "Niets om aan te vinken — alles is al gezien of favoriet"
+          : `Vink ${candidates.length} aandelen aan als gezien (favorieten overgeslagen)`
+      }
+    >
+      ✓ {label} ({candidates.length})
     </button>
   );
 }

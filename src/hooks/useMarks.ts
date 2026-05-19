@@ -4,7 +4,7 @@
 // wordt geklikt. Eén GET per pagina-load, daarna alleen toggles.
 
 import { useEffect, useState } from "react";
-import { addMark, fetchMarks, removeMark, getToken, type MarkKind } from "../api";
+import { addMark, addMarksBulk, fetchMarks, removeMark, getToken, type MarkKind } from "../api";
 
 type Listener = () => void;
 
@@ -47,6 +47,7 @@ export interface MarksApi {
   isFavorite: (ticker: string) => boolean;
   isSeen: (ticker: string) => boolean;
   toggle: (kind: MarkKind, ticker: string) => Promise<void>;
+  markManySeen: (tickers: string[]) => Promise<number>;
   loaded: boolean;
 }
 
@@ -85,6 +86,30 @@ export function useMarks(): MarksApi {
         else set.delete(T);
         emit();
         console.error("toggle mark failed", err);
+      }
+    },
+    // Bulk markeren als gezien — gebruikt door de "vink alle behalve favorieten"
+    // knop bovenin elke ticker-tabel. Favorieten worden hier overgeslagen zodat
+    // de gebruiker zijn watch-list niet per ongeluk wegklikt.
+    markManySeen: async (tickers) => {
+      const toAdd: string[] = [];
+      for (const t of tickers) {
+        const T = t.toUpperCase();
+        if (state.favorites.has(T)) continue;
+        if (state.seen.has(T)) continue;
+        toAdd.push(T);
+      }
+      if (toAdd.length === 0) return 0;
+      for (const T of toAdd) state.seen.add(T);
+      emit();
+      try {
+        await addMarksBulk("seen", toAdd);
+        return toAdd.length;
+      } catch (err) {
+        for (const T of toAdd) state.seen.delete(T);
+        emit();
+        console.error("bulk mark seen failed", err);
+        throw err;
       }
     },
   };

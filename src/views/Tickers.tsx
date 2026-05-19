@@ -29,6 +29,7 @@ import {
   SeenCell,
   SeenHeader,
   ShowSeenToggle,
+  MarkAllSeenButton,
 } from "../components/MarkCells";
 
 const EXCHANGE_SUFFIXES = [
@@ -1226,6 +1227,7 @@ export function TickersView({
                 className="w-48 sm:w-64 h-8 text-xs"
               />
               <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+              <MarkAllSeenButton tickers={wlFiltered.map((c) => c.ticker)} />
             </div>
           }
         />
