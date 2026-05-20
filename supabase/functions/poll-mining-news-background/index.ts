@@ -123,7 +123,10 @@ async function searchNews(query: string): Promise<NewsItem[]> {
 // ───────────── signal_events dedup insert ─────────────
 type SB = ReturnType<typeof getServiceClient>;
 async function insertSignal(sb: SB, opts: { ticker: string; signal_type: string; severity: string; title: string; detail?: string; payload?: Json; expires_at?: string; dedup_key: string; }): Promise<boolean> {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  // Dedup over 14 dagen — gelijk aan expires_at — zodat hetzelfde artikel niet
+  // opnieuw als signaal binnenkomt bij de volgende round-robin-ronde (de
+  // tickercyclus duurt ruim langer dan 24u).
+  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
   const { data: ex } = await sb.from("signal_events").select("id")
     .eq("ticker", opts.ticker).eq("signal_type", opts.signal_type)
     .gte("detected_at", since)
@@ -140,12 +143,15 @@ async function insertSignal(sb: SB, opts: { ticker: string; signal_type: string;
 }
 
 // ───────────── patterns ─────────────
-interface Pat { type: string; severity: "yellow" | "orange" | "red"; re: RegExp; label: string; catalyst?: string; }
+interface Pat { type: string; severity: "yellow" | "orange" | "red"; re: RegExp; label: string; catalyst?: string; exclude?: RegExp; }
 
+// `exclude` filtert valse positieven: "AuEq/AgEq/CuEq"-equivalentgrades
+// (bevatten metaalcredits van andere metalen) en — voor koper — metallurgische
+// recovery/concentraatgrades, die geen in-situ boorintercepts zijn.
 const BONANZA: Pat[] = [
-  { type: "bonanza_au", severity: "orange", re: /(\d{1,4}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:au|gold)/i, label: "high-grade Au intercept" },
-  { type: "bonanza_ag", severity: "orange", re: /(\d{2,5}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:ag|silver)/i, label: "high-grade Ag intercept" },
-  { type: "bonanza_cu", severity: "orange", re: /(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:cu|copper)/i, label: "high-grade Cu intercept" },
+  { type: "bonanza_au", severity: "orange", re: /(\d{1,4}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:au|gold)/i, label: "high-grade Au intercept", exclude: /\bau[\s-]?eq\b|gold[\s-]?equiv/i },
+  { type: "bonanza_ag", severity: "orange", re: /(\d{2,5}(?:[.,]\d+)?)\s*(?:g\s*\/\s*t|gpt|grams?\s*per\s*tonne)\s*(?:ag|silver)/i, label: "high-grade Ag intercept", exclude: /\bag[\s-]?eq\b|silver[\s-]?equiv/i },
+  { type: "bonanza_cu", severity: "orange", re: /(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:cu|copper)/i, label: "high-grade Cu intercept", exclude: /\bcu[\s-]?eq\b|copper[\s-]?equiv|recover|concentrate|metallurg/i },
 ];
 function bonanzaTier(type: string, value: number): "none" | "orange" | "red" {
   if (type === "bonanza_au") return value >= 100 ? "red" : value >= 30 ? "orange" : "none";
@@ -208,6 +214,7 @@ Deno.serve(runBackground("poll-mining-news", async () => {
         for (const p of BONANZA) {
           const m = haystack.match(p.re);
           if (!m) continue;
+          if (p.exclude && p.exclude.test(haystack)) continue;
           const value = Number((m[1] ?? "").replace(",", "."));
           if (!Number.isFinite(value)) continue;
           const tier = bonanzaTier(p.type, value);
