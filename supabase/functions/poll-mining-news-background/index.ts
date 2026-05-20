@@ -82,11 +82,18 @@ function extractTag(block: string, tag: string): string {
   return m[1].replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "").trim();
 }
 
+// Catalyst-termen die we aan de Google-News-zoekopdracht meegeven zodat de
+// feed gericht de mining-catalyst-artikelen teruggeeft i.p.v. ruis.
+const CATALYST_QUERY_TERMS =
+  '(drill OR drilling OR resource OR "feasibility study" OR PEA OR PFS OR DFS OR permit OR licence OR license OR discovery OR "joint venture" OR "first pour" OR takeover OR acquisition OR intercept)';
+
 // Google News RSS — indexeert bedrijfs-persberichten (resource estimate,
 // PEA/PFS/DFS, permit granted, drill results) die de catalyst-patronen
-// hieronder herkennen. Gratis, geen key.
+// hieronder herkennen. Gratis, geen key. We zoeken op bedrijfsnaam ÉN
+// catalyst-termen zodat de feed direct de relevante artikelen oplevert.
 async function searchNews(query: string): Promise<NewsItem[]> {
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(`"${query}"`)}&hl=en-US&gl=US&ceid=US:en`;
+  const q = `"${query}" ${CATALYST_QUERY_TERMS}`;
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
   const res = await fetch(url, { headers: { "User-Agent": UA } });
   if (!res.ok) throw new Error(`Google News HTTP ${res.status}`);
   const xml = await res.text();
