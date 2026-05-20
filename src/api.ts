@@ -782,3 +782,34 @@ export async function setFavoriteRating(ticker: string, rating: number | null): 
   });
   if (!res.ok) throw new Error(`rate favorite ${res.status}: ${await res.text()}`);
 }
+
+// ── Volledige data-export ────────────────────────────────────────────
+// Wekelijkse, zelf-beschrijvende export van alle waardevolle data — voor
+// kennisbehoud als de site ooit verdwijnt.
+export interface DataExportResult { ok: boolean; total_rows: number; github_committed: boolean }
+
+// Maak nu een nieuwe export (vereist admin-token).
+export async function runDataExport(): Promise<DataExportResult> {
+  const res = await fetch(apiUrl("/api/xinix-full-export"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+  });
+  if (!res.ok) throw new Error(`export starten mislukt (${res.status})`);
+  return (await res.json()) as DataExportResult;
+}
+
+// Download de laatste export als JSON-bestand.
+export async function downloadDataExport(): Promise<void> {
+  const res = await fetch(apiUrl("/api/xinix-full-export"), { headers: authHeaders() });
+  if (res.status === 404) throw new Error("Er is nog geen export beschikbaar — klik eerst op 'Export nu'.");
+  if (!res.ok) throw new Error(`export ophalen mislukt (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `xinix-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
