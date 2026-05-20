@@ -30,6 +30,8 @@ import {
   SeenHeader,
   ShowSeenToggle,
   MarkAllSeenButton,
+  HideFavoritesToggle,
+  NotYetReviewedTile,
 } from "../components/MarkCells";
 
 const EXCHANGE_SUFFIXES = [
@@ -261,6 +263,7 @@ export function TickersView({
 
   // Watchlist cleanup state
   const [showSeen, setShowSeen] = useState(false);
+  const [hideFavorites, setHideFavorites] = useState(false);
   const marks = useMarks();
   const [wlSelected, setWlSelected] = useState<Set<string>>(new Set());
   const [wlUnrecognized, setWlUnrecognized] = useState<Set<string> | null>(null);
@@ -290,6 +293,9 @@ export function TickersView({
     if (!showSeen) {
       rows = rows.filter((c) => !marks.isSeen(c.ticker));
     }
+    if (hideFavorites) {
+      rows = rows.filter((c) => !marks.isFavorite(c.ticker));
+    }
     if (scanFilter.size > 0) {
       rows = rows.filter((c) =>
         (scanFilter.has("hikkertje")    && c.is_hikkertje    === true) ||
@@ -305,7 +311,7 @@ export function TickersView({
       );
     }
     return rows;
-  }, [data.cards, wlQuery, scanFilter, showSeen, marks]);
+  }, [data.cards, wlQuery, scanFilter, showSeen, hideFavorites, marks]);
 
   // Reset naar pagina 0 als de filter de huidige pagina overbodig maakt.
   useEffect(() => {
@@ -1227,6 +1233,11 @@ export function TickersView({
                 className="w-48 sm:w-64 h-8 text-xs"
               />
               <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+              <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
+              <NotYetReviewedTile
+                tickers={data.cards.map((c) => c.ticker)}
+                onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
+              />
               <MarkAllSeenButton tickers={wlFiltered.map((c) => c.ticker)} />
             </div>
           }

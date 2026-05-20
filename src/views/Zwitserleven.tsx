@@ -16,6 +16,8 @@ import {
   SeenHeader,
   ShowSeenToggle,
   MarkAllSeenButton,
+  HideFavoritesToggle,
+  NotYetReviewedTile,
 } from "../components/MarkCells";
 
 function fmtPct(v: number | null, decimals = 1): string {
@@ -163,6 +165,7 @@ export function ZwitserlevenView() {
   const [autoStep, setAutoStep] = useState(0);
   const [autoFoundDelta, setAutoFoundDelta] = useState(0);
   const [showSeen, setShowSeen] = useState(false);
+  const [hideFavorites, setHideFavorites] = useState(false);
   const marks = useMarks();
   const stopRef = useRef(false);
 
@@ -288,6 +291,7 @@ export function ZwitserlevenView() {
     if (!data) return [];
     let list = data.stocks.filter((s) => {
       if (!showSeen && marks.isSeen(s.ticker)) return false;
+      if (hideFavorites && marks.isFavorite(s.ticker)) return false;
       if (showFilter === "meets") return s.meets_criteria === true || s.is_manual === true;
       if (showFilter === "near") {
         return (s.dividend_yield_pct ?? 0) >= 4 && (s.pct_under_5y_high ?? 0) >= 30;
@@ -321,7 +325,7 @@ export function ZwitserlevenView() {
       return sortAsc ? diff : -diff;
     });
     return list;
-  }, [data, showFilter, sortKey, sortAsc, showSeen, marks]);
+  }, [data, showFilter, sortKey, sortAsc, showSeen, hideFavorites, marks]);
 
   const currentYear = new Date().getFullYear();
   const yearLabels = [1, 2, 3, 4, 5].map((offset) => String(currentYear - offset));
@@ -444,6 +448,11 @@ export function ZwitserlevenView() {
           );
         })}
         <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+        <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
+        <NotYetReviewedTile
+          tickers={(data?.stocks ?? []).map((s) => s.ticker)}
+          onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
+        />
         <MarkAllSeenButton tickers={filtered.map((s) => s.ticker)} />
         <div className="relative ml-auto">
           <Button size="sm" variant="secondary" onClick={() => setShowColPicker((v) => !v)}>
