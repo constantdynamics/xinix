@@ -8,7 +8,7 @@ import {
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
-import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton } from "../components/MarkCells";
+import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile } from "../components/MarkCells";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -39,6 +39,7 @@ export function HikkertjesView() {
   const [fullScanBatch, setFullScanBatch] = useState(0);
   const fullScanStopRef = useRef(false);
   const [showSeen, setShowSeen] = useState(false);
+  const [hideFavorites, setHideFavorites] = useState(false);
   const marks = useMarks();
 
   async function refreshData() {
@@ -176,6 +177,11 @@ export function HikkertjesView() {
           );
         })}
         <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+        <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
+        <NotYetReviewedTile
+          tickers={ranking.map((h) => h.ticker)}
+          onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
+        />
         <MarkAllSeenButton tickers={ranking.map((h) => h.ticker)} />
         <div className="ml-auto flex items-center gap-1 text-xs">
           <span className="text-neutral-500">Sorteer:</span>
@@ -204,6 +210,7 @@ export function HikkertjesView() {
       ) : (() => {
           const filtered = ranking.filter((h) => {
             if (!showSeen && marks.isSeen(h.ticker)) return false;
+            if (hideFavorites && marks.isFavorite(h.ticker)) return false;
             if (limitFilter === "below") return h.above_limit_pct != null && h.above_limit_pct <= 0;
             if (limitFilter === "near") return h.above_limit_pct != null && h.above_limit_pct <= 10;
             return true;
