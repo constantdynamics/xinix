@@ -65,11 +65,14 @@ interface CTStudy {
   };
 }
 async function fetchTrials(sponsor: string): Promise<CTStudy[]> {
+  // GEEN `fields`-parameter: de v2-API kent de oude v1-veldnamen (BriefTitle,
+  // EnrollmentCount, …) niet en geeft dan HTTP 400. Zonder `fields` levert de
+  // API de volledige protocolSection-structuur — precies wat deriveFromTrials
+  // hieronder uitleest.
   const params = new URLSearchParams({
     "query.lead": sponsor,
     "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING,ENROLLING_BY_INVITATION,COMPLETED,SUSPENDED",
     pageSize: "30",
-    fields: "BriefTitle,OverallStatus,Phase,EnrollmentCount,Conditions,Keywords,LeadSponsorName",
   });
   const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${params}`, { headers: { "User-Agent": UA } });
   if (!res.ok) throw new Error(`CT.gov HTTP ${res.status}`);
