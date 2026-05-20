@@ -51,13 +51,14 @@ const HEAT_CONTRIBUTION: Record<string, Sev> = {
 Deno.serve(async (req) => {
   const p = pf(req); if (p) return p;
   const supabase = getServiceClient();
-  const [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes] = await Promise.all([
+  const [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes, scoresRes] = await Promise.all([
     supabase.from("signal_tickers").select("*").eq("active", true),
     supabase.from("signal_price_summary").select("*"),
     supabase.from("signal_events").select("*").or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).order("detected_at", { ascending: false }).limit(500),
     supabase.from("signal_catalysts").select("*").eq("status", "pending").order("expected_date", { ascending: true }),
     supabase.from("signal_runs").select("job, started_at, finished_at, ok, message, metrics").order("started_at", { ascending: false }).limit(20),
     supabase.from("zwitserleven_stocks").select("ticker").eq("meets_criteria", true),
+    supabase.from("signal_scores_latest").select("ticker, mode, final_score, action, structural, catalyst, timing").eq("mode", "trader"),
   ]);
   const tickers = tickersRes.data ?? [];
   const summaries = summaryRes.data ?? [];
@@ -66,6 +67,8 @@ Deno.serve(async (req) => {
   const runLog = runLogRes.data ?? [];
   const summaryByTicker = new Map(summaries.map((s: any) => [s.ticker, s]));
   const zwitserlevenSet = new Set<string>((zwitserlevenRes.data ?? []).map((r: any) => r.ticker as string));
+  // Inhoudelijke score-engine (signal_scores): per ticker de laatste 'trader'-score.
+  const scoreByTicker = new Map<string, any>((scoresRes.data ?? []).map((s: any) => [s.ticker, s]));
   const signalsByTicker = new Map<string, any[]>();
   for (const sig of signals) { const arr = signalsByTicker.get(sig.ticker) ?? []; arr.push(sig); signalsByTicker.set(sig.ticker, arr); }
   const catalystsByTicker = new Map<string, any[]>();
@@ -150,6 +153,13 @@ Deno.serve(async (req) => {
       is_zwitserleven: zwitserlevenSet.has(t.ticker),
       briefing_status: t.briefing_status ?? null,
       briefing_polled_at: t.briefing_polled_at ?? null,
+      // Inhoudelijke score-engine (signal_scores). final_score 0-1; sub-scores
+      // structural/catalyst/timing eveneens 0-1. null = nog niet gescoord.
+      final_score: scoreByTicker.get(t.ticker)?.final_score ?? null,
+      signal_action: scoreByTicker.get(t.ticker)?.action ?? null,
+      score_structural: scoreByTicker.get(t.ticker)?.structural ?? null,
+      score_catalyst: scoreByTicker.get(t.ticker)?.catalyst ?? null,
+      score_timing: scoreByTicker.get(t.ticker)?.timing ?? null,
     };
   });
   cards.sort((a: any, b: any) => {
