@@ -68,7 +68,6 @@ export function App() {
   const [showTokenBar, setShowTokenBar] = useState(false);
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
   const [uiSettings, setUiSettings] = useState<UiSettings | null>(null);
-  const [showHiddenTabs, setShowHiddenTabs] = useState(false);
 
   // UI-settings 1× laden + opnieuw na save (via custom event).
   useEffect(() => {
@@ -90,14 +89,13 @@ export function App() {
     }
     const labels = uiSettings?.tab_labels ?? {};
     list = list.map((t) => labels[t.key] ? { ...t, label: labels[t.key] } : t);
+    // Verborgen tabs verdwijnen volledig uit de balk — beheren doe je in Instellingen.
     const hidden = new Set(uiSettings?.tab_hidden ?? []);
-    if (!showHiddenTabs && hidden.size > 0) {
+    if (hidden.size > 0) {
       list = list.filter((t) => !hidden.has(t.key));
     }
     return list;
-  }, [uiSettings, showHiddenTabs]);
-
-  const hiddenCount = (uiSettings?.tab_hidden ?? []).filter((k) => TABS.some((t) => t.key === k)).length;
+  }, [uiSettings]);
 
   async function refresh() {
     try {
@@ -246,19 +244,6 @@ export function App() {
               {t.label}
             </NavTab>
           ))}
-          {hiddenCount > 0 && (
-            <button
-              onClick={() => setShowHiddenTabs((v) => !v)}
-              title={showHiddenTabs ? "Verborgen tabs weer verbergen" : `${hiddenCount} verborgen tab${hiddenCount === 1 ? "" : "s"} tonen`}
-              className={`ml-2 px-2 py-1 rounded text-[11px] font-semibold border whitespace-nowrap transition-colors ${
-                showHiddenTabs
-                  ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
-                  : "border-ink-5 text-neutral-500 hover:text-neutral-200 hover:border-ink-5/80"
-              }`}
-            >
-              {showHiddenTabs ? "✕ verberg" : `+ ${hiddenCount} verborgen`}
-            </button>
-          )}
         </div>
 
         {showTokenBar && (
