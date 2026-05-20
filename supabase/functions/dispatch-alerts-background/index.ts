@@ -41,11 +41,29 @@ const BULLISH_CATALYST_TYPES = new Set<string>([
 ]);
 const POSITIVE_ACTIONS = new Set<string>(["BUY", "STRONG_BUY"]);
 
+// Impact-tier van een catalyst-event: hoe lager het cijfer, hoe groter de
+// verwachte koersimpact. Een tier 1/2 event op een aandeel dat ≤10% boven
+// (of onder) de aankooplimiet staat triggert de near-limit-snelalert — die
+// negeert de medal-eis en de score-actie, want de combinatie "groot event +
+// nabij limiet" IS zelf het kwaliteitssignaal. Tier 3 (boorresultaten, JV,
+// financiering) staat wel op het dashboard maar pingt niet via dit kanaal.
+const IMPACT_TIER: Record<string, 1 | 2> = {
+  takeover_bid: 1, buyout_definitive: 1, discovery_announcement: 1,
+  fda_approval: 1, licensing_deal: 1,
+  resource_update: 2, pea: 2, pfs: 2, dfs: 2, permit: 2, first_pour: 2,
+  topline_positive: 2, phase_success: 2, breakthrough_designation: 2,
+};
+const NEAR_LIMIT_MAX_ABOVE_PCT = 10;
+
 // Bepaalt of een signaal überhaupt een notificatie waard is.
-//  - Vereist altijd: ≥2 goud OF ≥3 zilver OF ≥4 brons (kwaliteitsdrempel).
-//  - Uitzonderingen: phoenix_near_limit en zwitserleven_laag bypass de medalcheck.
+//  - Vereist meestal: ≥2 goud OF ≥3 zilver OF ≥4 brons (kwaliteitsdrempel).
+//  - Uitzonderingen die de medalcheck bypassen: phoenix_near_limit,
+//    zwitserleven_laag, en de near-limit-snelalert (groot event ≤10% boven limiet).
 //  - Bullish catalysts: alleen bij BUY/STRONG_BUY-actie.
-function shouldNotify(signalType: string, action: string | null | undefined, medals: Medals | null): boolean {
+function shouldNotify(signalType: string, action: string | null | undefined, medals: Medals | null, nearLimitImpact: boolean): boolean {
+  // Groot event op een aandeel ≤10% boven de aankooplimiet — die combinatie
+  // is zelf het kwaliteitssignaal, dus medal-eis en score-actie vervallen.
+  if (nearLimitImpact) return true;
   // Speciale typen bypass de medal-eis — het type zelf is het kwaliteitssignaal
   if (signalType === "phoenix_near_limit") return true;
   if (signalType === "zwitserleven_laag") return true;
@@ -138,8 +156,10 @@ interface ScoreSnapshot { action: string; final_score: number; expected_outcome:
 function pct(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `${x >= 0 ? "+" : ""}${(x * 100).toFixed(0)}%`; }
 function fmtPrice(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `$${x.toFixed(x < 5 ? 3 : 2)}`; }
 function fmtDate(iso: string | null | undefined): string | null { if (!iso) return null; return iso.slice(0, 10); }
+function fmtAbove(p: number): string { return p <= 0 ? `${p.toFixed(0)}% onder limiet` : `+${p.toFixed(0)}% boven limiet`; }
 interface AlertView { title: string; body: string; priority: number; tags: string[]; }
 interface Medals { gold: number; silver: number; bronze: number; }
+interface NearLimitInfo { tier: 1 | 2; abovePct: number; buyLimit: number; lastClose: number; }
 function medalLine(m: Medals | null): string | null {
   if (!m || (m.gold + m.silver + m.bronze) === 0) return null;
   const parts: string[] = [];
@@ -161,6 +181,7 @@ function formatAlert(
   medals: Medals | null,
   gfUrl: string,
   isLimit: boolean,
+  nearLimit: NearLimitInfo | null,
 ): AlertView {
   const tickerDisp = safeTickerDisplay(sig.ticker);
   const safeTitleBase = sig.title.replaceAll(sig.ticker, tickerDisp);
@@ -172,9 +193,9 @@ function formatAlert(
 
   const isPhoenixAlert = sig.signal_type === "phoenix_near_limit";
   const isZwitserlevenAlert = sig.signal_type === "zwitserleven_laag";
-  const emoji = isPhoenixAlert ? "🦅" : isZwitserlevenAlert ? "🌴" : isLimit ? "📉" : showAction ? "\u{1F680}" : "\u{1F4CC}";
-  const priority = isPhoenixAlert || isZwitserlevenAlert ? 5 : isLimit ? 5 : showAction && action === "STRONG_BUY" ? 5 : 4;
-  const tags = isPhoenixAlert ? ["eagle", "chart_with_downwards_trend"] : isZwitserlevenAlert ? ["palm_tree", "moneybag"] : isLimit ? ["chart_with_downwards_trend"] : ["rocket"];
+  const emoji = nearLimit ? (nearLimit.tier === 1 ? "🚨" : "⚡") : isPhoenixAlert ? "🦅" : isZwitserlevenAlert ? "🌴" : isLimit ? "📉" : showAction ? "\u{1F680}" : "\u{1F4CC}";
+  const priority = nearLimit || isPhoenixAlert || isZwitserlevenAlert ? 5 : isLimit ? 5 : showAction && action === "STRONG_BUY" ? 5 : 4;
+  const tags = nearLimit ? (nearLimit.tier === 1 ? ["rotating_light", "dart"] : ["zap", "dart"]) : isPhoenixAlert ? ["eagle", "chart_with_downwards_trend"] : isZwitserlevenAlert ? ["palm_tree", "moneybag"] : isLimit ? ["chart_with_downwards_trend"] : ["rocket"];
 
   // Verwijder leading ticker uit de signaaltitel om dubbele ticker in header te voorkomen
   const cleanSigTitle = safeTitleBase
@@ -183,13 +204,19 @@ function formatAlert(
     .trim();
 
   const titleParts: string[] = [`${emoji} ${tickerDisp}`];
-  if (showAction) titleParts.push(action!);
-  if (isLimit) {
+  if (nearLimit) {
     if (cleanSigTitle) titleParts.push(cleanSigTitle);
+    titleParts.push(`T${nearLimit.tier}`);
+    titleParts.push(fmtAbove(nearLimit.abovePct));
   } else {
-    if (exp?.peakReturnEst != null) titleParts.push(`piek ${pct(exp.peakReturnEst)}`);
-    if (cat?.type && cat?.daysUntil != null) { const lbl = exp?.catalystLabel ?? cat.type; titleParts.push(`${lbl} ${cat.daysUntil}d`); }
-    else if (cleanSigTitle) titleParts.push(cleanSigTitle);
+    if (showAction) titleParts.push(action!);
+    if (isLimit) {
+      if (cleanSigTitle) titleParts.push(cleanSigTitle);
+    } else {
+      if (exp?.peakReturnEst != null) titleParts.push(`piek ${pct(exp.peakReturnEst)}`);
+      if (cat?.type && cat?.daysUntil != null) { const lbl = exp?.catalystLabel ?? cat.type; titleParts.push(`${lbl} ${cat.daysUntil}d`); }
+      else if (cleanSigTitle) titleParts.push(cleanSigTitle);
+    }
   }
   const title = titleParts.join(" · ").slice(0, 120);
 
@@ -205,6 +232,16 @@ function formatAlert(
   const ml = medalLine(medals);
   if (ml) lines.push(ml);
   lines.push("");
+
+  if (nearLimit) {
+    lines.push("\u{26A1} GROOT EVENT NABIJ AANKOOPLIMIET");
+    lines.push(`   Impact-tier: ${nearLimit.tier === 1
+      ? "T1 — grootste impact (overname / FDA / grote ontdekking)"
+      : "T2 — hoge impact (resource / feasibility / trial-readout)"}`);
+    lines.push(`   Koers ${fmtPrice(nearLimit.lastClose)} · Aankooplimiet ${fmtPrice(nearLimit.buyLimit)} · ${fmtAbove(nearLimit.abovePct)}`);
+    lines.push("   \u{26A0} Geen koersvoorspelling — een groot event vraagt nu je aandacht.");
+    lines.push("");
+  }
 
   if (exp && exp.peakReturnEst != null) {
     lines.push("\u{1F4C8} VERWACHTING (historische baseline)");
@@ -316,33 +353,58 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
   const companyByTicker = new Map<string, string>();
   const medalsByTicker = new Map<string, Medals>();
   const exchangeByTicker = new Map<string, string>();
+  const buyLimitByTicker = new Map<string, number>();
+  const lastCloseByTicker = new Map<string, number>();
   if (tickers.length) {
-    const { data: tks } = await sb.from("signal_tickers").select("ticker, company, exchange, medal_gold, medal_silver, medal_bronze").in("ticker", tickers);
+    const { data: tks } = await sb.from("signal_tickers").select("ticker, company, exchange, buy_limit, medal_gold, medal_silver, medal_bronze").in("ticker", tickers);
     for (const row of tks ?? []) {
       if (row.company) companyByTicker.set(row.ticker as string, row.company as string);
       if ((row as { exchange?: string | null }).exchange) exchangeByTicker.set(row.ticker as string, (row as { exchange: string }).exchange);
+      const bl = (row as { buy_limit?: number | null }).buy_limit;
+      if (bl != null && bl > 0) buyLimitByTicker.set(row.ticker as string, bl);
       const g = (row as { medal_gold?: number }).medal_gold ?? 0;
       const si = (row as { medal_silver?: number }).medal_silver ?? 0;
       const br = (row as { medal_bronze?: number }).medal_bronze ?? 0;
       if (g + si + br > 0) medalsByTicker.set(row.ticker as string, { gold: g, silver: si, bronze: br });
     }
+    const { data: prices } = await sb.from("signal_price_summary").select("ticker, last_close").in("ticker", tickers);
+    for (const row of prices ?? []) {
+      const lc = (row as { last_close?: number | null }).last_close;
+      if (lc != null) lastCloseByTicker.set(row.ticker as string, lc);
+    }
   }
-  let sentEmail = 0, sentNtfy = 0, suppressed = 0;
+  let sentEmail = 0, sentNtfy = 0, suppressed = 0, nearLimitAlerts = 0;
   const errors: string[] = [];
   for (const sig of signals) {
     const score = scoreByTicker.get(sig.ticker) ?? null;
     const isLimit = LIMIT_EVENT_TYPES.has(sig.signal_type);
     const medals = medalsByTicker.get(sig.ticker) ?? null;
 
-    if (!shouldNotify(sig.signal_type, score?.action ?? null, medals)) {
+    // Near-limit-snelalert: tier 1/2 catalyst-event op een aandeel dat
+    // ≤10% boven (of onder) de aankooplimiet staat.
+    let nearLimit: NearLimitInfo | null = null;
+    const tier: 1 | 2 | undefined = IMPACT_TIER[sig.signal_type];
+    if (tier) {
+      const buyLimit = buyLimitByTicker.get(sig.ticker) ?? null;
+      const lastClose = lastCloseByTicker.get(sig.ticker) ?? null;
+      if (buyLimit != null && lastClose != null) {
+        const abovePct = ((lastClose - buyLimit) / buyLimit) * 100;
+        if (abovePct <= NEAR_LIMIT_MAX_ABOVE_PCT) {
+          nearLimit = { tier, abovePct, buyLimit, lastClose };
+        }
+      }
+    }
+
+    if (!shouldNotify(sig.signal_type, score?.action ?? null, medals, nearLimit != null)) {
       await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
       suppressed++;
       continue;
     }
+    if (nearLimit) nearLimitAlerts++;
 
     const company = companyByTicker.get(sig.ticker) ?? null;
     const clickUrl = googleFinanceUrl(sig.ticker, exchangeByTicker.get(sig.ticker) ?? null);
-    const view = formatAlert(sig, score, company, medals, clickUrl, isLimit);
+    const view = formatAlert(sig, score, company, medals, clickUrl, isLimit, nearLimit);
 
     if (s.email) {
       const r = await sendEmail(s.email, `[XINIX] ${view.title}`, `${view.body}\nDetected: ${sig.detected_at}`);
@@ -356,5 +418,5 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     }
     await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
   }
-  return { ok: errors.length === 0, message: `email: ${sentEmail}, ntfy: ${sentNtfy}, suppressed: ${suppressed}, phoenix_generated: ${phoenixGenerated}` + (errors.length ? `; errors: ${errors.slice(0, 3).join("; ")}` : ""), metrics: { email: sentEmail, ntfy: sentNtfy, suppressed, errors: errors.length, total_signals: signals.length, phoenix_generated: phoenixGenerated } };
+  return { ok: errors.length === 0, message: `email: ${sentEmail}, ntfy: ${sentNtfy}, suppressed: ${suppressed}, near_limit: ${nearLimitAlerts}, phoenix_generated: ${phoenixGenerated}` + (errors.length ? `; errors: ${errors.slice(0, 3).join("; ")}` : ""), metrics: { email: sentEmail, ntfy: sentNtfy, suppressed, near_limit: nearLimitAlerts, errors: errors.length, total_signals: signals.length, phoenix_generated: phoenixGenerated } };
 }));
