@@ -214,6 +214,39 @@ export function HideFavoritesToggle({
   );
 }
 
+// Sterren-rating 1..5 voor favorieten. Klik op ster N = rating N. Klik
+// op de huidige rating = wissen. Werkt optimistisch via useMarks.
+export function StarRating({ ticker, size = "sm" }: { ticker: string; size?: "sm" | "md" }) {
+  const { getRating, setRating } = useMarks();
+  const current = getRating(ticker) ?? 0;
+  const cls = size === "md" ? "text-lg" : "text-sm";
+  return (
+    <div className="inline-flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((n) => {
+        const filled = n <= current;
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void setRating(ticker, n === current ? null : n);
+            }}
+            className={
+              cls + " leading-none cursor-pointer transition-colors " +
+              (filled ? "text-yellow-400 hover:text-yellow-300" : "text-neutral-600 hover:text-neutral-400")
+            }
+            title={n === current ? `Klik om ${n}-sterren te wissen` : `Geef ${n} sterren`}
+            aria-label={`Geef ${ticker} ${n} sterren`}
+          >
+            {filled ? "★" : "☆"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // Tegel die laat zien hoeveel aandelen in deze tabel nog "te beoordelen" zijn:
 // geen hartje (favoriet) ÉN geen verrekijker (gezien). Klikbaar — bij klik
 // worden beide filters geactiveerd zodat je direct alleen die rijen ziet.
