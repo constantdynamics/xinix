@@ -1,15 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  addMark,
+  batchAddTickers,
   fetchDashboard,
   fetchScanResults,
+  getToken,
+  lookupTickers,
+  patchTicker,
+  type LookupResult,
   type ScanResults,
+  type TickerInput,
 } from "../api";
 import type { Dashboard, Card as CardType, Sector } from "../types";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Badge, Pill, Stat } from "../components/ui";
+import { Card, Button, Badge, Stat } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
-import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle } from "../components/MarkCells";
+import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
 
@@ -41,7 +48,7 @@ interface FavRow {
   bronnen: Bron[];
 }
 
-type SortKey = "ticker" | "company" | "score" | "above_limit_pct" | "last_close";
+type SortKey = "ticker" | "company" | "score" | "above_limit_pct" | "last_close" | "rating";
 type SortDir = "asc" | "desc";
 
 function fmtPrice(v: number | null): string {
@@ -57,11 +64,25 @@ export function FavorietenView() {
   const [scans, setScans] = useState<ScanResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>("ticker");
+  // Default: sorteer op afstand tot aankooplimiet (oplopend) — wat het dichtst
+  // bij de koop-trigger zit komt bovenaan.
+  const [sortKey, setSortKey] = useState<SortKey>("above_limit_pct");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [bronFilter, setBronFilter] = useState<Set<Bron>>(new Set());
   const [sectorFilter, setSectorFilter] = useState<Set<Sector>>(new Set());
   const [showSeen, setShowSeen] = useState(false);
+
+  // Inline buy_limit editing: track welke ticker bewerkt wordt + de tekstwaarde.
+  const [editingLimit, setEditingLimit] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>("");
+  const [savingLimit, setSavingLimit] = useState<string | null>(null);
+  // Locale optimistische overrides van buy_limit (na inline-save, voordat
+  // dashboard opnieuw geladen is).
+  const [limitOverrides, setLimitOverrides] = useState<Record<string, number | null>>({});
+  // Bulk-add panel
+  const [showAdd, setShowAdd] = useState(false);
+
+  const isAdmin = !!getToken();
 
   useEffect(() => {
     setLoading(true);
@@ -108,12 +129,19 @@ export function FavorietenView() {
       if (card?.is_zwitserleven) bronnen.push("zwitserleven");
       if (card && bronnen.length === 0) bronnen.push("watchlist");
 
-      const last_close = p?.last_close ?? null;
-      const buy_limit = card?.buy_limit ?? p?.buy_limit ?? null;
-      const above_limit_pct = p?.above_limit_pct
-        ?? (last_close != null && buy_limit != null && buy_limit > 0
-              ? ((last_close - buy_limit) / buy_limit) * 100
-              : null);
+      const last_close = p?.last_close ?? card?.summary?.last_close ?? null;
+      const override = limitOverrides[T];
+      const buy_limit = override !== undefined ? override : (card?.buy_limit ?? p?.buy_limit ?? null);
+      // Hergebruik above_limit_pct alleen als override ongebruikt is — anders
+      // herberekenen uit de bijgewerkte limiet.
+      const above_limit_pct = override !== undefined
+        ? (last_close != null && buy_limit != null && buy_limit > 0
+            ? ((last_close - buy_limit) / buy_limit) * 100
+            : null)
+        : (p?.above_limit_pct
+            ?? (last_close != null && buy_limit != null && buy_limit > 0
+                  ? ((last_close - buy_limit) / buy_limit) * 100
+                  : null));
 
       out.push({
         ticker: T,
@@ -128,7 +156,7 @@ export function FavorietenView() {
       });
     }
     return out;
-  }, [dashboard, scans, marks]);
+  }, [dashboard, scans, marks, limitOverrides]);
 
   const filtered = useMemo(() => {
     let list = rows;
@@ -148,6 +176,7 @@ export function FavorietenView() {
         case "score": av = a.score; bv = b.score; break;
         case "above_limit_pct": av = a.above_limit_pct; bv = b.above_limit_pct; break;
         case "last_close": av = a.last_close; bv = b.last_close; break;
+        case "rating": av = marks.getRating(a.ticker); bv = marks.getRating(b.ticker); break;
       }
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
@@ -159,6 +188,39 @@ export function FavorietenView() {
     });
     return list;
   }, [rows, sortKey, sortDir, bronFilter, sectorFilter, showSeen, marks]);
+
+  function startEditLimit(row: FavRow) {
+    if (!isAdmin) return;
+    setEditingLimit(row.ticker);
+    setEditValue(row.buy_limit != null ? String(row.buy_limit) : "");
+  }
+  async function commitEditLimit(ticker: string) {
+    const trimmed = editValue.trim();
+    let newLimit: number | null;
+    if (trimmed === "") {
+      newLimit = null;
+    } else {
+      const parsed = Number(trimmed.replace(",", "."));
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        setEditingLimit(null);
+        return;
+      }
+      newLimit = parsed;
+    }
+    setEditingLimit(null);
+    setSavingLimit(ticker);
+    setLimitOverrides((m) => ({ ...m, [ticker]: newLimit }));
+    try {
+      await patchTicker(ticker, { buy_limit: newLimit });
+    } catch (err) {
+      console.error("save buy_limit failed", err);
+      // rollback: verwijder override zodat de oude DB-waarde weer zichtbaar wordt
+      setLimitOverrides((m) => { const n = { ...m }; delete n[ticker]; return n; });
+    } finally {
+      setSavingLimit(null);
+    }
+  }
+  function cancelEditLimit() { setEditingLimit(null); setEditValue(""); }
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -172,6 +234,8 @@ export function FavorietenView() {
   }
 
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "";
+
+  // (BulkAddFavoritesPanel staat onderaan dit bestand)
 
   if (loading) return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
   if (error) return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
@@ -201,10 +265,25 @@ export function FavorietenView() {
       <div className="flex flex-wrap items-center gap-3">
         <Stat label="Favorieten" value={marks.favorites.size} />
         <Stat label="Getoond" value={filtered.length} />
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {isAdmin && (
+            <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
+              {showAdd ? "Sluit" : "+ Toevoegen"}
+            </Button>
+          )}
           <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
         </div>
       </div>
+
+      {showAdd && isAdmin && (
+        <BulkAddFavoritesPanel
+          onClose={() => setShowAdd(false)}
+          onDone={() => {
+            // Herlaad dashboard om de nieuwe tickers met data te tonen
+            fetchDashboard().then(setDashboard).catch(() => {});
+          }}
+        />
+      )}
 
       {rows.length === 0 ? (
         <Card className="p-10 text-center space-y-3">
@@ -275,6 +354,10 @@ export function FavorietenView() {
                     <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("above_limit_pct")}>
                       vs limiet <span className="text-fog-lime text-[9px]">{sortArrow("above_limit_pct")}</span>
                     </th>
+                    <th className="px-3 py-2 text-right" title="Aankooplimiet — klik om in te vullen">Limiet</th>
+                    <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("rating")}>
+                      Sterren <span className="text-fog-lime text-[9px]">{sortArrow("rating")}</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-5/40">
@@ -322,6 +405,40 @@ export function FavorietenView() {
                             <span className="text-neutral-600">—</span>
                           )}
                         </td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {editingLimit === r.ticker ? (
+                            <input
+                              autoFocus
+                              type="text"
+                              inputMode="decimal"
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={() => commitEditLimit(r.ticker)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") commitEditLimit(r.ticker);
+                                else if (e.key === "Escape") cancelEditLimit();
+                              }}
+                              className="w-20 px-1.5 py-0.5 rounded bg-ink-3 border border-fog-lime text-right font-mono text-xs text-neutral-100 focus:outline-none"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => startEditLimit(r)}
+                              disabled={!isAdmin}
+                              className={
+                                "px-1.5 py-0.5 rounded text-xs font-mono tabular-nums transition-colors " +
+                                (isAdmin ? "hover:bg-ink-3 cursor-pointer" : "cursor-default") +
+                                " " + (r.buy_limit != null ? "text-neutral-200" : "text-neutral-600")
+                              }
+                              title={isAdmin ? "Klik om de aankooplimiet aan te passen" : "Login vereist"}
+                            >
+                              {savingLimit === r.ticker ? "…" : (r.buy_limit != null ? fmtPrice(r.buy_limit) : "+")}
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <StarRating ticker={r.ticker} />
+                        </td>
                       </tr>
                     );
                   })}
@@ -332,5 +449,188 @@ export function FavorietenView() {
         </>
       )}
     </div>
+  );
+}
+
+// Parse vrije tekst input naar (ticker, optionele exchange) paren.
+// Ondersteund:
+//   - Plain ticker: "AAPL"
+//   - Google Finance URL: "https://www.google.com/finance/beta/quote/FRMM:NASDAQ?window=1Y"
+//     → ticker=FRMM exchange=NASDAQ
+//   - Ticker met exchange: "FRMM:NASDAQ"
+// Separators: nieuwe regels, komma's, whitespace.
+function parseTickerInput(input: string): Array<{ ticker: string; exchange?: string }> {
+  const out: Array<{ ticker: string; exchange?: string }> = [];
+  const seen = new Set<string>();
+  const tokens = input.split(/[\s,;]+/).map((t) => t.trim()).filter((t) => t.length > 0);
+  for (const tok of tokens) {
+    let ticker: string | null = null;
+    let exchange: string | undefined;
+    // Google Finance URL: ".../quote/TICKER:EXCHANGE?..." of "/quote/TICKER:EXCHANGE"
+    const gfMatch = tok.match(/\/quote\/([A-Z0-9.\-]+):([A-Z]+)(?:[/?#]|$)/i);
+    if (gfMatch) {
+      ticker = gfMatch[1].toUpperCase();
+      exchange = gfMatch[2].toUpperCase();
+    } else {
+      // TICKER:EXCHANGE losse vorm
+      const colonMatch = tok.match(/^([A-Z0-9.\-]+):([A-Z]+)$/i);
+      if (colonMatch) {
+        ticker = colonMatch[1].toUpperCase();
+        exchange = colonMatch[2].toUpperCase();
+      } else if (/^[A-Z0-9.\-]+$/i.test(tok)) {
+        ticker = tok.toUpperCase();
+      }
+    }
+    if (ticker && !seen.has(ticker)) {
+      seen.add(ticker);
+      out.push({ ticker, exchange });
+    }
+  }
+  return out;
+}
+
+interface ResolvedRow extends LookupResult {
+  alreadyFavorite: boolean;
+}
+
+function BulkAddFavoritesPanel({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const marks = useMarks();
+  const [input, setInput] = useState("");
+  const [resolving, setResolving] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [resolved, setResolved] = useState<ResolvedRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  async function onLookup() {
+    setError(null);
+    const parsed = parseTickerInput(input);
+    if (parsed.length === 0) {
+      setError("Geen herkenbare tickers gevonden.");
+      return;
+    }
+    setResolving(true);
+    try {
+      const tickers = parsed.map((p) => p.ticker);
+      const results = await lookupTickers(tickers);
+      const rows: ResolvedRow[] = results.map((r) => ({
+        ...r,
+        alreadyFavorite: marks.favorites.has(r.ticker.toUpperCase()),
+      }));
+      setResolved(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResolving(false);
+    }
+  }
+
+  async function onConfirmAdd() {
+    if (!resolved) return;
+    setAdding(true);
+    setError(null);
+    try {
+      // 1) Nieuwe tickers (recognized && niet al in favorieten) toevoegen aan watchlist
+      const toAddWatchlist: TickerInput[] = resolved
+        .filter((r) => r.recognized && !r.alreadyFavorite)
+        .map((r) => ({
+          ticker: r.ticker,
+          company: r.company ?? r.ticker,
+          sector: "other" as const,
+        }));
+      if (toAddWatchlist.length > 0) {
+        try {
+          await batchAddTickers(toAddWatchlist);
+        } catch {
+          // Watchlist-add mag falen (bv. al bestaand) — favoriet-toevoeging is
+          // het belangrijkst en gebeurt onafhankelijk hieronder.
+        }
+      }
+      // 2) Alle herkende tickers favorieten — gebruik addMark per ticker zodat
+      //    de hook-state ook ge-update wordt en optimistic UI klopt.
+      for (const r of resolved) {
+        if (!r.recognized || r.alreadyFavorite) continue;
+        try {
+          await addMark("favorite", r.ticker);
+        } catch (err) {
+          console.error("favorite add failed for", r.ticker, err);
+        }
+      }
+      // 3) Sluit het panel en herlaad data
+      onDone();
+      onClose();
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  return (
+    <Card className="p-4 space-y-3 border-fog-lime/30">
+      <div className="flex items-center justify-between">
+        <div className="font-semibold text-sm">Favorieten toevoegen</div>
+        <button onClick={onClose} className="text-xs text-neutral-500 hover:text-neutral-300">Sluiten</button>
+      </div>
+      <div className="text-[11px] text-neutral-500 leading-relaxed">
+        Plak tickers (één per regel, met komma's of spaties), of Google-Finance URL's zoals{" "}
+        <code className="text-fog-lime">https://www.google.com/finance/beta/quote/FRMM:NASDAQ?window=1Y</code>.
+        Onbekende tickers worden eerst aan de watchlist toegevoegd en daarna als favoriet gemarkeerd.
+      </div>
+      <textarea
+        ref={inputRef}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        rows={4}
+        placeholder={"AAPL\nMSFT\nhttps://www.google.com/finance/beta/quote/FRMM:NASDAQ?window=1Y"}
+        className="w-full px-2 py-1.5 rounded bg-ink-3 border border-ink-5 text-xs font-mono text-neutral-100 focus:outline-none focus:border-fog-lime"
+      />
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={onLookup} disabled={resolving || adding || input.trim() === ""}>
+          {resolving ? "Opzoeken…" : "Opzoeken"}
+        </Button>
+        {resolved && (
+          <Button size="sm" onClick={onConfirmAdd} disabled={adding || resolved.every((r) => !r.recognized || r.alreadyFavorite)}>
+            {adding ? "Bezig…" : `${resolved.filter((r) => r.recognized && !r.alreadyFavorite).length} toevoegen`}
+          </Button>
+        )}
+        <span className="text-[10px] text-neutral-500 ml-2">{parseTickerInput(input).length} tickers geparseerd</span>
+      </div>
+      {error && <div className="text-xs text-fog-loss">{error}</div>}
+      {resolved && (
+        <div className="border border-ink-5 rounded overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-ink-3/40 text-[10px] uppercase text-neutral-500">
+              <tr>
+                <th className="px-2 py-1 text-left">Ticker</th>
+                <th className="px-2 py-1 text-left">Bedrijf</th>
+                <th className="px-2 py-1 text-left">Beurs</th>
+                <th className="px-2 py-1 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink-5/40">
+              {resolved.map((r) => (
+                <tr key={r.ticker}>
+                  <td className="px-2 py-1 font-mono">{r.ticker}</td>
+                  <td className="px-2 py-1 text-neutral-300">{r.company ?? "—"}</td>
+                  <td className="px-2 py-1 text-neutral-500">{r.exchange ?? "—"}</td>
+                  <td className="px-2 py-1">
+                    {!r.recognized ? (
+                      <span className="text-fog-loss">Onbekend{r.error ? ` (${r.error})` : ""}</span>
+                    ) : r.alreadyFavorite ? (
+                      <span className="text-neutral-500">Al favoriet</span>
+                    ) : (
+                      <span className="text-fog-lime">Klaar om toe te voegen</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }

@@ -703,6 +703,7 @@ export type MarkKind = "favorite" | "seen";
 export interface MarksResponse {
   favorites: string[];
   seen: string[];
+  ratings?: Record<string, number>;
 }
 
 export async function fetchMarks(): Promise<MarksResponse> {
@@ -737,4 +738,13 @@ export async function addMarksBulk(kind: MarkKind, tickers: string[]): Promise<v
     body: JSON.stringify({ kind, tickers }),
   });
   if (!res.ok) throw new Error(`bulk add mark ${res.status}: ${await res.text()}`);
+}
+
+export async function setFavoriteRating(ticker: string, rating: number | null): Promise<void> {
+  const res = await fetch(apiUrl("/api/marks"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kind: "favorite", ticker, rating }),
+  });
+  if (!res.ok) throw new Error(`rate favorite ${res.status}: ${await res.text()}`);
 }
