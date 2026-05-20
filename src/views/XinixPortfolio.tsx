@@ -39,6 +39,8 @@ import {
   SeenHeader,
   ShowSeenToggle,
   MarkAllSeenButton,
+  HideFavoritesToggle,
+  NotYetReviewedTile,
 } from "../components/MarkCells";
 
 const SIGNAL_LABELS: Record<string, string> = {
@@ -1914,6 +1916,7 @@ export function PhoenixView() {
   const [fullScanBatch, setFullScanBatch] = useState(0);
   const fullScanStopRef = useRef(false);
   const [showSeen, setShowSeen] = useState(false);
+  const [hideFavorites, setHideFavorites] = useState(false);
   const marks = useMarks();
   const isAdmin = !!getToken();
 
@@ -2011,6 +2014,7 @@ export function PhoenixView() {
   const filteredRanking = useMemo(() => {
     const filtered = ranking.filter((p) => {
       if (!showSeen && marks.isSeen(p.ticker)) return false;
+      if (hideFavorites && marks.isFavorite(p.ticker)) return false;
       for (const g of FACET_GROUPS) {
         const sel = selectedBuckets[g.key];
         if (sel.size === 0) continue;
@@ -2034,7 +2038,7 @@ export function PhoenixView() {
     });
 
     return sorted;
-  }, [ranking, sortKey, sortDir, selectedBuckets, showSeen, marks]);
+  }, [ranking, sortKey, sortDir, selectedBuckets, showSeen, hideFavorites, marks]);
 
   // Live count per bucket: hoeveel rijen vallen erin als je ALLE andere
   // facet-groepen toepast (de eigen groep wordt genegeerd, zoals bol.com).
@@ -2142,7 +2146,14 @@ export function PhoenixView() {
             <div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+                <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
                 <MarkAllSeenButton tickers={filteredRanking.map((p) => p.ticker)} />
+              </div>
+              <div className="mt-2">
+                <NotYetReviewedTile
+                  tickers={ranking.map((p) => p.ticker)}
+                  onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
+                />
               </div>
               <div className="mt-1 text-[10px] text-neutral-500">
                 {marks.seen.size} gezien · standaard verborgen

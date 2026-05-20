@@ -32,15 +32,50 @@ Deno.serve(async (req) => {
 
   if (req.method === "GET") {
     const [fav, seen] = await Promise.all([
-      supabase.from("xinix_favorites").select("ticker"),
+      supabase.from("xinix_favorites").select("ticker, rating"),
       supabase.from("xinix_seen").select("ticker"),
     ]);
     if (fav.error) return textResponse(req, fav.error.message, { status: 500 });
     if (seen.error) return textResponse(req, seen.error.message, { status: 500 });
+    const favList = (fav.data ?? []) as Array<{ ticker: string; rating: number | null }>;
+    const ratings: Record<string, number> = {};
+    for (const r of favList) {
+      if (r.rating != null) ratings[r.ticker] = r.rating;
+    }
     return jsonResponse(req, {
-      favorites: (fav.data ?? []).map((r) => r.ticker as string),
+      favorites: favList.map((r) => r.ticker),
       seen: (seen.data ?? []).map((r) => r.ticker as string),
+      ratings,
     });
+  }
+
+  if (req.method === "PATCH") {
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await req.json()) as Record<string, unknown>;
+    } catch {
+      return textResponse(req, "Invalid JSON body", { status: 400 });
+    }
+    const kind = parseKind(body.kind);
+    if (kind !== "favorite") {
+      return textResponse(req, "PATCH alleen ondersteund voor kind=favorite (rating-update)", { status: 400 });
+    }
+    const ticker = typeof body.ticker === "string" ? body.ticker.trim().toUpperCase() : "";
+    if (!ticker) return textResponse(req, "Missing ticker", { status: 400 });
+    const ratingRaw = body.rating;
+    let rating: number | null;
+    if (ratingRaw === null) {
+      rating = null;
+    } else if (typeof ratingRaw === "number" && Number.isFinite(ratingRaw) && ratingRaw >= 1 && ratingRaw <= 5) {
+      rating = Math.round(ratingRaw);
+    } else {
+      return textResponse(req, "Invalid rating (must be 1..5 or null)", { status: 400 });
+    }
+    const { error } = await supabase
+      .from("xinix_favorites")
+      .upsert({ ticker, rating }, { onConflict: "ticker" });
+    if (error) return textResponse(req, error.message, { status: 500 });
+    return jsonResponse(req, { ok: true, kind, ticker, rating, action: "rated" });
   }
 
   if (req.method === "POST" || req.method === "DELETE") {

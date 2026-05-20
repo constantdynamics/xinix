@@ -4,7 +4,7 @@
 // wordt geklikt. Eén GET per pagina-load, daarna alleen toggles.
 
 import { useEffect, useState } from "react";
-import { addMark, addMarksBulk, fetchMarks, removeMark, getToken, type MarkKind } from "../api";
+import { addMark, addMarksBulk, fetchMarks, removeMark, setFavoriteRating, getToken, type MarkKind } from "../api";
 
 type Listener = () => void;
 
@@ -13,6 +13,7 @@ const state = {
   loading: false,
   favorites: new Set<string>(),
   seen: new Set<string>(),
+  ratings: new Map<string, number>(),
 };
 const listeners = new Set<Listener>();
 
@@ -32,6 +33,10 @@ async function ensureLoaded(): Promise<void> {
     const data = await fetchMarks();
     state.favorites = new Set(data.favorites.map((t) => t.toUpperCase()));
     state.seen = new Set(data.seen.map((t) => t.toUpperCase()));
+    state.ratings = new Map();
+    for (const [t, r] of Object.entries(data.ratings ?? {})) {
+      state.ratings.set(t.toUpperCase(), r);
+    }
     state.loaded = true;
     emit();
   } catch (err) {
@@ -44,9 +49,12 @@ async function ensureLoaded(): Promise<void> {
 export interface MarksApi {
   favorites: Set<string>;
   seen: Set<string>;
+  ratings: Map<string, number>;
   isFavorite: (ticker: string) => boolean;
   isSeen: (ticker: string) => boolean;
+  getRating: (ticker: string) => number | null;
   toggle: (kind: MarkKind, ticker: string) => Promise<void>;
+  setRating: (ticker: string, rating: number | null) => Promise<void>;
   markManySeen: (tickers: string[]) => Promise<number>;
   loaded: boolean;
 }
@@ -66,16 +74,41 @@ export function useMarks(): MarksApi {
   return {
     favorites: state.favorites,
     seen: state.seen,
+    ratings: state.ratings,
     loaded: state.loaded,
     isFavorite: (t) => state.favorites.has(t.toUpperCase()),
     isSeen: (t) => state.seen.has(t.toUpperCase()),
+    getRating: (t) => state.ratings.get(t.toUpperCase()) ?? null,
+    setRating: async (ticker, rating) => {
+      const T = ticker.toUpperCase();
+      const prev = state.ratings.get(T) ?? null;
+      // optimistic
+      if (rating == null) state.ratings.delete(T);
+      else state.ratings.set(T, rating);
+      // Een rating heeft een favoriet nodig; zorg dat hij in de favorieten-set staat.
+      const wasFav = state.favorites.has(T);
+      if (!wasFav && rating != null) state.favorites.add(T);
+      emit();
+      try {
+        await setFavoriteRating(T, rating);
+      } catch (err) {
+        // rollback
+        if (prev == null) state.ratings.delete(T);
+        else state.ratings.set(T, prev);
+        if (!wasFav) state.favorites.delete(T);
+        emit();
+        console.error("setRating failed", err);
+      }
+    },
     toggle: async (kind, ticker) => {
       const T = ticker.toUpperCase();
       const set = setForKind(kind);
       const wasOn = set.has(T);
+      const prevRating = kind === "favorite" ? (state.ratings.get(T) ?? null) : null;
       // optimistic
       if (wasOn) set.delete(T);
       else set.add(T);
+      if (kind === "favorite" && wasOn) state.ratings.delete(T);
       emit();
       try {
         if (wasOn) await removeMark(kind, T);
@@ -84,6 +117,7 @@ export function useMarks(): MarksApi {
         // rollback
         if (wasOn) set.add(T);
         else set.delete(T);
+        if (kind === "favorite" && wasOn && prevRating != null) state.ratings.set(T, prevRating);
         emit();
         console.error("toggle mark failed", err);
       }

@@ -134,7 +134,7 @@ export function ShowSeenToggle({
 // zouden worden, om ongelukken te voorkomen.
 export function MarkAllSeenButton({
   tickers,
-  label = "Alles aanvinken",
+  label = "Markeer alle niet-hartjes als gezien",
 }: {
   tickers: string[];
   label?: string;
@@ -183,6 +183,104 @@ export function MarkAllSeenButton({
       }
     >
       ✓ {label} ({candidates.length})
+    </button>
+  );
+}
+
+// Toggle voor "verberg favoriete rijen" — toont alleen aandelen zonder hartje.
+// Handig wanneer je een nieuwe scan-batch wil reviewen en de al-bekende favorieten
+// niet opnieuw wil zien.
+export function HideFavoritesToggle({
+  hideFavorites,
+  onChange,
+}: {
+  hideFavorites: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!hideFavorites)}
+      className={
+        "px-2 py-1 rounded text-[11px] border transition-colors " +
+        (hideFavorites
+          ? "border-fog-pink text-fog-pink bg-fog-pink/10"
+          : "border-ink-5 text-neutral-400 hover:text-neutral-200")
+      }
+      title={hideFavorites ? "Toon ook favorieten" : "Toon alleen aandelen zonder hartje"}
+    >
+      {hideFavorites ? "♡ Alleen niet-favoriet" : "♡ Verberg favorieten"}
+    </button>
+  );
+}
+
+// Sterren-rating 1..5 voor favorieten. Klik op ster N = rating N. Klik
+// op de huidige rating = wissen. Werkt optimistisch via useMarks.
+export function StarRating({ ticker, size = "sm" }: { ticker: string; size?: "sm" | "md" }) {
+  const { getRating, setRating } = useMarks();
+  const current = getRating(ticker) ?? 0;
+  const cls = size === "md" ? "text-lg" : "text-sm";
+  return (
+    <div className="inline-flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((n) => {
+        const filled = n <= current;
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void setRating(ticker, n === current ? null : n);
+            }}
+            className={
+              cls + " leading-none cursor-pointer transition-colors " +
+              (filled ? "text-yellow-400 hover:text-yellow-300" : "text-neutral-600 hover:text-neutral-400")
+            }
+            title={n === current ? `Klik om ${n}-sterren te wissen` : `Geef ${n} sterren`}
+            aria-label={`Geef ${ticker} ${n} sterren`}
+          >
+            {filled ? "★" : "☆"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Tegel die laat zien hoeveel aandelen in deze tabel nog "te beoordelen" zijn:
+// geen hartje (favoriet) ÉN geen verrekijker (gezien). Klikbaar — bij klik
+// worden beide filters geactiveerd zodat je direct alleen die rijen ziet.
+export function NotYetReviewedTile({
+  tickers,
+  onActivate,
+}: {
+  tickers: string[];
+  onActivate?: () => void;
+}) {
+  const { favorites, seen } = useMarks();
+  const count = tickers.reduce((n, t) => {
+    const T = t.toUpperCase();
+    return !favorites.has(T) && !seen.has(T) ? n + 1 : n;
+  }, 0);
+  const disabled = count === 0;
+  return (
+    <button
+      type="button"
+      onClick={() => { if (!disabled) onActivate?.(); }}
+      disabled={disabled}
+      className={
+        "flex items-center gap-2 px-3 py-2 rounded border text-left transition-colors " +
+        (disabled
+          ? "border-ink-5 text-neutral-600 cursor-default"
+          : "border-fog-lime/40 hover:border-fog-lime hover:bg-fog-lime/5 cursor-pointer")
+      }
+      title={disabled ? "Alles is al gezien of favoriet" : "Klik om alleen niet-bekeken aandelen te tonen"}
+    >
+      <span className="text-xl leading-none" aria-hidden>🆕</span>
+      <span className="flex flex-col leading-tight">
+        <span className={"text-lg font-mono tabular-nums font-bold " + (disabled ? "text-neutral-600" : "text-fog-lime")}>{count}</span>
+        <span className="text-[10px] text-neutral-500 uppercase tracking-wider">nog niet bekeken</span>
+      </span>
     </button>
   );
 }

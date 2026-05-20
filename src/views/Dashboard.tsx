@@ -111,6 +111,15 @@ type NavTarget =
 export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh: () => void; onNavigate?: (t: NavTarget) => void }) {
   const [filter, setFilter] = useState<ColorFilter>("all");
   const [tilePrefs, setTilePrefs] = useState<TilePrefs>(loadTilePrefs);
+  // Sorteer-modus: "heat" = signaal-heat (standaard) · "score" = inhoudelijke
+  // score-engine (signal_scores.final_score). Keuze bewaard in localStorage.
+  const [sortMode, setSortMode] = useState<"heat" | "score">(
+    () => (localStorage.getItem("xinix_dashboard_sort") === "score" ? "score" : "heat"),
+  );
+  function pickSort(m: "heat" | "score") {
+    setSortMode(m);
+    localStorage.setItem("xinix_dashboard_sort", m);
+  }
   // Re-load prefs wanneer de gebruiker de Settings tab heeft opengehad
   // — andere tabs/storage events triggeren dit zonder full refresh.
   useEffect(() => {
@@ -141,11 +150,18 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
   );
 
   const visibleCards = useMemo(
-    () =>
-      filter === "all"
+    () => {
+      const filtered = filter === "all"
         ? data.cards
-        : data.cards.filter((c) => c.color === filter),
-    [data.cards, filter]
+        : data.cards.filter((c) => c.color === filter);
+      if (sortMode === "score") {
+        // Inhoudelijke sortering: hoogste final_score eerst, ongescoorde onderaan.
+        return [...filtered].sort((a, b) => (b.final_score ?? -1) - (a.final_score ?? -1));
+      }
+      // "heat": de cards komen al heat-gesorteerd uit de edge function.
+      return filtered;
+    },
+    [data.cards, filter, sortMode]
   );
 
   // KPIs
@@ -272,7 +288,36 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
         >
           Rust
         </Pill>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <span className="text-[11px] text-neutral-500 mr-1">Sorteer:</span>
+            <button
+              type="button"
+              onClick={() => pickSort("heat")}
+              className={
+                "px-2 py-1 rounded text-[11px] font-semibold border transition-colors " +
+                (sortMode === "heat"
+                  ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10"
+                  : "border-ink-5 text-neutral-400 hover:text-neutral-200")
+              }
+              title="Sorteer op signaal-heat (Hot/Warm/Pre/Rust)"
+            >
+              🔥 Heat
+            </button>
+            <button
+              type="button"
+              onClick={() => pickSort("score")}
+              className={
+                "px-2 py-1 rounded text-[11px] font-semibold border transition-colors " +
+                (sortMode === "score"
+                  ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10"
+                  : "border-ink-5 text-neutral-400 hover:text-neutral-200")
+              }
+              title="Sorteer op inhoudelijke score (signal_scores) — structureel + catalyst + timing"
+            >
+              🧠 Inhoudelijke score
+            </button>
+          </div>
           <JobControls />
         </div>
       </div>
@@ -443,6 +488,8 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
       {prefs.showDetailMeta && detailMeta && (
         <div className="text-[11px] text-neutral-400 truncate">{detailMeta}</div>
       )}
+
+      {c.final_score != null && <SignalScoreBox card={c} />}
 
       {prefs.showTriggerEvent && c.trigger_event && (
         <div className="text-[10px] text-neutral-500 italic line-clamp-2 leading-snug" title={c.trigger_event}>
@@ -869,6 +916,50 @@ function ScoreRing({ value }: { value: number }) {
       <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
         <span className="text-[14px] font-bold tabular text-neutral-50">{value}</span>
         <span className="text-[7px] uppercase tracking-wider text-neutral-500 mt-0.5">score</span>
+      </div>
+    </div>
+  );
+}
+
+// Inhoudelijke score-box: toont final_score van de signal_scores-engine plus
+// de drie sub-scores (structureel / catalyst / timing) als mini-balkjes. Geeft
+// inzicht in waaróm een aandeel inhoudelijk hoog/laag scoort — los van de koers.
+function SignalScoreBox({ card: c }: { card: CardData }) {
+  const ACTION_STYLE: Record<string, string> = {
+    STRONG_BUY: "bg-fog-lime/20 text-fog-lime border-fog-lime/40",
+    BUY: "bg-fog-lime/10 text-fog-lime/90 border-fog-lime/30",
+    WATCH: "bg-fog-warn/15 text-fog-warn border-fog-warn/30",
+    AVOID: "bg-ink-3 text-neutral-500 border-ink-5",
+  };
+  const fs = c.final_score ?? 0;
+  const pct = Math.round(fs * 100);
+  const action = c.signal_action ?? "AVOID";
+  const bar = (label: string, v: number | null | undefined) => {
+    const w = Math.max(0, Math.min(100, Math.round((v ?? 0) * 100)));
+    return (
+      <div className="flex items-center gap-1" title={`${label}: ${w}%`}>
+        <span className="text-[8px] uppercase tracking-wider text-neutral-500 w-8 shrink-0">{label}</span>
+        <div className="flex-1 h-1 rounded-full bg-ink-3 overflow-hidden">
+          <div className="h-full rounded-full bg-fog-lime/70" style={{ width: `${w}%` }} />
+        </div>
+      </div>
+    );
+  };
+  return (
+    <div className="rounded-lg border border-ink-5 bg-ink-2/40 px-2 py-1.5 space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">Inhoudelijke score</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-bold tabular text-neutral-100">{pct}</span>
+          <span className={"px-1.5 py-0.5 rounded text-[8px] font-bold border " + (ACTION_STYLE[action] ?? ACTION_STYLE.AVOID)}>
+            {action}
+          </span>
+        </div>
+      </div>
+      <div className="space-y-0.5">
+        {bar("Struct", c.score_structural)}
+        {bar("Catlst", c.score_catalyst)}
+        {bar("Timing", c.score_timing)}
       </div>
     </div>
   );
