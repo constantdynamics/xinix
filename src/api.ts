@@ -738,3 +738,37 @@ export async function addMarksBulk(kind: MarkKind, tickers: string[]): Promise<v
   });
   if (!res.ok) throw new Error(`bulk add mark ${res.status}: ${await res.text()}`);
 }
+
+// ── Apparaat-koppeling ───────────────────────────────────────────────
+// Favorieten/markeringen staan server-side, maar een apparaat ziet ze
+// pas na invoer van het admin-token. Een koppelcode laat de telefoon
+// het token ophalen zonder het over te typen.
+export interface PairingCode { code: string; expires_at: string; ttl_minutes: number }
+
+// Laptop-kant: genereer een kortlevende koppelcode (vereist admin-token).
+export async function createPairingCode(): Promise<PairingCode> {
+  const res = await fetch(apiUrl("/api/pair"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ action: "create" }),
+  });
+  if (!res.ok) throw new Error(`koppelcode aanmaken mislukt (${res.status})`);
+  return (await res.json()) as PairingCode;
+}
+
+// Telefoon-kant: wissel een koppelcode in voor het admin-token.
+export async function redeemPairingCode(code: string): Promise<string> {
+  const res = await fetch(apiUrl("/api/pair"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "redeem", code }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      res.status === 404 || res.status === 400
+        ? "Code ongeldig of verlopen"
+        : `koppelen mislukt (${res.status})`,
+    );
+  }
+  return ((await res.json()) as { token: string }).token;
+}

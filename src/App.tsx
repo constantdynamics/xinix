@@ -18,6 +18,7 @@ import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, fetchUiSettings, getToken, setToken, type UiSettings } from "./api";
 import type { Dashboard } from "./types";
 import { Button, NavTab, Input, Skeleton, Dot } from "./components/ui";
+import { DeviceSync } from "./components/DeviceSync";
 import { DEFAULT_TABS as TABS, type Tab, type TabDef } from "./tabsConfig";
 
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
@@ -241,28 +242,33 @@ export function App() {
 
         {showTokenBar && (
           <div className="border-t border-ink-5 bg-ink-2/60">
-            <div className="mx-auto max-w-7xl px-4 py-2 flex items-center gap-2 animate-fade-up">
-              <Input
-                type="password"
-                placeholder="Admin token"
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                className="w-56"
-              />
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => {
-                  setToken(tokenInput || null);
-                  refresh();
-                  setShowTokenBar(false);
-                }}
-              >
-                Opslaan
-              </Button>
-              <span className="text-[11px] text-neutral-500">
-                Wordt lokaal in de browser bewaard.
-              </span>
+            <div className="mx-auto max-w-7xl px-4 py-2 flex flex-col gap-2 animate-fade-up">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Input
+                  type="password"
+                  placeholder="Admin token"
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  className="w-56"
+                />
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => {
+                    setToken(tokenInput || null);
+                    refresh();
+                    setShowTokenBar(false);
+                  }}
+                >
+                  Opslaan
+                </Button>
+                <span className="text-[11px] text-neutral-500">
+                  Wordt lokaal in de browser bewaard.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap border-t border-ink-5/60 pt-2">
+                <DeviceSync />
+              </div>
             </div>
           </div>
         )}
