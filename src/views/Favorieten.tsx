@@ -70,6 +70,29 @@ function fmtYield(v: number | null): string {
   return `${(v * 100).toFixed(1)}%`;
 }
 
+// Verbergbare tabelkolommen — Ticker blijft altijd zichtbaar (rij-identiteit).
+type ColKey = "company" | "sector" | "bron" | "score" | "medals" | "dividend" | "last_close" | "above_limit_pct" | "limiet" | "rating";
+const COLUMNS: { key: ColKey; label: string }[] = [
+  { key: "company", label: "Bedrijf" },
+  { key: "sector", label: "Sector" },
+  { key: "bron", label: "Bron" },
+  { key: "score", label: "Score" },
+  { key: "medals", label: "Medailles" },
+  { key: "dividend", label: "Dividend" },
+  { key: "last_close", label: "Koers" },
+  { key: "above_limit_pct", label: "vs limiet" },
+  { key: "limiet", label: "Limiet" },
+  { key: "rating", label: "Sterren" },
+];
+const HIDDEN_COLS_KEY = "xinix_fav_hidden_cols";
+function loadHiddenCols(): Set<ColKey> {
+  try {
+    const raw = localStorage.getItem(HIDDEN_COLS_KEY);
+    if (raw) return new Set((JSON.parse(raw) as ColKey[]).filter((k) => COLUMNS.some((c) => c.key === k)));
+  } catch { /* genegeerd */ }
+  return new Set();
+}
+
 export function FavorietenView() {
   const marks = useMarks();
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -104,6 +127,7 @@ export function FavorietenView() {
   const [showAdd, setShowAdd] = useState(false);
 
   const isAdmin = !!getToken();
+  const [hiddenCols, setHiddenCols] = useState<Set<ColKey>>(loadHiddenCols);
 
   useEffect(() => {
     setLoading(true);
@@ -262,6 +286,15 @@ export function FavorietenView() {
   function toggleSector(s: Sector) {
     setSectorFilter((prev) => { const n = new Set(prev); if (n.has(s)) n.delete(s); else n.add(s); return n; });
   }
+  function toggleCol(key: ColKey) {
+    setHiddenCols((prev) => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key); else n.add(key);
+      try { localStorage.setItem(HIDDEN_COLS_KEY, JSON.stringify([...n])); } catch { /* genegeerd */ }
+      return n;
+    });
+  }
+  const colVisible = (key: ColKey) => !hiddenCols.has(key);
 
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "";
 
@@ -417,6 +450,28 @@ export function FavorietenView() {
           {viewMode === "tiles" ? (
             <FavorietenTiles rows={filtered} />
           ) : (
+          <>
+          {/* Kolom-zichtbaarheid — alleen in lijstweergave, keuze lokaal bewaard */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold mr-1">Kolommen:</span>
+            {COLUMNS.map((c) => {
+              const shown = colVisible(c.key);
+              return (
+                <button
+                  key={c.key}
+                  onClick={() => toggleCol(c.key)}
+                  title={shown ? `Verberg kolom "${c.label}"` : `Toon kolom "${c.label}"`}
+                  className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                    shown
+                      ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10"
+                      : "border-ink-5 text-neutral-500 line-through hover:text-neutral-300"
+                  }`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
           <Card className="p-0 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -427,30 +482,44 @@ export function FavorietenView() {
                     <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("ticker")}>
                       Ticker <span className="text-fog-lime text-[9px]">{sortArrow("ticker")}</span>
                     </th>
-                    <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("company")}>
-                      Bedrijf <span className="text-fog-lime text-[9px]">{sortArrow("company")}</span>
-                    </th>
-                    <th className="px-3 py-2 text-left">Sector</th>
-                    <th className="px-3 py-2 text-left">Bron</th>
-                    <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("score")}>
-                      Score <span className="text-fog-lime text-[9px]">{sortArrow("score")}</span>
-                    </th>
-                    <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("medals")}>
-                      Medailles <span className="text-fog-lime text-[9px]">{sortArrow("medals")}</span>
-                    </th>
-                    <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("dividend")}>
-                      Dividend <span className="text-fog-lime text-[9px]">{sortArrow("dividend")}</span>
-                    </th>
-                    <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("last_close")}>
-                      Koers <span className="text-fog-lime text-[9px]">{sortArrow("last_close")}</span>
-                    </th>
-                    <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("above_limit_pct")}>
-                      vs limiet <span className="text-fog-lime text-[9px]">{sortArrow("above_limit_pct")}</span>
-                    </th>
-                    <th className="px-3 py-2 text-right" title="Aankooplimiet — klik om in te vullen">Limiet</th>
-                    <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("rating")}>
-                      Sterren <span className="text-fog-lime text-[9px]">{sortArrow("rating")}</span>
-                    </th>
+                    {colVisible("company") && (
+                      <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("company")}>
+                        Bedrijf <span className="text-fog-lime text-[9px]">{sortArrow("company")}</span>
+                      </th>
+                    )}
+                    {colVisible("sector") && <th className="px-3 py-2 text-left">Sector</th>}
+                    {colVisible("bron") && <th className="px-3 py-2 text-left">Bron</th>}
+                    {colVisible("score") && (
+                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("score")}>
+                        Score <span className="text-fog-lime text-[9px]">{sortArrow("score")}</span>
+                      </th>
+                    )}
+                    {colVisible("medals") && (
+                      <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("medals")}>
+                        Medailles <span className="text-fog-lime text-[9px]">{sortArrow("medals")}</span>
+                      </th>
+                    )}
+                    {colVisible("dividend") && (
+                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("dividend")}>
+                        Dividend <span className="text-fog-lime text-[9px]">{sortArrow("dividend")}</span>
+                      </th>
+                    )}
+                    {colVisible("last_close") && (
+                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("last_close")}>
+                        Koers <span className="text-fog-lime text-[9px]">{sortArrow("last_close")}</span>
+                      </th>
+                    )}
+                    {colVisible("above_limit_pct") && (
+                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("above_limit_pct")}>
+                        vs limiet <span className="text-fog-lime text-[9px]">{sortArrow("above_limit_pct")}</span>
+                      </th>
+                    )}
+                    {colVisible("limiet") && <th className="px-3 py-2 text-right" title="Aankooplimiet — klik om in te vullen">Limiet</th>}
+                    {colVisible("rating") && (
+                      <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("rating")}>
+                        Sterren <span className="text-fog-lime text-[9px]">{sortArrow("rating")}</span>
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-5/40">
@@ -470,86 +539,104 @@ export function FavorietenView() {
                             {r.ticker}
                           </a>
                         </td>
-                        <td className="px-3 py-2 text-neutral-200">{r.company}</td>
-                        <td className="px-3 py-2">
-                          {r.sector ? <Badge tone={SECTOR_TONE[r.sector]}>{SECTOR_LABEL[r.sector]}</Badge> : <span className="text-neutral-600">—</span>}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-wrap gap-1">
-                            {r.bronnen.map((b) => (
-                              <span key={b} className={`px-1.5 py-0.5 rounded text-[10px] border font-semibold whitespace-nowrap ${BRON_COLOR[b]}`}>
-                                {BRON_LABEL[b]}
+                        {colVisible("company") && <td className="px-3 py-2 text-neutral-200">{r.company}</td>}
+                        {colVisible("sector") && (
+                          <td className="px-3 py-2">
+                            {r.sector ? <Badge tone={SECTOR_TONE[r.sector]}>{SECTOR_LABEL[r.sector]}</Badge> : <span className="text-neutral-600">—</span>}
+                          </td>
+                        )}
+                        {colVisible("bron") && (
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap gap-1">
+                              {r.bronnen.map((b) => (
+                                <span key={b} className={`px-1.5 py-0.5 rounded text-[10px] border font-semibold whitespace-nowrap ${BRON_COLOR[b]}`}>
+                                  {BRON_LABEL[b]}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        )}
+                        {colVisible("score") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                            {r.score != null ? r.score.toFixed(0) : <span className="text-neutral-600">—</span>}
+                          </td>
+                        )}
+                        {colVisible("medals") && (
+                          <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
+                            {r.medal_gold + r.medal_silver + r.medal_bronze > 0 ? (
+                              <span>
+                                {r.medal_gold > 0 && `🏆${r.medal_gold} `}
+                                {r.medal_silver > 0 && `🥈${r.medal_silver} `}
+                                {r.medal_bronze > 0 && `🥉${r.medal_bronze}`}
                               </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                          {r.score != null ? r.score.toFixed(0) : <span className="text-neutral-600">—</span>}
-                        </td>
-                        <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
-                          {r.medal_gold + r.medal_silver + r.medal_bronze > 0 ? (
-                            <span>
-                              {r.medal_gold > 0 && `🏆${r.medal_gold} `}
-                              {r.medal_silver > 0 && `🥈${r.medal_silver} `}
-                              {r.medal_bronze > 0 && `🥉${r.medal_bronze}`}
-                            </span>
-                          ) : (
-                            <span className="text-neutral-600">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums">
-                          {r.dividend_yield != null && r.dividend_yield > 0 ? (
-                            <span className="text-emerald-300">{fmtYield(r.dividend_yield)}</span>
-                          ) : (
-                            <span className="text-neutral-600">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                          {r.last_close != null ? fmtPrice(r.last_close) : <span className="text-neutral-600">—</span>}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums">
-                          {r.above_limit_pct != null ? (
-                            <span className={r.above_limit_pct <= 0 ? "text-fog-lime font-semibold" : r.above_limit_pct <= 10 ? "text-fog-warn" : "text-neutral-300"}>
-                              {r.above_limit_pct <= 0 ? "✓ onder" : `+${r.above_limit_pct.toFixed(1)}%`}
-                            </span>
-                          ) : (
-                            <span className="text-neutral-600">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums">
-                          {editingLimit === r.ticker ? (
-                            <input
-                              autoFocus
-                              type="text"
-                              inputMode="decimal"
-                              value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
-                              onBlur={() => commitEditLimit(r.ticker)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") commitEditLimit(r.ticker);
-                                else if (e.key === "Escape") cancelEditLimit();
-                              }}
-                              className="w-20 px-1.5 py-0.5 rounded bg-ink-3 border border-fog-lime text-right font-mono text-xs text-neutral-100 focus:outline-none"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => startEditLimit(r)}
-                              disabled={!isAdmin}
-                              className={
-                                "px-1.5 py-0.5 rounded text-xs font-mono tabular-nums transition-colors " +
-                                (isAdmin ? "hover:bg-ink-3 cursor-pointer" : "cursor-default") +
-                                " " + (r.buy_limit != null ? "text-neutral-200" : "text-neutral-600")
-                              }
-                              title={isAdmin ? "Klik om de aankooplimiet aan te passen" : "Login vereist"}
-                            >
-                              {savingLimit === r.ticker ? "…" : (r.buy_limit != null ? fmtPrice(r.buy_limit) : "+")}
-                            </button>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <StarRating ticker={r.ticker} />
-                        </td>
+                            ) : (
+                              <span className="text-neutral-600">—</span>
+                            )}
+                          </td>
+                        )}
+                        {colVisible("dividend") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums">
+                            {r.dividend_yield != null && r.dividend_yield > 0 ? (
+                              <span className="text-emerald-300">{fmtYield(r.dividend_yield)}</span>
+                            ) : (
+                              <span className="text-neutral-600">—</span>
+                            )}
+                          </td>
+                        )}
+                        {colVisible("last_close") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                            {r.last_close != null ? fmtPrice(r.last_close) : <span className="text-neutral-600">—</span>}
+                          </td>
+                        )}
+                        {colVisible("above_limit_pct") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums">
+                            {r.above_limit_pct != null ? (
+                              <span className={r.above_limit_pct <= 0 ? "text-fog-lime font-semibold" : r.above_limit_pct <= 10 ? "text-fog-warn" : "text-neutral-300"}>
+                                {r.above_limit_pct <= 0 ? "✓ onder" : `+${r.above_limit_pct.toFixed(1)}%`}
+                              </span>
+                            ) : (
+                              <span className="text-neutral-600">—</span>
+                            )}
+                          </td>
+                        )}
+                        {colVisible("limiet") && (
+                          <td className="px-3 py-2 text-right font-mono tabular-nums">
+                            {editingLimit === r.ticker ? (
+                              <input
+                                autoFocus
+                                type="text"
+                                inputMode="decimal"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={() => commitEditLimit(r.ticker)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") commitEditLimit(r.ticker);
+                                  else if (e.key === "Escape") cancelEditLimit();
+                                }}
+                                className="w-20 px-1.5 py-0.5 rounded bg-ink-3 border border-fog-lime text-right font-mono text-xs text-neutral-100 focus:outline-none"
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => startEditLimit(r)}
+                                disabled={!isAdmin}
+                                className={
+                                  "px-1.5 py-0.5 rounded text-xs font-mono tabular-nums transition-colors " +
+                                  (isAdmin ? "hover:bg-ink-3 cursor-pointer" : "cursor-default") +
+                                  " " + (r.buy_limit != null ? "text-neutral-200" : "text-neutral-600")
+                                }
+                                title={isAdmin ? "Klik om de aankooplimiet aan te passen" : "Login vereist"}
+                              >
+                                {savingLimit === r.ticker ? "…" : (r.buy_limit != null ? fmtPrice(r.buy_limit) : "+")}
+                              </button>
+                            )}
+                          </td>
+                        )}
+                        {colVisible("rating") && (
+                          <td className="px-3 py-2 text-center">
+                            <StarRating ticker={r.ticker} />
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -557,6 +644,7 @@ export function FavorietenView() {
               </table>
             </div>
           </Card>
+          </>
           )}
         </>
       )}
