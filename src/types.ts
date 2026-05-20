@@ -140,6 +140,13 @@ export interface Card {
   briefing_status?: "pending" | "filled" | "no_data" | "not_applicable" | null;
   briefing_polled_at?: string | null;
   notes?: string | null;
+  // Inhoudelijke score-engine (signal_scores). final_score + sub-scores zijn
+  // 0-1; null = nog niet gescoord. signal_action = STRONG_BUY/BUY/WATCH/AVOID.
+  final_score?: number | null;
+  signal_action?: string | null;
+  score_structural?: number | null;
+  score_catalyst?: number | null;
+  score_timing?: number | null;
 }
 
 export interface RunLog {
