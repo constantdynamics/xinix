@@ -45,17 +45,29 @@ interface FavRow {
   last_close: number | null;
   buy_limit: number | null;
   above_limit_pct: number | null;
+  dividend_yield: number | null;
+  medal_gold: number;
+  medal_silver: number;
+  medal_bronze: number;
   bronnen: Bron[];
 }
 
-type SortKey = "ticker" | "company" | "score" | "above_limit_pct" | "last_close" | "rating";
+type SortKey = "ticker" | "company" | "score" | "above_limit_pct" | "last_close" | "rating" | "medals" | "dividend";
 type SortDir = "asc" | "desc";
+type ViewMode = "table" | "tiles";
+
+const VIEW_KEY = "xinix_favorieten_view";
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
   if (v < 1) return v.toFixed(4);
   if (v < 10) return v.toFixed(3);
   return v.toFixed(2);
+}
+
+function fmtYield(v: number | null): string {
+  if (v == null || v <= 0) return "—";
+  return `${(v * 100).toFixed(1)}%`;
 }
 
 export function FavorietenView() {
@@ -71,6 +83,15 @@ export function FavorietenView() {
   const [bronFilter, setBronFilter] = useState<Set<Bron>>(new Set());
   const [sectorFilter, setSectorFilter] = useState<Set<Sector>>(new Set());
   const [showSeen, setShowSeen] = useState(false);
+  // Minimum sterren-filter: 0 = alles, 1..5 = alleen rijen met ≥ N sterren.
+  const [minRating, setMinRating] = useState(0);
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    () => (localStorage.getItem(VIEW_KEY) === "tiles" ? "tiles" : "table"),
+  );
+  function pickView(v: ViewMode) {
+    setViewMode(v);
+    localStorage.setItem(VIEW_KEY, v);
+  }
 
   // Inline buy_limit editing: track welke ticker bewerkt wordt + de tekstwaarde.
   const [editingLimit, setEditingLimit] = useState<string | null>(null);
@@ -152,6 +173,10 @@ export function FavorietenView() {
         last_close,
         buy_limit,
         above_limit_pct,
+        dividend_yield: card?.dividend_yield ?? null,
+        medal_gold: card?.medal_gold ?? 0,
+        medal_silver: card?.medal_silver ?? 0,
+        medal_bronze: card?.medal_bronze ?? 0,
         bronnen,
       });
     }
@@ -167,6 +192,9 @@ export function FavorietenView() {
     if (sectorFilter.size > 0) {
       list = list.filter((r) => r.sector != null && sectorFilter.has(r.sector));
     }
+    if (minRating > 0) {
+      list = list.filter((r) => (marks.getRating(r.ticker) ?? 0) >= minRating);
+    }
     list = [...list].sort((a, b) => {
       let av: number | string | null = null;
       let bv: number | string | null = null;
@@ -177,6 +205,8 @@ export function FavorietenView() {
         case "above_limit_pct": av = a.above_limit_pct; bv = b.above_limit_pct; break;
         case "last_close": av = a.last_close; bv = b.last_close; break;
         case "rating": av = marks.getRating(a.ticker); bv = marks.getRating(b.ticker); break;
+        case "medals": av = a.medal_gold * 100 + a.medal_silver * 10 + a.medal_bronze; bv = b.medal_gold * 100 + b.medal_silver * 10 + b.medal_bronze; break;
+        case "dividend": av = a.dividend_yield; bv = b.dividend_yield; break;
       }
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
@@ -187,7 +217,7 @@ export function FavorietenView() {
       return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
     });
     return list;
-  }, [rows, sortKey, sortDir, bronFilter, sectorFilter, showSeen, marks]);
+  }, [rows, sortKey, sortDir, bronFilter, sectorFilter, showSeen, minRating, marks]);
 
   function startEditLimit(row: FavRow) {
     if (!isAdmin) return;
@@ -328,8 +358,65 @@ export function FavorietenView() {
                 </button>
               );
             })}
+            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold ml-3 mr-1">Min. sterren:</span>
+            {[0, 1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                onClick={() => setMinRating(n)}
+                className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                  minRating === n ? "border-yellow-400/50 text-yellow-300 bg-yellow-400/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                {n === 0 ? "alle" : `${n}★+`}
+              </button>
+            ))}
           </div>
 
+          {/* Sorteer + weergave-controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold mr-1">Sorteer:</span>
+            {([
+              ["above_limit_pct", "Afstand limiet"],
+              ["rating", "Sterren"],
+              ["score", "Score"],
+              ["medals", "Medailles"],
+              ["dividend", "Dividend"],
+              ["last_close", "Koers"],
+              ["ticker", "Ticker"],
+            ] as Array<[SortKey, string]>).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => toggleSort(key)}
+                className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                  sortKey === key ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                {label} {sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : ""}
+              </button>
+            ))}
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                onClick={() => pickView("table")}
+                className={`px-2 py-1 rounded text-[11px] font-semibold border transition-colors ${
+                  viewMode === "table" ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                ☰ Lijst
+              </button>
+              <button
+                onClick={() => pickView("tiles")}
+                className={`px-2 py-1 rounded text-[11px] font-semibold border transition-colors ${
+                  viewMode === "tiles" ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                ▦ Tegels
+              </button>
+            </div>
+          </div>
+
+          {viewMode === "tiles" ? (
+            <FavorietenTiles rows={filtered} />
+          ) : (
           <Card className="p-0 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -347,6 +434,12 @@ export function FavorietenView() {
                     <th className="px-3 py-2 text-left">Bron</th>
                     <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("score")}>
                       Score <span className="text-fog-lime text-[9px]">{sortArrow("score")}</span>
+                    </th>
+                    <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("medals")}>
+                      Medailles <span className="text-fog-lime text-[9px]">{sortArrow("medals")}</span>
+                    </th>
+                    <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("dividend")}>
+                      Dividend <span className="text-fog-lime text-[9px]">{sortArrow("dividend")}</span>
                     </th>
                     <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("last_close")}>
                       Koers <span className="text-fog-lime text-[9px]">{sortArrow("last_close")}</span>
@@ -392,6 +485,24 @@ export function FavorietenView() {
                         </td>
                         <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
                           {r.score != null ? r.score.toFixed(0) : <span className="text-neutral-600">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
+                          {r.medal_gold + r.medal_silver + r.medal_bronze > 0 ? (
+                            <span>
+                              {r.medal_gold > 0 && `🏆${r.medal_gold} `}
+                              {r.medal_silver > 0 && `🥈${r.medal_silver} `}
+                              {r.medal_bronze > 0 && `🥉${r.medal_bronze}`}
+                            </span>
+                          ) : (
+                            <span className="text-neutral-600">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {r.dividend_yield != null && r.dividend_yield > 0 ? (
+                            <span className="text-emerald-300">{fmtYield(r.dividend_yield)}</span>
+                          ) : (
+                            <span className="text-neutral-600">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
                           {r.last_close != null ? fmtPrice(r.last_close) : <span className="text-neutral-600">—</span>}
@@ -446,8 +557,79 @@ export function FavorietenView() {
               </table>
             </div>
           </Card>
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+// Tegelweergave — compacte grid-kaarten, één per favoriet. Toont sterren,
+// afstand tot limiet, medailles en bron-badges. Klik op de kaart opent
+// Google Finance; klik op een ster zet de rating (stopPropagation in StarRating).
+function FavorietenTiles({ rows }: { rows: FavRow[] }) {
+  const marks = useMarks();
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+      {rows.map((r) => {
+        const seen = marks.isSeen(r.ticker);
+        const atOrUnder = r.above_limit_pct != null && r.above_limit_pct <= 0;
+        const near = r.above_limit_pct != null && r.above_limit_pct > 0 && r.above_limit_pct <= 10;
+        const toneRing = atOrUnder ? "ring-fog-lime/40" : near ? "ring-fog-warn/30" : "ring-ink-5";
+        return (
+          <div
+            key={r.ticker}
+            className={`rounded-xl border border-ink-5 bg-ink-2/60 ring-1 ${toneRing} p-2.5 transition ${seen ? "opacity-50" : ""}`}
+          >
+            <div className="flex items-center justify-between gap-1 mb-1">
+              <a
+                href={googleFinanceUrl(r.ticker, r.exchange)}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono font-bold text-sm text-red-300 hover:underline truncate"
+              >
+                {r.ticker}
+              </a>
+              {r.sector && <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">{SECTOR_LABEL[r.sector]}</span>}
+            </div>
+            <div className="text-[10px] text-neutral-400 truncate mb-1" title={r.company}>{r.company}</div>
+            <div className="font-mono tabular-nums text-base font-bold leading-none">
+              {r.above_limit_pct != null ? (
+                <span className={atOrUnder ? "text-fog-lime" : near ? "text-fog-warn" : "text-neutral-300"}>
+                  {atOrUnder ? "✓ onder limiet" : `+${r.above_limit_pct.toFixed(1)}%`}
+                </span>
+              ) : (
+                <span className="text-neutral-600 text-xs">geen limiet</span>
+              )}
+            </div>
+            <div className="text-[10px] font-mono tabular-nums text-neutral-500 mt-0.5">
+              {r.last_close != null ? `$${fmtPrice(r.last_close)}` : "—"}
+              {r.buy_limit != null && <span className="text-neutral-600"> / lim ${fmtPrice(r.buy_limit)}</span>}
+            </div>
+            <div className="mt-1"><StarRating ticker={r.ticker} /></div>
+            <div className="flex items-center gap-1.5 mt-1 text-[10px]">
+              {r.score != null && <span className="text-neutral-400">S{r.score.toFixed(0)}</span>}
+              {r.medal_gold + r.medal_silver + r.medal_bronze > 0 && (
+                <span>
+                  {r.medal_gold > 0 && `🏆${r.medal_gold}`}
+                  {r.medal_silver > 0 && `🥈${r.medal_silver}`}
+                  {r.medal_bronze > 0 && `🥉${r.medal_bronze}`}
+                </span>
+              )}
+              {r.dividend_yield != null && r.dividend_yield > 0 && (
+                <span className="text-emerald-300">💰{fmtYield(r.dividend_yield)}</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {r.bronnen.map((b) => (
+                <span key={b} className={`px-1 py-0.5 rounded text-[9px] border font-semibold ${BRON_COLOR[b]}`}>
+                  {BRON_LABEL[b]}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

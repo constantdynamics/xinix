@@ -242,3 +242,11 @@ Deze ideeën zijn nog niet geïmplementeerd maar kunnen snel waarde toevoegen:
 - Commit altijd naar `claude/poll-fundamentals-background-5TjhG`
 - Push met `git push -u origin claude/poll-fundamentals-background-5TjhG`
 - Deploy edge functions met de Supabase MCP tool `deploy_edge_function`
+
+## 13. Workflow-instructies voor Claude
+
+- **Pull requests altijd direct mergen.** Zodra een PR is aangemaakt en er
+  geen openstaande CI-fouten of review-opmerkingen zijn die aandacht vragen,
+  squash-merge de PR meteen zelf — vraag niet eerst om toestemming. De
+  gebruiker heeft hier doorlopende toestemming voor gegeven (2026-05-20).
+
