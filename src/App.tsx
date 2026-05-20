@@ -256,8 +256,10 @@ export function App() {
                   variant="primary"
                   onClick={() => {
                     setToken(tokenInput || null);
-                    refresh();
-                    setShowTokenBar(false);
+                    // Volledige reload — anders laadt useMarks de favorieten
+                    // niet (ensureLoaded draait alleen bij mount en stopt
+                    // vroegtijdig zolang er geen token is).
+                    window.location.reload();
                   }}
                 >
                   Opslaan

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { triggerJob, getToken, apiUrl } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
@@ -111,11 +111,19 @@ export function ScoresView({ exchangeByTicker }: { exchangeByTicker?: Map<string
     "all" | "biotech" | "mining"
   >("all");
 
+  // Volgnummer tegen race-conditions: bij snel wisselen van mode (of een
+  // recompute die over een mode-wissel valt) mag een traag, verouderd
+  // antwoord het verse antwoord niet overschrijven.
+  const loadSeq = useRef(0);
   async function load() {
+    const seq = ++loadSeq.current;
     try {
-      setData(await fetchScores(mode));
+      const d = await fetchScores(mode);
+      if (seq !== loadSeq.current) return;
+      setData(d);
       setError(null);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       setError(e instanceof Error ? e.message : String(e));
     }
   }

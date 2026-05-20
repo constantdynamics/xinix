@@ -406,17 +406,26 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     const clickUrl = googleFinanceUrl(sig.ticker, exchangeByTicker.get(sig.ticker) ?? null);
     const view = formatAlert(sig, score, company, medals, clickUrl, isLimit, nearLimit);
 
+    let anyAttempted = false;
+    let anySent = false;
     if (s.email) {
+      anyAttempted = true;
       const r = await sendEmail(s.email, `[XINIX] ${view.title}`, `${view.body}\nDetected: ${sig.detected_at}`);
       await sb.from("signal_alerts_sent").insert({ signal_id: sig.id, channel: "email", success: r.ok, error: r.error ?? null });
-      if (r.ok) sentEmail++; else errors.push(`email ${sig.id}: ${r.error}`);
+      if (r.ok) { sentEmail++; anySent = true; } else errors.push(`email ${sig.id}: ${r.error}`);
     }
     if (s.ntfy_topic) {
+      anyAttempted = true;
       const r = await sendNtfy(s.ntfy_server, s.ntfy_topic, view.title, view.body, view.priority, view.tags, clickUrl);
       await sb.from("signal_alerts_sent").insert({ signal_id: sig.id, channel: "ntfy", success: r.ok, error: r.error ?? null });
-      if (r.ok) sentNtfy++; else errors.push(`ntfy ${sig.id}: ${r.error}`);
+      if (r.ok) { sentNtfy++; anySent = true; } else errors.push(`ntfy ${sig.id}: ${r.error}`);
     }
-    await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
+    // Markeer alleen als 'verstuurd' wanneer minstens één kanaal slaagde, of
+    // wanneer er geen kanaal is geconfigureerd. Bij totale mislukking blijft het
+    // event open zodat de volgende run (binnen het 24u-venster) opnieuw probeert.
+    if (anySent || !anyAttempted) {
+      await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
+    }
   }
   return { ok: errors.length === 0, message: `email: ${sentEmail}, ntfy: ${sentNtfy}, suppressed: ${suppressed}, near_limit: ${nearLimitAlerts}, phoenix_generated: ${phoenixGenerated}` + (errors.length ? `; errors: ${errors.slice(0, 3).join("; ")}` : ""), metrics: { email: sentEmail, ntfy: sentNtfy, suppressed, near_limit: nearLimitAlerts, errors: errors.length, total_signals: signals.length, phoenix_generated: phoenixGenerated } };
 }));

@@ -70,8 +70,11 @@ function signalLabel(t: string): string {
 }
 
 function fmtUsd(v: number, decimals = 0): string {
-  const sign = v < 0 ? "-" : "";
-  const abs = Math.abs(v);
+  // Rond eerst af en bepaal pas dán het teken — anders toont bv. -0,3 als "-$0".
+  const factor = 10 ** decimals;
+  const rounded = Math.round(v * factor) / factor;
+  const sign = rounded < 0 ? "-" : "";
+  const abs = Math.abs(rounded);
   return `${sign}$${abs.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 }
 function fmtPct(v: number, decimals = 1): string {
@@ -1281,15 +1284,19 @@ function CyclePulse({ evo }: { evo: SimEvolution }) {
           className={`h-full rounded-full transition-all ${barFull ? "bg-fog-lime" : "bg-fog-watch/70"}`}
           style={{ width: `${pct}%` }}
         />
-        {/* Tactische markeringen bij 60d en 120d */}
-        {tacticalMarks.map((d) => (
-          <div
-            key={d}
-            className="absolute top-0 bottom-0 w-px bg-ink-5/80"
-            style={{ left: `${Math.round((d / totalDays) * 100)}%` }}
-            title={`${d} dagen`}
-          />
-        ))}
+        {/* Tactische markeringen bij 60d en 120d — alleen bij een geldige
+            cycluslengte, anders deelt d/totalDays door 0 → left: Infinity%. */}
+        {totalDays > 0 && tacticalMarks.map((d) => {
+          const left = Math.min(100, Math.max(0, Math.round((d / totalDays) * 100)));
+          return (
+            <div
+              key={d}
+              className="absolute top-0 bottom-0 w-px bg-ink-5/80"
+              style={{ left: `${left}%` }}
+              title={`${d} dagen`}
+            />
+          );
+        })}
       </div>
 
       <div className="flex justify-between text-[10px] text-neutral-600 mt-1">

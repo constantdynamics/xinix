@@ -14,23 +14,28 @@ function formatCode(code: string): string {
 function GenerateCode() {
   const [code, setCode] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [genId, setGenId] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Aftelinterval gekoppeld aan genId — zo herstart de timer betrouwbaar bij
+  // elke nieuwe code, ook in het onwaarschijnlijke geval dat de server
+  // dezelfde code teruggeeft.
   useEffect(() => {
-    if (!code) return;
+    if (genId === 0) return;
     const id = setInterval(() => setSecondsLeft((s) => (s <= 1 ? 0 : s - 1)), 1000);
     return () => clearInterval(id);
-  }, [code]);
+  }, [genId]);
 
   async function generate() {
     setBusy(true);
     setErr(null);
     try {
       const c = await createPairingCode();
-      setCode(c.code);
       const ttl = Math.round((new Date(c.expires_at).getTime() - Date.now()) / 1000);
+      setCode(c.code);
       setSecondsLeft(ttl > 0 ? ttl : c.ttl_minutes * 60);
+      setGenId((n) => n + 1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Mislukt");
     } finally {

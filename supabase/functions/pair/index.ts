@@ -57,10 +57,18 @@ const CODE_LEN = 6;
 const TTL_MINUTES = 5;
 
 function generateCode(): string {
-  const bytes = new Uint8Array(CODE_LEN);
-  crypto.getRandomValues(bytes);
+  // Rejection sampling: alleen bytes onder het grootste veelvoud van de
+  // alfabetlengte gebruiken, zodat `% lengte` geen modulo-bias naar de
+  // eerste alfabettekens introduceert.
+  const limit = 256 - (256 % CODE_ALPHABET.length);
   let out = "";
-  for (let i = 0; i < CODE_LEN; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  while (out.length < CODE_LEN) {
+    const buf = new Uint8Array(CODE_LEN);
+    crypto.getRandomValues(buf);
+    for (let i = 0; i < buf.length && out.length < CODE_LEN; i++) {
+      if (buf[i] < limit) out += CODE_ALPHABET[buf[i] % CODE_ALPHABET.length];
+    }
+  }
   return out;
 }
 function normalizeCode(v: unknown): string {

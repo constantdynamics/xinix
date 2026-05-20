@@ -127,7 +127,7 @@ function mutate(cfg: Cfg, rand: () => number, donors: Cfg[], maxMuts = 3): Cfg {
     (c) => ({ ...c, sector: inherit(c.sector, donor?.sector,
       v => v === "all" ? (rand() > 0.5 ? "biotech" : "mining") : "all") }),
     (c) => ({ ...c, stop: inherit(c.stop, donor?.stop,
-      v => v == null ? -0.12 : (v < -0.25 ? null : +(v - 0.03).toFixed(2))) }),
+      v => v == null ? 0.12 : (v >= 0.25 ? null : +(v + 0.03).toFixed(2))) }),
     (c) => ({ ...c, tp: inherit(c.tp, donor?.tp, v => v == null ? 0.30 : null) }),
     (c) => ({ ...c, maxPos: inherit(c.maxPos, donor?.maxPos,
       v => Math.max(3, Math.min(15, v + (rand() > 0.5 ? 2 : -2)))) }),
@@ -424,7 +424,7 @@ Deno.serve(async (req) => {
       await sb.from("xinix_strategy_state").insert(
         (inserted as { id: number }[]).map(s => ({
           strategy_id: s.id, cash: 10000, initial_capital: 10000,
-          started_at: retiredAt, last_run_at: null,
+          max_equity: 10000, started_at: retiredAt, last_run_at: null,
         }))
       );
     }
