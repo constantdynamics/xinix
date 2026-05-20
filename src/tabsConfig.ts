@@ -39,6 +39,4 @@ export const DEFAULT_TABS: TabDef[] = [
   { key: "hikkertjes", label: "⚡ Hikkertjes" },
   { key: "zwitserleven", label: "🌴 Zwitserleven" },
   { key: "favorieten", label: "♥ Favorieten" },
-  { key: "status", label: "Status" },
-  { key: "settings", label: "Instellingen" },
 ];

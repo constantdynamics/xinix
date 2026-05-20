@@ -46,7 +46,11 @@ const TAB_KEY = "xinix_active_tab_v1";
 function loadInitialTab(): Tab {
   try {
     const saved = sessionStorage.getItem(TAB_KEY);
-    if (saved && TABS.some((t) => t.key === saved)) return saved as Tab;
+    // settings/status staan niet meer in de tabbalk maar zijn nog wel geldige
+    // routes (bereikbaar via de bovenbalk) — dus expliciet toelaten.
+    if (saved && (TABS.some((t) => t.key === saved) || saved === "settings" || saved === "status")) {
+      return saved as Tab;
+    }
   } catch { /* SSR/restricted */ }
   return "dashboard";
 }
@@ -182,6 +186,23 @@ export function App() {
                 })}
               </span>
             )}
+            <Button
+              size="sm"
+              variant={tab === "settings" ? "secondary" : "ghost"}
+              onClick={() => setTab("settings")}
+              title="Instellingen"
+            >
+              ⚙<span className="hidden sm:inline">instellingen</span>
+            </Button>
+            <Button
+              size="sm"
+              variant={tab === "status" ? "secondary" : "ghost"}
+              onClick={() => setTab("status")}
+              title="Status van de achtergrondjobs"
+            >
+              <Dot tone={urgent.status ? "loss" : "neutral"} />
+              <span className="hidden sm:inline">status</span>
+            </Button>
             <Button
               size="sm"
               variant="ghost"
