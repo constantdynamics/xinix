@@ -1,4 +1,4 @@
-// poll-mining-news-background — scant Yahoo-nieuws voor mining-tickers op
+// poll-mining-news-background — scant nieuws voor mining-tickers op
 // PEA/PFS/DFS/permit/bonanza-patronen en schrijft signal_events +
 // signal_catalysts (status: "pending" zodat de scorer ze oppikt).
 //
@@ -6,6 +6,12 @@
 // Fixes t.o.v. origineel:
 //   - status "occurred" -> "pending"  (was de reden van 0 mining-catalysts)
 //   - round-robin batch ipv alle 820 tickers ineens (was de timeoutreden)
+//   - bron: Google News RSS i.p.v. Yahoo ticker-nieuwszoek. Yahoo's
+//     ticker-search gaf algemene beursjournalistiek; Google News RSS
+//     indexeert de bedrijfs-persberichten (resource estimate, PEA, permit
+//     granted, …) waar de catalyst-patronen op matchen. Mining-catalysts
+//     zijn zelden vooraf gedateerd (geen PDUFA-equivalent) — dit is dus
+//     supersnel-reactief: Google indexeert persberichten binnen minuten.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -54,15 +60,57 @@ const SLEEP_MS = 250;
 const UA = "Mozilla/5.0 (compatible; SignalMiningBot/1.0; +https://github.com)";
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-// ───────────── Yahoo news ─────────────
+// ───────────── nieuws-bron ─────────────
 interface NewsItem { uuid?: string; title?: string; link?: string; publisher?: string; providerPublishTime?: number; summary?: string; }
 
+// Minimale HTML-entity decode + tag-strip voor RSS-velden.
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+}
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+function extractTag(block: string, tag: string): string {
+  // <![CDATA[ ... ]]> of platte inhoud
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+  const m = block.match(re);
+  if (!m) return "";
+  return m[1].replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "").trim();
+}
+
+// Google News RSS — indexeert bedrijfs-persberichten (resource estimate,
+// PEA/PFS/DFS, permit granted, drill results) die de catalyst-patronen
+// hieronder herkennen. Gratis, geen key.
 async function searchNews(query: string): Promise<NewsItem[]> {
-  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=0&newsCount=20&lang=en-US`;
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(`"${query}"`)}&hl=en-US&gl=US&ceid=US:en`;
   const res = await fetch(url, { headers: { "User-Agent": UA } });
-  if (!res.ok) throw new Error(`Yahoo news HTTP ${res.status}`);
-  const json = (await res.json()) as { news?: NewsItem[] };
-  return json.news ?? [];
+  if (!res.ok) throw new Error(`Google News HTTP ${res.status}`);
+  const xml = await res.text();
+  const out: NewsItem[] = [];
+  const itemRe = /<item>([\s\S]*?)<\/item>/g;
+  let m: RegExpExecArray | null;
+  while ((m = itemRe.exec(xml)) !== null && out.length < 25) {
+    const block = m[1];
+    const rawTitle = decodeEntities(extractTag(block, "title"));
+    // Google News-titels hebben een " - Bron"-suffix; die laten we staan
+    // (schaadt de pattern-match niet) maar de summary stripen we wel.
+    const link = decodeEntities(extractTag(block, "link"));
+    const summary = decodeEntities(stripHtml(extractTag(block, "description")));
+    const pub = extractTag(block, "pubDate");
+    const ts = pub ? Math.floor(new Date(pub).getTime() / 1000) : undefined;
+    if (rawTitle) {
+      out.push({
+        title: rawTitle, link, summary,
+        providerPublishTime: Number.isFinite(ts) ? ts : undefined,
+        uuid: link || `${query}:${rawTitle.slice(0, 80)}`,
+      });
+    }
+  }
+  return out;
 }
 
 // ───────────── signal_events dedup insert ─────────────
@@ -104,7 +152,7 @@ const NEWS_PATTERNS: Pat[] = [
   { type: "pea", severity: "orange", re: /preliminary\s+economic\s+assessment|\bpea\b/i, label: "PEA published", catalyst: "PEA" },
   { type: "pfs", severity: "orange", re: /pre[\s-]?feasibility\s+study|\bpfs\b/i, label: "PFS published", catalyst: "PFS" },
   { type: "dfs", severity: "orange", re: /(?:definitive|bankable)\s+feasibility|\bdfs\b/i, label: "DFS published", catalyst: "DFS" },
-  { type: "permit", severity: "red", re: /(?:mining|construction|environmental)\s+permit\s+(?:granted|approved|received)|\beia\s+approved/i, label: "Permit granted", catalyst: "permit" },
+  { type: "permit", severity: "red", re: /(?:mining|construction|environmental|operating|exploration)\s+(?:permit|licen[cs]e|approval)|(?:permit|licen[cs]e)\s+(?:granted|approved|received|awarded|issued)|environmental\s+approval|\beia\s+approv/i, label: "Permit granted", catalyst: "permit" },
   { type: "jv_strategic", severity: "yellow", re: /(?:strategic\s+)?(?:joint\s+venture|earn[-\s]?in\b|cornerstone\s+investment)/i, label: "JV / strategic investment" },
   { type: "first_pour", severity: "orange", re: /first\s+gold\s+pour|commercial\s+production\s+(?:declared|achieved|announced)/i, label: "First pour / commercial production" },
   { type: "takeover_bid", severity: "red", re: /(?:takeover|acquisition|all[-\s]?cash)\s+(?:offer|bid|proposal)|(?:definitive|binding)\s+agreement\s+to\s+(?:acquire|be\s+acquired)|to\s+be\s+acquired\s+(?:for|by)/i, label: "Takeover bid" },
@@ -137,8 +185,10 @@ Deno.serve(runBackground("poll-mining-news", async () => {
     if (Date.now() - startMs > BUDGET_MS) break;
     const nowIso = new Date().toISOString();
     try {
-      let news = await searchNews(t.ticker);
-      if (news.length === 0 && t.company) news = await searchNews(t.company);
+      // Zoek op bedrijfsnaam — bij Google News geeft dat de persberichten;
+      // een kale ticker ("ABC") is te ambigu. Ticker alleen als fallback.
+      let news = t.company ? await searchNews(t.company) : [];
+      if (news.length === 0) news = await searchNews(t.ticker);
 
       for (const item of news) {
         if (!item.title) continue;
@@ -166,14 +216,14 @@ Deno.serve(runBackground("poll-mining-news", async () => {
 
           if (p.catalyst) {
             const { data: existing } = await sb.from("signal_catalysts").select("id")
-              .eq("ticker", t.ticker).eq("source", "yahoo-news").eq("source_id", uniq).maybeSingle();
+              .eq("ticker", t.ticker).eq("source", "google-news").eq("source_id", uniq).maybeSingle();
             if (!existing) {
               await sb.from("signal_catalysts").insert({
                 ticker: t.ticker, sector: "mining",
                 catalyst_type: p.catalyst,
                 description: item.title,
                 expected_date: new Date().toISOString().slice(0, 10),
-                source: "yahoo-news", source_id: uniq,
+                source: "google-news", source_id: uniq,
                 status: "pending",
               });
               catalystsAdded++;
