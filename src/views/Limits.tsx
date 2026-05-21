@@ -19,6 +19,7 @@ import {
   RangeBar,
   BlockBar,
 } from "../components/ui";
+import { SeenHeader, HeartHeader, StarHeader, SeenCell, HeartCell, StarCell, HeartInline, StarRating } from "../components/MarkCells";
 
 const VIEW_KEY = "xinix_limit_view";
 const FILTER_KEY = "xinix_limit_filter_v1";
@@ -434,6 +435,9 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
         <table className="w-full text-sm">
           <thead className="text-[10px] uppercase tracking-wider text-neutral-300 bg-ink-3/40">
             <tr>
+              <SeenHeader />
+              <HeartHeader />
+              <StarHeader />
               {showRank && <th className="text-right p-3 font-semibold w-10">#</th>}
               <th className="text-left p-3 font-semibold">Ticker</th>
               <th className="text-left p-3 font-semibold">Bedrijf</th>
@@ -456,6 +460,9 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
                   key={r.ticker}
                   className="border-t border-ink-5 hover:bg-ink-3/40 transition"
                 >
+                  <SeenCell ticker={r.ticker} />
+                  <HeartCell ticker={r.ticker} />
+                  <StarCell ticker={r.ticker} />
                   {showRank && (
                     <td className="p-3 text-right tabular text-neutral-400">
                       {i + 1}
@@ -538,21 +545,23 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
             ? ((r.current - r.limit) / r.limit) * 100
             : null;
         return (
-          <a
+          <div
             key={r.ticker}
-            href={googleFinanceUrl(r.ticker, r.exchange)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`block rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5 hover:scale-[1.02] transition cursor-pointer`}
-            title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🏆${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}`}
+            className={`rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5`}
           >
             <div className="flex items-center justify-between gap-1 mb-1">
-              <span className="font-bold text-sm text-ink-0 truncate">
+              <a
+                href={googleFinanceUrl(r.ticker, r.exchange)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold text-sm text-ink-0 truncate hover:underline"
+                title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🏆${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}`}
+              >
                 {showRank && (
                   <span className="text-ink-0/60 mr-1">#{i + 1}</span>
                 )}
                 {r.ticker}
-              </span>
+              </a>
               <span className="text-[9px] uppercase tracking-wider text-ink-0/70 font-bold">
                 {SECTOR_LABEL[r.sector]}
               </span>
@@ -582,7 +591,11 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
                 💰 {fmtYield(r.dividend_yield)} div
               </div>
             )}
-          </a>
+            <div className="flex items-center gap-2 mt-1.5">
+              <HeartInline ticker={r.ticker} />
+              <StarRating ticker={r.ticker} size="sm" />
+            </div>
+          </div>
         );
       })}
     </div>
