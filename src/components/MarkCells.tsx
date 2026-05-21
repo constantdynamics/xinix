@@ -7,6 +7,24 @@
 import { useState } from "react";
 import { useMarks } from "../hooks/useMarks";
 
+// Variant 4: gevuld hart, currentColor zodat Tailwind hover-classes werken.
+function HeartIcon() {
+  return (
+    <svg viewBox="0 0 32 32" className="w-[1em] h-[1em]" aria-hidden="true">
+      <path d="M16 27.5 C5 19.5,1 13,1 9 C1 4.5,4.5 2,8.5 2 C11.5 2,14 4,16 7.5 C18 4,20.5 2,23.5 2 C27.5 2,31 4.5,31 9 C31 13,27 19.5,16 27.5 Z" fill="currentColor"/>
+    </svg>
+  );
+}
+
+// Variant 3: gevulde 5-punts ster, currentColor.
+function StarIcon() {
+  return (
+    <svg viewBox="0 0 32 32" className="w-[1em] h-[1em]" aria-hidden="true">
+      <polygon points="16,2 19.5,12 30,12 21.5,18.5 24.5,29 16,23 7.5,29 10.5,18.5 2,12 12.5,12" fill="currentColor"/>
+    </svg>
+  );
+}
+
 export function SeenHeader() {
   return (
     <th
@@ -24,7 +42,7 @@ export function HeartHeader() {
       className="px-2 py-2 text-center w-8"
       title="Favoriet — klik op het hartje om dit aandeel in de gaten te houden"
     >
-      <span aria-hidden>♡</span>
+      <span aria-hidden className="text-[#2a1a4a]"><HeartIcon /></span>
     </th>
   );
 }
@@ -56,13 +74,13 @@ export function HeartCell({ ticker }: { ticker: string }) {
         onClick={() => void toggle("favorite", ticker)}
         className={
           "text-base leading-none cursor-pointer transition-colors " +
-          (on ? "text-red-500 hover:text-red-400" : "text-neutral-600 hover:text-neutral-400")
+          (on ? "text-[#8855ff] hover:text-[#aa77ff]" : "text-[#2a1a4a] hover:text-[#4a2a7a]")
         }
         title={on ? "Favoriet — klik om te verwijderen" : "Markeer als favoriet"}
         aria-label={`Markeer ${ticker} als favoriet`}
         aria-pressed={on}
       >
-        {on ? "♥" : "♡"}
+        <HeartIcon />
       </button>
     </td>
   );
@@ -93,13 +111,13 @@ export function HeartInline({ ticker }: { ticker: string }) {
       onClick={() => void toggle("favorite", ticker)}
       className={
         "text-base leading-none cursor-pointer transition-colors shrink-0 " +
-        (on ? "text-red-500 hover:text-red-400" : "text-neutral-600 hover:text-neutral-400")
+        (on ? "text-[#8855ff] hover:text-[#aa77ff]" : "text-[#2a1a4a] hover:text-[#4a2a7a]")
       }
       title={on ? "Favoriet — klik om te verwijderen" : "Markeer als favoriet"}
       aria-label={`Markeer ${ticker} als favoriet`}
       aria-pressed={on}
     >
-      {on ? "♥" : "♡"}
+      <HeartIcon />
     </button>
   );
 }
@@ -220,7 +238,7 @@ export function StarHeader() {
       className="px-2 py-2 text-center w-24"
       title="Sterren — geef 1–5 sterren (geeft ook automatisch een hartje)"
     >
-      <span aria-hidden>★</span>
+      <span aria-hidden className="text-[#2a0a2a]"><StarIcon /></span>
     </th>
   );
 }
@@ -253,12 +271,12 @@ export function StarRating({ ticker, size = "sm" }: { ticker: string; size?: "sm
             }}
             className={
               cls + " leading-none cursor-pointer transition-colors " +
-              (filled ? "text-yellow-400 hover:text-yellow-300" : "text-neutral-600 hover:text-neutral-400")
+              (filled ? "text-[#ff00cc] hover:text-[#ff44dd]" : "text-[#2a0a2a] hover:text-[#5a1a5a]")
             }
             title={n === current ? `Klik om ${n}-sterren te wissen` : `Geef ${n} sterren`}
             aria-label={`Geef ${ticker} ${n} sterren`}
           >
-            {filled ? "★" : "☆"}
+            <StarIcon />
           </button>
         );
       })}

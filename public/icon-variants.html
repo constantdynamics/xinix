@@ -45,6 +45,22 @@ h2 { font-size: .75rem; color: #6b7280; margin-bottom: 1rem; text-transform: upp
     <filter id="shadow">
       <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#ff1f8f" flood-opacity="0.45"/>
     </filter>
+    <!-- Logo-gradient (Aurora borealis omgekeerd) voor nieuwe secties -->
+    <linearGradient id="logo" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#6633ff"/>
+      <stop offset="40%"  stop-color="#0099ff"/>
+      <stop offset="70%"  stop-color="#00ddcc"/>
+      <stop offset="100%" stop-color="#00ff88"/>
+    </linearGradient>
+    <linearGradient id="logo-v" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#6633ff"/>
+      <stop offset="50%"  stop-color="#0099ff"/>
+      <stop offset="100%" stop-color="#00ddcc"/>
+    </linearGradient>
+    <filter id="glow-logo" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
 </svg>
 
@@ -514,6 +530,170 @@ h2 { font-size: .75rem; color: #6b7280; margin-bottom: 1rem; text-transform: upp
       <circle cx="16" cy="16" r="3.5" fill="url(#brand)" filter="url(#glow)"/>
     </svg>
     <div class="lbl">explosie glow</div></div>
+
+</div>
+</section>
+
+<!-- ══════════ BLIKSEM — NIEUWE VORMEN (11–20) ══════════ -->
+<section>
+<h2>⚡ Hikkertjes — nieuwe bliksem-vormen (varianten 11–20)</h2>
+<div class="row">
+
+  <div class="card"><div class="num">11</div>
+    <!-- Z-bolt: horizontale Z-vorm -->
+    <svg viewBox="0 0 32 32"><path d="M3,5 L28,5 L28,13 L9,19 L28,19 L28,27 L3,27 L3,19 L22,13 L3,13 Z" fill="url(#logo)"/></svg>
+    <div class="lbl">Z-bolt</div></div>
+
+  <div class="card"><div class="num">12</div>
+    <!-- Traptreden: rechthoekige treden omlaag -->
+    <svg viewBox="0 0 32 32"><path d="M18,3 L28,3 L28,12 L22,12 L22,21 L12,21 L12,29 L4,29 L4,21 L10,21 L10,12 L18,12 Z" fill="url(#logo-v)"/></svg>
+    <div class="lbl">traptreden</div></div>
+
+  <div class="card"><div class="num">13</div>
+    <!-- Drievoudige punt: bolt die uitwaaiert in 3 takken -->
+    <svg viewBox="0 0 32 32">
+      <path d="M20,2 L11,16 L17,16 L17,16 Z" fill="url(#logo-v)" stroke="url(#logo-v)" stroke-width="0.5"/>
+      <g stroke="url(#logo)" stroke-width="3" stroke-linecap="round" fill="none">
+        <path d="M20 2 L11 15 L17 15"/>
+        <line x1="11" y1="15" x2="7" y2="30"/>
+        <line x1="15" y1="15" x2="16" y2="30"/>
+        <line x1="17" y1="15" x2="23" y2="30"/>
+      </g>
+    </svg>
+    <div class="lbl">3-punts</div></div>
+
+  <div class="card"><div class="num">14</div>
+    <!-- Gespiegeld: bolt leunt naar rechts i.p.v. links -->
+    <svg viewBox="0 0 32 32"><path d="M11 2 L22 18 L14 18 L20 30 L9 14 L17 14 Z" fill="url(#logo-v)"/></svg>
+    <div class="lbl">gespiegeld</div></div>
+
+  <div class="card"><div class="num">15</div>
+    <!-- Liggend: bolt op zijn zij (links→rechts) -->
+    <svg viewBox="0 0 32 32"><path d="M2,11 L18,20 L18,14 L30,21 L14,12 L14,18 Z" fill="url(#logo)"/></svg>
+    <div class="lbl">liggend</div></div>
+
+  <div class="card"><div class="num">16</div>
+    <!-- Geblokt: brede korte bolt, heel hoekig -->
+    <svg viewBox="0 0 32 32"><path d="M22,2 L8,18 L18,18 L10,30 L24,14 L14,14 Z" fill="url(#logo-v)" filter="url(#glow-logo)"/></svg>
+    <div class="lbl">glow logo</div></div>
+
+  <div class="card"><div class="num">17</div>
+    <!-- Serif-bolt: bolt met kleine dwarsbalkjes boven en onder -->
+    <svg viewBox="0 0 32 32">
+      <path d="M20,4 L11,17 L17,17 L13,28 L22,15 L16,15 Z" fill="url(#logo-v)"/>
+      <line x1="16" y1="4" x2="24" y2="4" stroke="url(#logo)" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="10" y1="28" x2="16" y2="28" stroke="url(#logo)" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+    <div class="lbl">serif</div></div>
+
+  <div class="card"><div class="num">18</div>
+    <!-- Drie parallelle bolts -->
+    <svg viewBox="0 0 32 32">
+      <path d="M11,2 L7,14 L10,14 L7,24 L11,12 L8,12 Z" fill="url(#logo-v)"/>
+      <path d="M17,2 L13,14 L16,14 L13,24 L17,12 L14,12 Z" fill="url(#logo-v)"/>
+      <path d="M23,2 L19,14 L22,14 L19,24 L23,12 L20,12 Z" fill="url(#logo-v)"/>
+    </svg>
+    <div class="lbl">trio</div></div>
+
+  <div class="card"><div class="num">19</div>
+    <!-- S-bolt: twee gegeneerde knikken vormen een S -->
+    <svg viewBox="0 0 32 32">
+      <path d="M22,2 L12,10 L20,10 L10,22 L18,22 L8,30 L14,30 L24,18 L16,18 L26,6 Z" fill="url(#logo-v)"/>
+    </svg>
+    <div class="lbl">S-bolt</div></div>
+
+  <div class="card"><div class="num">20</div>
+    <!-- Outline bolt met logo-kleur -->
+    <svg viewBox="0 0 32 32"><path d="M21 2 L10 18 L18 18 L12 30 L23 14 L15 14 Z" fill="none" stroke="url(#logo-v)" stroke-width="2" stroke-linejoin="round"/></svg>
+    <div class="lbl">logo outline</div></div>
+
+</div>
+</section>
+
+<!-- ══════════ GOLFSTREEPJE — 🎆 Poefjes (dubbele W) ══════════ -->
+<section>
+<h2>🎆 Poefjes — hoekig golfstreepje / dubbele W (10 varianten)</h2>
+<div class="row">
+
+  <div class="card"><div class="num">01</div>
+    <!-- Simpele dubbele W — twee M/W-golven als lijn -->
+    <svg viewBox="0 0 32 32">
+      <polyline points="2,24 9,8 16,24 23,8 30,24" fill="none" stroke="url(#logo)" stroke-width="2" stroke-linejoin="miter" stroke-linecap="round"/>
+    </svg>
+    <div class="lbl">1× W, dun</div></div>
+
+  <div class="card"><div class="num">02</div>
+    <!-- Dubbele W (4 V's = 2 W's) compact -->
+    <svg viewBox="0 0 32 32">
+      <polyline points="1,22 6,10 11,22 16,10 21,22 26,10 31,22" fill="none" stroke="url(#logo)" stroke-width="2.5" stroke-linejoin="miter" stroke-linecap="square"/>
+    </svg>
+    <div class="lbl">2× W streep</div></div>
+
+  <div class="card"><div class="num">03</div>
+    <!-- Gevulde dubbele W (polygon met baseline) -->
+    <svg viewBox="0 0 32 32">
+      <polygon points="1,22 6,10 11,22 16,10 21,22 26,10 31,22 31,28 1,28" fill="url(#logo)" opacity="0.85"/>
+    </svg>
+    <div class="lbl">gevuld band</div></div>
+
+  <div class="card"><div class="num">04</div>
+    <!-- Gevulde dubbele W met toprand (volle band) -->
+    <svg viewBox="0 0 32 32">
+      <polygon points="1,22 6,10 11,22 16,10 21,22 26,10 31,22 31,10 26,10" fill="none" stroke="none"/>
+      <polygon points="1,10 1,22 6,10 11,22 16,10 21,22 26,10 31,22 31,10" fill="url(#logo)"/>
+    </svg>
+    <div class="lbl">volle band</div></div>
+
+  <div class="card"><div class="num">05</div>
+    <!-- Dubbele W glow -->
+    <svg viewBox="0 0 32 32">
+      <polyline points="1,22 6,10 11,22 16,10 21,22 26,10 31,22" fill="none" stroke="url(#logo)" stroke-width="3" stroke-linejoin="miter" stroke-linecap="square" filter="url(#glow-logo)"/>
+    </svg>
+    <div class="lbl">glow</div></div>
+
+  <div class="card"><div class="num">06</div>
+    <!-- Dubbele laag: twee parallelle W's -->
+    <svg viewBox="0 0 32 32">
+      <polyline points="1,20 6,10 11,20 16,10 21,20 26,10 31,20" fill="none" stroke="url(#logo)" stroke-width="2" stroke-linejoin="miter"/>
+      <polyline points="1,26 6,16 11,26 16,16 21,26 26,16 31,26" fill="none" stroke="#0099ff" stroke-width="1.5" stroke-linejoin="miter" opacity="0.6"/>
+    </svg>
+    <div class="lbl">dubbele laag</div></div>
+
+  <div class="card"><div class="num">07</div>
+    <!-- Stippen op de hoekpunten van de W -->
+    <svg viewBox="0 0 32 32">
+      <polyline points="1,22 6,10 11,22 16,10 21,22 26,10 31,22" fill="none" stroke="#1a1a2e" stroke-width="1" stroke-linejoin="miter"/>
+      <circle cx="6" cy="10" r="2.5" fill="#6633ff"/>
+      <circle cx="16" cy="10" r="2.5" fill="#0099ff"/>
+      <circle cx="26" cy="10" r="2.5" fill="#00ddcc"/>
+      <circle cx="1" cy="22" r="2" fill="#6633ff" opacity="0.5"/>
+      <circle cx="11" cy="22" r="2" fill="#0099ff" opacity="0.5"/>
+      <circle cx="21" cy="22" r="2" fill="#00ddcc" opacity="0.5"/>
+      <circle cx="31" cy="22" r="2" fill="#00ff88" opacity="0.5"/>
+    </svg>
+    <div class="lbl">stippen</div></div>
+
+  <div class="card"><div class="num">08</div>
+    <!-- W in cirkel -->
+    <svg viewBox="0 0 32 32">
+      <circle cx="16" cy="16" r="13" fill="none" stroke="url(#logo)" stroke-width="1.5"/>
+      <polyline points="5,22 10,10 16,22 22,10 27,22" fill="none" stroke="url(#logo)" stroke-width="2.5" stroke-linejoin="miter" stroke-linecap="round"/>
+    </svg>
+    <div class="lbl">in cirkel</div></div>
+
+  <div class="card"><div class="num">09</div>
+    <!-- Drie W's (strak, meer oscillaties) -->
+    <svg viewBox="0 0 32 32">
+      <polyline points="1,22 4.3,10 7.6,22 10.9,10 14.2,22 17.5,10 20.8,22 24.1,10 27.4,22 30.7,10" fill="none" stroke="url(#logo)" stroke-width="2" stroke-linejoin="miter" stroke-linecap="square"/>
+    </svg>
+    <div class="lbl">3× W strak</div></div>
+
+  <div class="card"><div class="num">10</div>
+    <!-- Gevulde W met glow + gradient -->
+    <svg viewBox="0 0 32 32">
+      <polygon points="1,22 6,10 11,22 16,10 21,22 26,10 31,22 31,28 1,28" fill="url(#logo)" filter="url(#glow-logo)"/>
+    </svg>
+    <div class="lbl">gevuld glow</div></div>
 
 </div>
 </section>
