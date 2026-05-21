@@ -293,20 +293,6 @@ async function logRun(db: SB, ok: boolean, message: string, metrics?: Record<str
   } catch { /* logging mag de run niet laten falen */ }
 }
 
-// Tijdelijke diagnose: schrijft per fase een checkpoint met geheugengebruik weg,
-// zodat een crash zonder logregel toch te lokaliseren is.
-async function dbg(db: SB, phase: string) {
-  try {
-    const m = Deno.memoryUsage();
-    const mb = (n: number) => Math.round(n / 1048576);
-    await db.from("signal_runs").insert({
-      job: "xinix-full-export",
-      ok: true,
-      message: `DEBUG ${phase} | rss=${mb(m.rss)}MB heapUsed=${mb(m.heapUsed)}MB external=${mb(m.external)}MB`,
-    });
-  } catch { /* diagnose mag niets breken */ }
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   const db = getServiceClient();
@@ -335,7 +321,6 @@ Deno.serve(async (req) => {
   const startMs = Date.now();
   try {
     const now = new Date();
-    await dbg(db, "start");
 
     // ── Tabellen ophalen ──────────────────────────────────────────────────────
     // Onvervangbaar (volledig): watchlist, strategieën, posities, catalysts, config.
@@ -383,7 +368,6 @@ Deno.serve(async (req) => {
         }
         rowCounts[s.table] = rows.length;
         dataParts.push(JSON.stringify(s.table) + ":" + JSON.stringify(rows));
-        await dbg(db, `fetched ${s.table} (${rowCounts[s.table]})`);
       } catch (e) {
         tableErrors[s.table] = e instanceof Error ? e.message : String(e);
         rowCounts[s.table] = 0;
@@ -392,7 +376,6 @@ Deno.serve(async (req) => {
     }
     let dataJson: string | null = "{" + dataParts.join(",") + "}";
     dataParts.length = 0;
-    await dbg(db, `dataJson built (${dataJson.length} chars)`);
 
     const totalRows = Object.values(rowCounts).reduce((a, b) => a + b, 0);
     const exportMeta = {
@@ -417,7 +400,6 @@ Deno.serve(async (req) => {
       ',"documentation":' + JSON.stringify(DOCUMENTATION) +
       ',"data":' + dataJson + "}";
     dataJson = null;
-    await dbg(db, `json built (${json.length} chars)`);
 
     const readme = buildReadme({ exported_at: now.toISOString(), total_rows: totalRows, row_counts: rowCounts });
 
@@ -436,7 +418,6 @@ Deno.serve(async (req) => {
     } catch (e) {
       githubError = e instanceof Error ? e.message : String(e);
     }
-    await dbg(db, `github committed=${githubCommitted}${githubError ? " err=" + githubError : ""}`);
 
     // ── Laatste export bewaren voor download via het dashboard ────────────────
     const { error: upsertError } = await db.from("xinix_data_exports").upsert({
@@ -449,7 +430,6 @@ Deno.serve(async (req) => {
       export_data: json,
     });
     json = null;
-    await dbg(db, `upsert done err=${upsertError?.message ?? "none"}`);
     if (upsertError) throw new Error(`opslaan in xinix_data_exports mislukt: ${upsertError.message}`);
 
     const githubStatus = githubCommitted ? "ok" : githubError ? "fout" : "geen token";
