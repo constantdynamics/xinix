@@ -5,7 +5,8 @@
 // vervangende website meteen verder kan zonder de jaren leerwerk te verliezen.
 //
 // Elke run:
-//   1. Dumpt alle waardevolle tabellen (gepagineerd, dus volledig).
+//   1. Dumpt de waardevolle tabellen — de onvervangbare gecureerde data
+//      volledig, de bulkige her-afleidbare tabellen ingekort.
 //   2. Voegt een uitgebreide UITLEG toe (concept + per-tabel veld-glossarium).
 //   3. Commit het geheel naar de Git-repo (docs/data-export/) — die staat los
 //      van Supabase en overleeft dus een verdwijnende site.
@@ -14,6 +15,11 @@
 //
 // GET  → laatste export downloaden (JSON)
 // POST → nieuwe export maken (wekelijkse cron of admin)
+//
+// Geheugen: de export-JSON wordt incrementeel als string opgebouwd (tabel voor
+// tabel) en als tekst opgeslagen. Zo staat nooit alle data tegelijk geparsed
+// in het geheugen — een eerdere versie laadde alles dubbel en crashte op de
+// geheugenlimiet van de edge runtime.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -50,29 +56,55 @@ const GITHUB_TOKEN = Deno.env.get("GITHUB_TOKEN") ?? "";
 const GITHUB_REPO = "constantdynamics/xinix";
 const GITHUB_BRANCH = "claude/poll-fundamentals-background-5TjhG";
 
-// Commit één bestand naar de repo (maakt aan of werkt bij).
-async function pushToGitHub(path: string, content: string, message: string): Promise<boolean> {
+// Commit één of meer bestanden in één commit naar de repo, via de Git Data API.
+// De Contents API werkt slecht voor grote bestanden (base64-payload, ~1 MB-
+// advieslimiet); de Git Data API verwerkt grote blobs en stuurt de inhoud
+// rechtstreeks als UTF-8 — geen base64, dus ook geen extra geheugenpieken.
+async function commitToGitHub(files: { path: string; content: string }[], message: string): Promise<boolean> {
   if (!GITHUB_TOKEN) return false;
-  const base = `https://api.github.com/repos/${GITHUB_REPO}/contents/${path}`;
+  const api = `https://api.github.com/repos/${GITHUB_REPO}`;
   const headers = {
     Authorization: `Bearer ${GITHUB_TOKEN}`,
     Accept: "application/vnd.github+json",
     "User-Agent": "xinix-full-export",
     "Content-Type": "application/json",
   };
-  let sha: string | undefined;
-  try {
-    const get = await fetch(`${base}?ref=${GITHUB_BRANCH}`, { headers });
-    if (get.ok) sha = (await get.json()).sha;
-  } catch { /* nieuw bestand */ }
-  const body: Record<string, unknown> = {
-    message,
-    content: btoa(unescape(encodeURIComponent(content))),
-    branch: GITHUB_BRANCH,
+  const gh = async (path: string, init?: RequestInit): Promise<Record<string, unknown>> => {
+    const res = await fetch(`${api}${path}`, { ...init, headers });
+    if (!res.ok) throw new Error(`GitHub ${path}: ${res.status} ${await res.text()}`);
+    return await res.json();
   };
-  if (sha) body.sha = sha;
-  const res = await fetch(base, { method: "PUT", headers, body: JSON.stringify(body) });
-  return res.ok;
+
+  // 1. Huidige branch-tip + bijbehorende boom.
+  const ref = await gh(`/git/ref/heads/${GITHUB_BRANCH}`);
+  const parentSha = (ref.object as { sha: string }).sha;
+  const parentCommit = await gh(`/git/commits/${parentSha}`);
+  const baseTree = (parentCommit.tree as { sha: string }).sha;
+
+  // 2. Een blob per bestand (UTF-8, geen base64).
+  const tree: { path: string; mode: string; type: string; sha: string }[] = [];
+  for (const f of files) {
+    const blob = await gh(`/git/blobs`, {
+      method: "POST",
+      body: JSON.stringify({ content: f.content, encoding: "utf-8" }),
+    });
+    tree.push({ path: f.path, mode: "100644", type: "blob", sha: blob.sha as string });
+  }
+
+  // 3. Nieuwe boom, commit en branch-update.
+  const newTree = await gh(`/git/trees`, {
+    method: "POST",
+    body: JSON.stringify({ base_tree: baseTree, tree }),
+  });
+  const commit = await gh(`/git/commits`, {
+    method: "POST",
+    body: JSON.stringify({ message, tree: newTree.sha, parents: [parentSha] }),
+  });
+  await gh(`/git/refs/heads/${GITHUB_BRANCH}`, {
+    method: "PATCH",
+    body: JSON.stringify({ sha: commit.sha }),
+  });
+  return true;
 }
 
 type SB = ReturnType<typeof getServiceClient>;
@@ -155,43 +187,49 @@ const DOCUMENTATION = {
   tabellen: {
     signal_tickers:
       "De watchlist — de meest waardevolle, met de hand gecureerde data. Eén rij " +
-      "per aandeel. Sleutelvelden: ticker, company, sector (biotech/mining), " +
-      "goud_score, medal_gold/silver/bronze, buy_limit, is_phoenix/is_poefie/" +
-      "is_hikkertje (speciale koerspatroon-classificaties), active.",
+      "per aandeel. Alle kolommen behalve phoenix_loose_data en poefie_loose_data " +
+      "(ruwe, her-afleidbare caches die compute-phoenix/compute-poefies opnieuw " +
+      "kunnen genereren). De gedistilleerde samenvattingen (is_phoenix, " +
+      "poefie_count_*, phoenix_incident_count, ...) blijven wél behouden. " +
+      "Sleutelvelden: ticker, company, sector (biotech/mining), goud_score, " +
+      "medal_gold/silver/bronze, buy_limit, is_phoenix/is_poefie/is_hikkertje " +
+      "(speciale koerspatroon-classificaties), active.",
     signal_price_summary:
-      "Laatste bekende slotkoers per ticker. Sleutelvelden: ticker, last_close.",
+      "Laatste bekende slotkoers per ticker. Volledig. Sleutelvelden: ticker, last_close.",
     signal_events:
-      "Gedetecteerde gebeurtenissen (meest recente ~8000). Sleutelvelden: ticker, " +
-      "signal_type, severity (yellow/orange/red), title, detail, detected_at, payload.",
+      "Gedetecteerde gebeurtenissen — ingekort tot de recentste ~2000 (bulkig en " +
+      "deels her-afleidbaar). Sleutelvelden: ticker, signal_type, severity " +
+      "(yellow/orange/red), title, detail, detected_at, payload.",
     signal_catalysts:
       "Aankomende/recente fundamentele catalysts (resource estimate, PFS, FDA-" +
-      "besluit, ...). Sleutelvelden: ticker, catalyst_type, expected_date, status.",
+      "besluit, ...). Volledig. Sleutelvelden: ticker, catalyst_type, expected_date, status.",
     signal_scores:
-      "Berekende scores per ticker (meest recente ~8000). Sleutelvelden: ticker, " +
-      "scan_date, structural, catalyst, timing, final_score, action.",
+      "Berekende scores per ticker — ingekort tot de recentste ~2000 (bulkig en " +
+      "her-afleidbaar uit de signalen). Sleutelvelden: ticker, scan_date, structural, " +
+      "catalyst, timing, final_score, action.",
     xinix_strategies:
-      "Config van alle ~200 simulatie-strategieën. Sleutelvelden: id, slug, name, " +
-      "grp (groep), config (JSON met parameters), generation, active, parent_id.",
+      "Config van alle ~200 simulatie-strategieën. Volledig. Sleutelvelden: id, slug, " +
+      "name, grp (groep), config (JSON met parameters), generation, active, parent_id.",
     xinix_strategy_state:
-      "Kas + kapitaal per strategie. Sleutelvelden: strategy_id, cash, " +
+      "Kas + kapitaal per strategie. Volledig. Sleutelvelden: strategy_id, cash, " +
       "initial_capital, max_equity, max_drawdown_pct.",
     xinix_strategy_positions:
-      "Alle open + gesloten posities van de 200 strategieën. Sleutelvelden: " +
+      "Alle open + gesloten posities van de 200 strategieën. Volledig. Sleutelvelden: " +
       "strategy_id, ticker, qty, avg_price, opened_at, closed_at, return_pct, " +
       "partial_exits (JSON met deelverkopen).",
     xinix_paper_positions:
-      "Posities van de single gecureerde papieren portefeuille. Zelfde structuur " +
-      "als xinix_strategy_positions.",
+      "Posities van de single gecureerde papieren portefeuille. Volledig. Zelfde " +
+      "structuur als xinix_strategy_positions.",
     xinix_paper_config:
-      "Configuratie van de single paper portfolio (stop-loss, positiegrootte, ...).",
+      "Configuratie van de single paper portfolio (stop-loss, positiegrootte, ...). Volledig.",
     market_regime:
-      "Huidige marktfase op basis van de S&P 500 (SPY) en VIX. Velden: regime " +
+      "Huidige marktfase op basis van de S&P 500 (SPY) en VIX. Volledig. Velden: regime " +
       "(strong_bull/weak_bull/bear), spy_close, ma_50, ma_200, vix_close.",
     xinix_knowledge_exports:
       "Maandelijkse kennis-snapshots (samenvatting + markdown). Hier zonder het " +
       "volledige export_data-blob om dubbele nesting te voorkomen.",
     signal_runs:
-      "Log van edge-function-runs (meest recente ~1000). Operationeel, geen kennis — " +
+      "Log van edge-function-runs (recentste ~1000). Operationeel, geen kennis — " +
       "ingekort. Velden: job, ok, message, metrics, started_at/finished_at.",
   },
 
@@ -250,7 +288,9 @@ function buildReadme(meta: { exported_at: string; total_rows: number; row_counts
 }
 
 async function logRun(db: SB, ok: boolean, message: string, metrics?: Record<string, unknown>) {
-  await db.from("signal_runs").insert({ job: "xinix-full-export", ok, message, metrics: metrics ?? null }).catch(() => {});
+  try {
+    await db.from("signal_runs").insert({ job: "xinix-full-export", ok, message, metrics: metrics ?? null });
+  } catch { /* logging mag de run niet laten falen */ }
 }
 
 Deno.serve(async (req) => {
@@ -258,12 +298,14 @@ Deno.serve(async (req) => {
   const db = getServiceClient();
 
   // ── GET: laatste export downloaden ──────────────────────────────────────────
+  // export_data is een kant-en-klare JSON-string (text-kolom) — direct teruggeven.
   if (req.method === "GET") {
-    const { data, error } = await db.from("xinix_data_exports").select("*").eq("id", 1).maybeSingle();
+    const { data, error } = await db.from("xinix_data_exports").select("exported_at, export_data").eq("id", 1).maybeSingle();
     if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...cors(req), "content-type": "application/json" } });
-    if (!data) return new Response(JSON.stringify({ error: "nog geen export beschikbaar" }), { status: 404, headers: { ...cors(req), "content-type": "application/json" } });
+    const exportData = (data as Record<string, unknown> | null)?.export_data as string | null | undefined;
+    if (!exportData) return new Response(JSON.stringify({ error: "nog geen export beschikbaar" }), { status: 404, headers: { ...cors(req), "content-type": "application/json" } });
     const day = String((data as Record<string, unknown>).exported_at ?? "").slice(0, 10);
-    return new Response(JSON.stringify((data as Record<string, unknown>).export_data ?? {}), {
+    return new Response(exportData, {
       status: 200,
       headers: {
         ...cors(req),
@@ -289,8 +331,15 @@ Deno.serve(async (req) => {
       "worst_strategy_name, worst_strategy_return, avg_portfolio_return, strategies_in_profit, " +
       "evolution_cycles, summary";
 
-    const specs: { table: string; select: string; opts?: { orderCol: string; ascending: boolean; cap: number } }[] = [
-      { table: "signal_tickers", select: "*" },
+    // `exclude`: kolommen die uit `select *` worden gestript — ruwe, her-
+    // afleidbare caches (geen gecureerde kennis) die alleen ruimte kosten.
+    const specs: {
+      table: string;
+      select: string;
+      exclude?: string[];
+      opts?: { orderCol: string; ascending: boolean; cap: number };
+    }[] = [
+      { table: "signal_tickers", select: "*", exclude: ["phoenix_loose_data", "poefie_loose_data"] },
       { table: "signal_price_summary", select: "*" },
       { table: "xinix_strategies", select: "*" },
       { table: "xinix_strategy_state", select: "*" },
@@ -300,79 +349,106 @@ Deno.serve(async (req) => {
       { table: "signal_catalysts", select: "*" },
       { table: "market_regime", select: "*" },
       { table: "xinix_knowledge_exports", select: KNOWLEDGE_COLS },
-      { table: "signal_events", select: "*", opts: { orderCol: "detected_at", ascending: false, cap: 8000 } },
-      { table: "signal_scores", select: "*", opts: { orderCol: "scan_date", ascending: false, cap: 8000 } },
+      { table: "signal_events", select: "*", opts: { orderCol: "detected_at", ascending: false, cap: 2000 } },
+      { table: "signal_scores", select: "*", opts: { orderCol: "scan_date", ascending: false, cap: 2000 } },
       { table: "signal_runs", select: "*", opts: { orderCol: "id", ascending: false, cap: 1000 } },
     ];
 
-    const data: Record<string, unknown[]> = {};
+    // Incrementeel opbouwen: per tabel ophalen → meteen naar een JSON-fragment →
+    // de geparseerde rij-objecten loslaten. Zo staat nooit alle data tegelijk
+    // als objectgraaf in het geheugen.
+    const dataParts: string[] = [];
     const rowCounts: Record<string, number> = {};
     const tableErrors: Record<string, string> = {};
     for (const s of specs) {
       try {
         const rows = await fetchRows(db, s.table, s.select, s.opts);
-        data[s.table] = rows;
+        if (s.exclude) {
+          for (const r of rows) for (const c of s.exclude) delete r[c];
+        }
         rowCounts[s.table] = rows.length;
+        dataParts.push(JSON.stringify(s.table) + ":" + JSON.stringify(rows));
       } catch (e) {
         tableErrors[s.table] = e instanceof Error ? e.message : String(e);
-        data[s.table] = [];
         rowCounts[s.table] = 0;
+        dataParts.push(JSON.stringify(s.table) + ":[]");
       }
     }
+    let dataJson: string | null = "{" + dataParts.join(",") + "}";
+    dataParts.length = 0;
 
     const totalRows = Object.values(rowCounts).reduce((a, b) => a + b, 0);
-    const exportObj = {
-      export_meta: {
-        generated_at: now.toISOString(),
-        format_version: 1,
-        project: "Xinix — gesimuleerde belegger",
-        source_repo: GITHUB_REPO,
-        table_count: specs.length,
-        total_rows: totalRows,
-        row_counts: rowCounts,
-        table_errors: Object.keys(tableErrors).length ? tableErrors : undefined,
-        note:
-          "Sommige tabellen zijn ingekort tot de recentste rijen — zie " +
-          "documentation.tabellen. De onvervangbare gecureerde data is volledig.",
-      },
-      documentation: DOCUMENTATION,
-      data,
+    const exportMeta = {
+      generated_at: now.toISOString(),
+      format_version: 1,
+      project: "Xinix — gesimuleerde belegger",
+      source_repo: GITHUB_REPO,
+      table_count: specs.length,
+      total_rows: totalRows,
+      row_counts: rowCounts,
+      table_errors: Object.keys(tableErrors).length ? tableErrors : undefined,
+      note:
+        "Compacte export: de onvervangbare gecureerde data (watchlist, strategieën, " +
+        "posities, portfolio, catalysts) is volledig. Signalen en scores zijn " +
+        "ingekort tot de recentste rijen — zie documentation.tabellen.",
     };
-    const json = JSON.stringify(exportObj);
+
+    // Eindbestand als string samenstellen — geen tweede objectgraaf, geen
+    // dubbele serialisatie.
+    let json: string | null =
+      '{"export_meta":' + JSON.stringify(exportMeta) +
+      ',"documentation":' + JSON.stringify(DOCUMENTATION) +
+      ',"data":' + dataJson + "}";
+    dataJson = null;
+
     const readme = buildReadme({ exported_at: now.toISOString(), total_rows: totalRows, row_counts: rowCounts });
 
     // ── Naar de Git-repo committen (overleeft een verdwijnende site) ──────────
     const day = now.toISOString().slice(0, 10);
-    const pushedJson = await pushToGitHub(
-      "docs/data-export/xinix-data-export.json",
-      json,
-      `chore: wekelijkse data-export ${day} (${totalRows} rijen)`,
-    );
-    const pushedReadme = await pushToGitHub(
-      "docs/data-export/README.md",
-      readme,
-      `chore: data-export README ${day}`,
-    );
+    let githubCommitted = false;
+    let githubError: string | null = null;
+    try {
+      githubCommitted = await commitToGitHub(
+        [
+          { path: "docs/data-export/xinix-data-export.json", content: json },
+          { path: "docs/data-export/README.md", content: readme },
+        ],
+        `chore: wekelijkse data-export ${day} (${totalRows} rijen)`,
+      );
+    } catch (e) {
+      githubError = e instanceof Error ? e.message : String(e);
+    }
 
     // ── Laatste export bewaren voor download via het dashboard ────────────────
-    await db.from("xinix_data_exports").upsert({
+    const { error: upsertError } = await db.from("xinix_data_exports").upsert({
       id: 1,
       exported_at: now.toISOString(),
       table_count: specs.length,
       total_rows: totalRows,
       row_counts: rowCounts,
-      github_committed: pushedJson && pushedReadme,
-      export_data: exportObj,
+      github_committed: githubCommitted,
+      export_data: json,
+    });
+    json = null;
+    if (upsertError) throw new Error(`opslaan in xinix_data_exports mislukt: ${upsertError.message}`);
+
+    const githubStatus = githubCommitted ? "ok" : githubError ? "fout" : "geen token";
+    const msg =
+      `Export: ${totalRows} rijen, ${specs.length} tabellen, github=${githubStatus}` +
+      (githubError ? ` (${githubError})` : "") +
+      (Object.keys(tableErrors).length ? `, tabelfouten: ${Object.keys(tableErrors).join(", ")}` : "");
+    await logRun(db, true, msg, {
+      total_rows: totalRows,
+      row_counts: rowCounts,
+      github_committed: githubCommitted,
+      github_error: githubError,
+      ms: Date.now() - startMs,
     });
 
-    const msg = `Export: ${totalRows} rijen, ${specs.length} tabellen, github=${pushedJson && pushedReadme ? "ok" : "nee"}` +
-      (Object.keys(tableErrors).length ? `, fouten: ${Object.keys(tableErrors).join(", ")}` : "");
-    await logRun(db, true, msg, { total_rows: totalRows, row_counts: rowCounts, github_committed: pushedJson && pushedReadme, ms: Date.now() - startMs });
-
-    return new Response(JSON.stringify({ ok: true, total_rows: totalRows, row_counts: rowCounts, github_committed: pushedJson && pushedReadme }), {
-      status: 200,
-      headers: { ...cors(req), "content-type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ ok: true, total_rows: totalRows, row_counts: rowCounts, github_committed: githubCommitted }),
+      { status: 200, headers: { ...cors(req), "content-type": "application/json" } },
+    );
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await logRun(db, false, message);
