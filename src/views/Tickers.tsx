@@ -21,6 +21,7 @@ import {
   Select,
   SectionHeader,
   InlineConfirm,
+  toast,
 } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import {
@@ -511,11 +512,13 @@ export function TickersView({
         payload.deposit_type = form.deposit_type || undefined;
       }
       await addTicker(payload);
-      setMsg(`${payload.ticker} toegevoegd`);
+      toast(`${payload.ticker} toegevoegd`);
       setForm({ ...EMPTY, sector: form.sector });
       onRefresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast(msg, "error");
     }
   }
 
@@ -552,11 +555,14 @@ export function TickersView({
         );
       }
       setMsg(`${inserted} ticker(s) toegevoegd / bijgewerkt`);
+      toast(`${inserted} ticker(s) toegevoegd / bijgewerkt`);
       setBatchText("");
       setRows([]);
       onRefresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast(msg, "error");
     } finally {
       setBatchBusy(false);
     }
@@ -567,9 +573,12 @@ export function TickersView({
   async function removeNoConfirm(ticker: string) {
     try {
       await removeTicker(ticker);
+      toast(`${ticker} verwijderd`, "success");
       onRefresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast(msg, "error");
     }
   }
 
