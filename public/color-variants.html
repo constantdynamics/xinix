@@ -72,6 +72,36 @@
     display: inline-block;
     margin-bottom: 0.2rem;
   }
+  .header-mock {
+    background: #0d0d14;
+    border: 1px solid #1f2028;
+    border-radius: 6px;
+    padding: 0.4rem 0.65rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .logo-mini {
+    font-family: 'Inter', sans-serif;
+    font-style: normal;
+    font-weight: 900;
+    letter-spacing: -0.06em;
+    font-size: 1.35rem;
+    line-height: 1;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    flex-shrink: 0;
+  }
+  .header-mock-nav {
+    font-size: 0.45rem;
+    color: #374151;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+  }
 </style>
 </head>
 <body>
@@ -254,5 +284,30 @@
   </div>
 
 </div>
+
+<script>
+// Voeg onder elke .logo automatisch een mini header-preview toe
+document.querySelectorAll('.card').forEach(card => {
+  const logo = card.querySelector('.logo');
+  if (!logo) return;
+  const mock = document.createElement('div');
+  mock.className = 'header-mock';
+  const mini = document.createElement('span');
+  mini.className = 'logo-mini';
+  mini.textContent = 'Xinix';
+  // Kopieer de gradient + filter van de grote logo
+  mini.style.background = logo.style.background;
+  mini.style.webkitBackgroundClip = 'text';
+  mini.style.backgroundClip = 'text';
+  mini.style.webkitTextFillColor = 'transparent';
+  mini.style.filter = logo.style.filter;
+  const nav = document.createElement('span');
+  nav.className = 'header-mock-nav';
+  nav.textContent = 'Biotech & Mining';
+  mock.appendChild(mini);
+  mock.appendChild(nav);
+  logo.after(mock);
+});
+</script>
 </body>
 </html>
