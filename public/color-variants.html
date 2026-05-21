@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Xinix — kleurverloop varianten</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a0f;
+    color: #e5e7eb;
+    font-family: Inter, sans-serif;
+    padding: 2rem;
+  }
+  h1 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #9ca3af;
+    margin-bottom: 2rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1.25rem;
+  }
+  .card {
+    background: #13131a;
+    border: 1px solid #1f2028;
+    border-radius: 12px;
+    padding: 1.25rem 1.25rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .card:hover { border-color: #2a2a3a; }
+  .num {
+    font-size: 0.65rem;
+    color: #4b5563;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .logo {
+    font-family: 'Inter', sans-serif;
+    font-style: normal;
+    font-weight: 900;
+    letter-spacing: -0.06em;
+    font-size: 2.4rem;
+    line-height: 1;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  .meta {
+    font-size: 0.63rem;
+    color: #4b5563;
+    line-height: 1.5;
+    word-break: break-all;
+  }
+  .current-badge {
+    font-size: 0.6rem;
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    color: #818cf8;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    display: inline-block;
+    margin-bottom: 0.2rem;
+  }
+</style>
+</head>
+<body>
+<h1>Xinix — 25 kleurverloop-varianten (Inter 900 · -0.06em)</h1>
+<div class="grid">
+
+  <!-- 01 – HUIDIG -->
+  <div class="card">
+    <div class="num">01 <span class="current-badge">huidig</span></div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff1f8f 0%,#ff3a6e 18%,#ff5a3a 36%,#ff8c00 54%,#ffd400 72%,#a7ff1f 100%);filter:drop-shadow(0 0 20px rgba(255,31,143,.25))">Xinix</div>
+    <div class="meta">pink → rood → oranje → geel → lime</div>
+  </div>
+
+  <!-- 02 – Regenboog volledig L→R -->
+  <div class="card">
+    <div class="num">02</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff0000 0%,#ff7700 17%,#ffdd00 33%,#00cc00 50%,#0088ff 67%,#8800ff 83%,#ff00cc 100%);filter:drop-shadow(0 0 20px rgba(136,0,255,.2))">Xinix</div>
+    <div class="meta">regenboog volledig · rood → violet → magenta</div>
+  </div>
+
+  <!-- 03 – Regenboog omgekeerd R→L -->
+  <div class="card">
+    <div class="num">03</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff00cc 0%,#8800ff 17%,#0088ff 33%,#00cc00 50%,#ffdd00 67%,#ff7700 83%,#ff0000 100%);filter:drop-shadow(0 0 20px rgba(255,0,204,.2))">Xinix</div>
+    <div class="meta">regenboog omgekeerd · magenta → violet → rood</div>
+  </div>
+
+  <!-- 04 – Regenboog pastels -->
+  <div class="card">
+    <div class="num">04</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff85c2 0%,#ffb347 20%,#ffee55 40%,#77ee88 60%,#55ccff 80%,#cc88ff 100%);filter:drop-shadow(0 0 20px rgba(255,133,194,.2))">Xinix</div>
+    <div class="meta">regenboog pastels · zachte kleuren</div>
+  </div>
+
+  <!-- 05 – Regenboog neon -->
+  <div class="card">
+    <div class="num">05</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff003c 0%,#ff6600 20%,#ffe600 40%,#00ff66 60%,#00ccff 80%,#cc00ff 100%);filter:drop-shadow(0 0 24px rgba(255,0,60,.3))">Xinix</div>
+    <div class="meta">regenboog neon · maximale verzadiging</div>
+  </div>
+
+  <!-- 06 – Reverse huidig (lime → pink) -->
+  <div class="card">
+    <div class="num">06</div>
+    <div class="logo" style="background:linear-gradient(90deg,#a7ff1f 0%,#ffd400 28%,#ff8c00 46%,#ff5a3a 64%,#ff3a6e 82%,#ff1f8f 100%);filter:drop-shadow(0 0 20px rgba(167,255,31,.2))">Xinix</div>
+    <div class="meta">omgekeerd huidig · lime → geel → pink</div>
+  </div>
+
+  <!-- 07 – Zonsondergang -->
+  <div class="card">
+    <div class="num">07</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff0080 0%,#ff4500 35%,#ff9500 65%,#ffd700 100%);filter:drop-shadow(0 0 20px rgba(255,0,128,.25))">Xinix</div>
+    <div class="meta">zonsondergang · pink → oranje → goud</div>
+  </div>
+
+  <!-- 08 – Vuur -->
+  <div class="card">
+    <div class="num">08</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff2200 0%,#ff6600 30%,#ffaa00 60%,#ffee00 100%);filter:drop-shadow(0 0 20px rgba(255,34,0,.3))">Xinix</div>
+    <div class="meta">vuur · rood → oranje → geel</div>
+  </div>
+
+  <!-- 09 – Goud -->
+  <div class="card">
+    <div class="num">09</div>
+    <div class="logo" style="background:linear-gradient(90deg,#b8860b 0%,#daa520 25%,#ffd700 50%,#ffe87c 75%,#fff0a0 100%);filter:drop-shadow(0 0 20px rgba(218,165,32,.3))">Xinix</div>
+    <div class="meta">goud · donkergoud → platina</div>
+  </div>
+
+  <!-- 10 – Aurora borealis -->
+  <div class="card">
+    <div class="num">10</div>
+    <div class="logo" style="background:linear-gradient(90deg,#00ff88 0%,#00ddcc 30%,#0099ff 60%,#6633ff 100%);filter:drop-shadow(0 0 20px rgba(0,255,136,.25))">Xinix</div>
+    <div class="meta">aurora borealis · groen → cyaan → blauw</div>
+  </div>
+
+  <!-- 11 – Oceaan -->
+  <div class="card">
+    <div class="num">11</div>
+    <div class="logo" style="background:linear-gradient(90deg,#004aff 0%,#0099cc 35%,#00ccaa 65%,#00ff88 100%);filter:drop-shadow(0 0 20px rgba(0,74,255,.25))">Xinix</div>
+    <div class="meta">oceaan · diepblauw → teal → zeegroen</div>
+  </div>
+
+  <!-- 12 – Neon cyber -->
+  <div class="card">
+    <div class="num">12</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff00aa 0%,#cc00ff 50%,#00ccff 100%);filter:drop-shadow(0 0 24px rgba(255,0,170,.35))">Xinix</div>
+    <div class="meta">neon cyber · magenta → paars → cyaan</div>
+  </div>
+
+  <!-- 13 – Lavendel droom -->
+  <div class="card">
+    <div class="num">13</div>
+    <div class="logo" style="background:linear-gradient(90deg,#c77dff 0%,#9b59b6 30%,#7f00ff 60%,#e040fb 100%);filter:drop-shadow(0 0 20px rgba(199,125,255,.25))">Xinix</div>
+    <div class="meta">lavendel · lichtpaars → violet → magenta</div>
+  </div>
+
+  <!-- 14 – Matrix -->
+  <div class="card">
+    <div class="num">14</div>
+    <div class="logo" style="background:linear-gradient(90deg,#003300 0%,#00aa00 40%,#00ff44 70%,#aaffcc 100%);filter:drop-shadow(0 0 20px rgba(0,255,68,.2))">Xinix</div>
+    <div class="meta">matrix · donkergroen → neongroen → mint</div>
+  </div>
+
+  <!-- 15 – IJsblauw -->
+  <div class="card">
+    <div class="num">15</div>
+    <div class="logo" style="background:linear-gradient(90deg,#a8edea 0%,#71d4ff 35%,#47b8ff 65%,#c4f0ff 100%);filter:drop-shadow(0 0 20px rgba(168,237,234,.2))">Xinix</div>
+    <div class="meta">ijsblauw · mint → lichtblauw → hemelsblauw</div>
+  </div>
+
+  <!-- 16 – Tropisch -->
+  <div class="card">
+    <div class="num">16</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff006e 0%,#ff7700 20%,#ffdd00 40%,#00ee88 60%,#00ccff 80%,#aa00ff 100%);filter:drop-shadow(0 0 20px rgba(255,0,110,.25))">Xinix</div>
+    <div class="meta">tropisch · pink → oranje → geel → groen → cyaan → paars</div>
+  </div>
+
+  <!-- 17 – Rose gold -->
+  <div class="card">
+    <div class="num">17</div>
+    <div class="logo" style="background:linear-gradient(90deg,#f4a0b5 0%,#e67090 25%,#d4a853 55%,#ffe0a0 100%);filter:drop-shadow(0 0 20px rgba(244,160,181,.2))">Xinix</div>
+    <div class="meta">rose gold · roze → warm goud</div>
+  </div>
+
+  <!-- 18 – Bloedsinaasappel -->
+  <div class="card">
+    <div class="num">18</div>
+    <div class="logo" style="background:linear-gradient(90deg,#8b0000 0%,#cc2200 25%,#ff4500 55%,#ff8c00 80%,#ffbb00 100%);filter:drop-shadow(0 0 20px rgba(204,34,0,.3))">Xinix</div>
+    <div class="meta">bloed­sinaasappel · diep­rood → amber</div>
+  </div>
+
+  <!-- 19 – Schemering -->
+  <div class="card">
+    <div class="num">19</div>
+    <div class="logo" style="background:linear-gradient(90deg,#1a0533 0%,#6a0572 25%,#c2185b 55%,#ff8a65 80%,#ffcc02 100%);filter:drop-shadow(0 0 20px rgba(106,5,114,.25))">Xinix</div>
+    <div class="meta">schemering · nacht­paars → roze → goud</div>
+  </div>
+
+  <!-- 20 – Candy -->
+  <div class="card">
+    <div class="num">20</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ff6eb4 0%,#ff9de2 30%,#b388ff 60%,#82b1ff 100%);filter:drop-shadow(0 0 20px rgba(255,110,180,.2))">Xinix</div>
+    <div class="meta">candy · bubble­gum­roze → lavendel → hemels­blauw</div>
+  </div>
+
+  <!-- 21 – Galaxy -->
+  <div class="card">
+    <div class="num">21</div>
+    <div class="logo" style="background:linear-gradient(90deg,#0d0221 0%,#4a0080 20%,#8800cc 40%,#ff3399 65%,#ffaa00 85%,#ffffff 100%);filter:drop-shadow(0 0 24px rgba(136,0,204,.3))">Xinix</div>
+    <div class="meta">galaxy · diepruimte → violet → pink → wit</div>
+  </div>
+
+  <!-- 22 – Mint & Coral -->
+  <div class="card">
+    <div class="num">22</div>
+    <div class="logo" style="background:linear-gradient(90deg,#00c9a7 0%,#45b7d1 35%,#ff9a8b 65%,#ff6a6a 100%);filter:drop-shadow(0 0 20px rgba(0,201,167,.2))">Xinix</div>
+    <div class="meta">mint &amp; coral · turquoise → zalmroze</div>
+  </div>
+
+  <!-- 23 – Chrome -->
+  <div class="card">
+    <div class="num">23</div>
+    <div class="logo" style="background:linear-gradient(90deg,#8e9eab 0%,#d4d4d4 25%,#ffffff 45%,#d4d4d4 65%,#8e9eab 80%,#c0c0c0 100%);filter:drop-shadow(0 0 20px rgba(200,200,220,.2))">Xinix</div>
+    <div class="meta">chrome · zilver­grijs → wit → zilver</div>
+  </div>
+
+  <!-- 24 – Neon groen/geel (acid) -->
+  <div class="card">
+    <div class="num">24</div>
+    <div class="logo" style="background:linear-gradient(90deg,#ccff00 0%,#aaff22 30%,#00ffcc 60%,#00ff88 100%);filter:drop-shadow(0 0 24px rgba(204,255,0,.3))">Xinix</div>
+    <div class="meta">acid · neon­geel → lime → mint</div>
+  </div>
+
+  <!-- 25 – Ultraviolet -->
+  <div class="card">
+    <div class="num">25</div>
+    <div class="logo" style="background:linear-gradient(90deg,#000428 0%,#1a237e 25%,#4a148c 50%,#880088 70%,#dd00ff 100%);filter:drop-shadow(0 0 24px rgba(136,0,136,.3))">Xinix</div>
+    <div class="meta">ultraviolet · diep­marine → indigo → violet</div>
+  </div>
+
+</div>
+</body>
+</html>

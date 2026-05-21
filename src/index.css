@@ -21,14 +21,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Defog-style wordmark — italic gradient (regenboog: pink -> red ->
- * orange -> yellow -> lime). text-shadow blijft pink-glow voor brand
- * herkenbaarheid. */
+/* Wordmark — Inter 900 upright, strak negatieve spatiëring. */
 .wordmark {
   font-family: "Inter", sans-serif;
-  font-style: italic;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: -0.06em;
   background: linear-gradient(
     90deg,
     #ff1f8f 0%,
