@@ -612,6 +612,13 @@ export interface SimInsight {
   entries: SimDimensionEntry[];
 }
 
+export interface SimSignalTypeStat {
+  signal_type: string;
+  count: number;
+  win_rate: number;
+  avg_return_pct: number;
+}
+
 export interface SimRetired {
   id: number;
   slug: string;
@@ -653,6 +660,7 @@ export interface SimResults {
   strategies: SimStrategy[];
   insights: SimInsight[];
   recommendations: string[];
+  signal_type_stats?: SimSignalTypeStat[];
   families?: { groups: SimFamily[]; dates: string[] };
   meta: {
     total: number;
