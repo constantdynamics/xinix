@@ -179,10 +179,7 @@ export function App() {
           >
             Xinix
           </a>
-          <div className="hidden sm:block text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400">
-            Biotech & Mining Signal Detector
-          </div>
-          <div className="ml-auto flex items-center gap-2">
+<div className="ml-auto flex items-center gap-2">
             {data && (
               <span
                 className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-neutral-500 tabular"
