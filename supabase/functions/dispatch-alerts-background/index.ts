@@ -56,7 +56,7 @@ const IMPACT_TIER: Record<string, 1 | 2> = {
 const NEAR_LIMIT_MAX_ABOVE_PCT = 10;
 
 // Bepaalt of een signaal überhaupt een notificatie waard is.
-//  - Vereist meestal: ≥2 goud OF ≥3 zilver OF ≥4 brons (kwaliteitsdrempel).
+//  - Vereist: ≥2 goud (5j) OF ≥3 zilver (5j) OF ≥4 brons in het AFGELOPEN JAAR.
 //  - Uitzonderingen die de medalcheck bypassen: phoenix_near_limit,
 //    zwitserleven_laag, en de near-limit-snelalert (groot event ≤10% boven limiet).
 //  - Bullish catalysts: alleen bij BUY/STRONG_BUY-actie.
@@ -69,8 +69,9 @@ function shouldNotify(signalType: string, action: string | null | undefined, med
   if (signalType === "zwitserleven_laag") return true;
   const g = medals?.gold ?? 0;
   const si = medals?.silver ?? 0;
-  const br = medals?.bronze ?? 0;
-  if (g < 2 && si < 3 && br < 4) return false;
+  // Bronze telt alleen voor de laatste 12 maanden — niet cumulatief over 5 jaar.
+  const br1y = medals?.bronze_1y ?? 0;
+  if (g < 2 && si < 3 && br1y < 4) return false;
   if (LIMIT_EVENT_TYPES.has(signalType)) return true;
   if (BULLISH_CATALYST_TYPES.has(signalType) && action != null && POSITIVE_ACTIONS.has(action)) return true;
   return false;
@@ -158,7 +159,7 @@ function fmtPrice(x: number | null | undefined): string { if (x == null || !Numb
 function fmtDate(iso: string | null | undefined): string | null { if (!iso) return null; return iso.slice(0, 10); }
 function fmtAbove(p: number): string { return p <= 0 ? `${p.toFixed(0)}% onder limiet` : `+${p.toFixed(0)}% boven limiet`; }
 interface AlertView { title: string; body: string; priority: number; tags: string[]; }
-interface Medals { gold: number; silver: number; bronze: number; }
+interface Medals { gold: number; silver: number; bronze: number; bronze_1y: number; }
 interface NearLimitInfo { tier: 1 | 2; abovePct: number; buyLimit: number; lastClose: number; }
 function medalLine(m: Medals | null): string | null {
   if (!m || (m.gold + m.silver + m.bronze) === 0) return null;
@@ -356,7 +357,7 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
   const buyLimitByTicker = new Map<string, number>();
   const lastCloseByTicker = new Map<string, number>();
   if (tickers.length) {
-    const { data: tks } = await sb.from("signal_tickers").select("ticker, company, exchange, buy_limit, medal_gold, medal_silver, medal_bronze").in("ticker", tickers);
+    const { data: tks } = await sb.from("signal_tickers").select("ticker, company, exchange, buy_limit, medal_gold, medal_silver, medal_bronze, medal_bronze_1y").in("ticker", tickers);
     for (const row of tks ?? []) {
       if (row.company) companyByTicker.set(row.ticker as string, row.company as string);
       if ((row as { exchange?: string | null }).exchange) exchangeByTicker.set(row.ticker as string, (row as { exchange: string }).exchange);
@@ -365,7 +366,8 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       const g = (row as { medal_gold?: number }).medal_gold ?? 0;
       const si = (row as { medal_silver?: number }).medal_silver ?? 0;
       const br = (row as { medal_bronze?: number }).medal_bronze ?? 0;
-      if (g + si + br > 0) medalsByTicker.set(row.ticker as string, { gold: g, silver: si, bronze: br });
+      const br1y = (row as { medal_bronze_1y?: number }).medal_bronze_1y ?? 0;
+      if (g + si + br + br1y > 0) medalsByTicker.set(row.ticker as string, { gold: g, silver: si, bronze: br, bronze_1y: br1y });
     }
     const { data: prices } = await sb.from("signal_price_summary").select("ticker, last_close").in("ticker", tickers);
     for (const row of prices ?? []) {
@@ -373,9 +375,32 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       if (lc != null) lastCloseByTicker.set(row.ticker as string, lc);
     }
   }
+  // Dedup: max 1 notificatie per (ticker, signal_type) per 7 dagen.
+  // Voorkomt dat aandelen die dagelijks dezelfde trigger halen (bv. VRR.V
+  // die continu rond de buy_limit zweeft) elke dag een melding sturen.
+  const DISPATCH_DEDUP_DAYS = 7;
+  const dedupSince = new Date(Date.now() - DISPATCH_DEDUP_DAYS * 24 * 3600 * 1000).toISOString();
+  const { data: recentSent } = await sb
+    .from("signal_events")
+    .select("ticker, signal_type")
+    .eq("alerted", true)
+    .gte("detected_at", dedupSince)
+    .in("ticker", tickers);
+  const recentSentSet = new Set(
+    (recentSent ?? []).map((e) => `${e.ticker as string}|${e.signal_type as string}`)
+  );
+
   let sentEmail = 0, sentNtfy = 0, suppressed = 0, nearLimitAlerts = 0;
   const errors: string[] = [];
   for (const sig of signals) {
+    // Dedup-check: markeer als verstuurd maar stuur niet opnieuw als
+    // dezelfde (ticker, signal_type) combinatie al binnen 7 dagen is verstuurd.
+    const dedupeKey = `${sig.ticker as string}|${sig.signal_type as string}`;
+    if (recentSentSet.has(dedupeKey)) {
+      await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
+      suppressed++;
+      continue;
+    }
     const score = scoreByTicker.get(sig.ticker) ?? null;
     const isLimit = LIMIT_EVENT_TYPES.has(sig.signal_type);
     const medals = medalsByTicker.get(sig.ticker) ?? null;

@@ -122,6 +122,11 @@ Deno.serve(runBackground("compute-extremes", async () => {
       const oneY = extremesSince(bars, oneYearAgo);
       const fiveY = extremesSince(bars, fiveYearsAgo);
       const medals = countMedals(bars);
+      // Bronze in het afgelopen jaar apart bijhouden — de dispatch-filter
+      // vereist ≥4 brons in de laatste 12 maanden, niet over 5 jaar totaal.
+      const oneYearAgoStr = oneYearAgo.toISOString().slice(0, 10);
+      const bars1y = bars.filter((b) => b.date >= oneYearAgoStr);
+      const medals1y = countMedals(bars1y);
       const { error: e1 } = await sb.from("signal_price_summary").upsert({
         ticker, low_1y: oneY.low, high_1y: oneY.high, low_5y: fiveY.low, high_5y: fiveY.high, last_extremes_at: now.toISOString(),
       }, { onConflict: "ticker" });
@@ -132,7 +137,9 @@ Deno.serve(runBackground("compute-extremes", async () => {
         ? Number((fiveY.low * 1.10).toFixed(fiveY.low < 1 ? 4 : fiveY.low < 10 ? 3 : 2))
         : null;
       const tickerUpdate: Record<string, unknown> = {
-        medal_gold: medals.gold, medal_silver: medals.silver, medal_bronze: medals.bronze, medals_computed_at: now.toISOString(),
+        medal_gold: medals.gold, medal_silver: medals.silver, medal_bronze: medals.bronze,
+        medal_bronze_1y: medals1y.bronze,
+        medals_computed_at: now.toISOString(),
       };
       const { error: e2 } = await sb.from("signal_tickers").update(tickerUpdate).eq("ticker", ticker);
       let e3: { message?: string } | null = null;
