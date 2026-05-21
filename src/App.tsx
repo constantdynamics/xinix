@@ -52,7 +52,7 @@ function loadInitialTab(): Tab {
       return saved as Tab;
     }
   } catch { /* SSR/restricted */ }
-  return "dashboard";
+  return "favorieten";
 }
 
 export function App() {
@@ -156,13 +156,13 @@ export function App() {
       <header className="sticky top-0 z-30 border-b border-ink-5 bg-ink-1/95 backdrop-blur supports-[backdrop-filter]:bg-ink-1/70">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-4">
           <a
-            href="#dashboard"
+            href="#favorieten"
             onClick={(e) => {
               e.preventDefault();
-              setTab("dashboard");
+              setTab("favorieten");
             }}
             className="wordmark text-2xl leading-none select-none cursor-pointer hover:scale-[1.02] transition-transform"
-            title="Naar dashboard"
+            title="Naar favorieten"
           >
             Xinix
           </a>
