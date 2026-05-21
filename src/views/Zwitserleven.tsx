@@ -18,6 +18,8 @@ import {
   MarkAllSeenButton,
   HideFavoritesToggle,
   NotYetReviewedTile,
+  StarCell,
+  StarHeader,
 } from "../components/MarkCells";
 
 function fmtPct(v: number | null, decimals = 1): string {
@@ -522,6 +524,7 @@ export function ZwitserlevenView() {
                 <tr>
                   <SeenHeader />
                   <HeartHeader />
+                  <StarHeader />
                   {isVis("idx") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>}
                   {isVis("ticker") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Ticker</th>}
                   {isVis("company") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Naam</th>}
@@ -569,6 +572,7 @@ export function ZwitserlevenView() {
                     >
                       <SeenCell ticker={s.ticker} />
                       <HeartCell ticker={s.ticker} />
+                      <StarCell ticker={s.ticker} />
                       {isVis("idx") && <td className="px-3 py-2.5 text-neutral-600 tabular text-xs">{idx + 1}</td>}
 
                       {isVis("ticker") && (

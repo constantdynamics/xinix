@@ -32,6 +32,8 @@ import {
   MarkAllSeenButton,
   HideFavoritesToggle,
   NotYetReviewedTile,
+  StarCell,
+  StarHeader,
 } from "../components/MarkCells";
 
 const EXCHANGE_SUFFIXES = [
@@ -1365,6 +1367,7 @@ export function TickersView({
                 <tr>
                   <SeenHeader />
                   <HeartHeader />
+                  <StarHeader />
                   <th className="p-3 w-8">
                     <input
                       type="checkbox"
@@ -1425,6 +1428,7 @@ export function TickersView({
                     >
                       <SeenCell ticker={c.ticker} />
                       <HeartCell ticker={c.ticker} />
+                      <StarCell ticker={c.ticker} />
                       <td className="p-3 text-center">
                         <input
                           type="checkbox"
@@ -1510,7 +1514,7 @@ export function TickersView({
                 })}
                 {wlPageRows.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="p-8 text-center text-neutral-500 text-sm">
+                    <td colSpan={10} className="p-8 text-center text-neutral-500 text-sm">
                       {wlQuery ? `Geen tickers gevonden voor "${wlQuery}".` : "Watchlist is leeg."}
                     </td>
                   </tr>

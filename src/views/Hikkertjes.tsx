@@ -8,7 +8,7 @@ import {
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
-import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile } from "../components/MarkCells";
+import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile, StarRating } from "../components/MarkCells";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -246,6 +246,7 @@ export function HikkertjesView() {
                 >
                   <SeenInline ticker={h.ticker} />
                   <HeartInline ticker={h.ticker} />
+                  <StarRating ticker={h.ticker} />
                   <span className="text-neutral-600 w-6 text-right tabular shrink-0">{idx + 1}</span>
 
                   <div className="w-24 shrink-0">
