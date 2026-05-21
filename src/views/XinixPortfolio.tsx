@@ -74,8 +74,66 @@ const SIGNAL_LABELS: Record<string, string> = {
   near5y_low_gem: "5y-bodem + track",
   macro_tide: "Macro-stroming",
 };
+
+const SIGNAL_DESCRIPTIONS: Record<string, string> = {
+  near_90d_low: "Koers nabij het laagste punt van de afgelopen 90 dagen — mogelijke bodem",
+  big_drop: "Forse koersdaling van minstens 15% in korte tijd — contrarian kans",
+  price_spike_up: "Plotse koerssprong omhoog — mogelijk aankondiging of nieuws",
+  volume_spike: "Ongewoon hoog handelsvolume — markt reageert op iets",
+  jv_strategic: "Joint venture of strategische deal aangekondigd",
+  "8k_material": "Materiële gebeurtenis gemeld via SEC 8-K formulier",
+  buy_limit_hit: "Koers heeft de ingestelde buy-limit bereikt",
+  buy_limit_warmup: "Koers nadert de buy-limit van onderen",
+  buy_limit_close: "Koers staat vlak boven de buy-limit",
+  pre_catalyst_7d: "Verwachte katalysator (trial, vergunning, rapport) binnen 7 dagen",
+  pre_catalyst_14d: "Verwachte katalysator binnen 14 dagen",
+  pre_catalyst_30d: "Verwachte katalysator binnen 30 dagen",
+  pre_catalyst_60d: "Verwachte katalysator binnen 60 dagen",
+  financing: "Nieuwe financieringsronde aangekondigd",
+  takeover_bid: "Overnamebod uitgebracht op dit bedrijf",
+  buyout_definitive: "Definitieve overnameverklaring getekend",
+  topline_positive: "Positieve primaire eindpunten van een klinische trial",
+  pfs: "Pre-feasibility studie voor mijnbouwproject gepubliceerd",
+  resource_update: "Bijgewerkte resource- of reserveschatting gepubliceerd",
+  loser_gem: "Forse daler met sterk historisch track-record op eerder dieptepunten",
+  near5y_low_gem: "Nabij 5-jaars dieptepunt + bewezen track-record van herstel",
+  macro_tide: "Gunstige macro-economische trend voor de sector",
+};
+
+type BadgeTone = "pink" | "lime" | "orange" | "cyan" | "neutral" | "loss" | "watch";
+const SIGNAL_TONE: Record<string, BadgeTone> = {
+  near_90d_low: "lime",
+  near5y_low_gem: "lime",
+  buy_limit_hit: "lime",
+  buy_limit_warmup: "lime",
+  buy_limit_close: "lime",
+  loser_gem: "lime",
+  big_drop: "orange",
+  price_spike_up: "cyan",
+  volume_spike: "cyan",
+  macro_tide: "cyan",
+  jv_strategic: "pink",
+  "8k_material": "pink",
+  financing: "pink",
+  takeover_bid: "pink",
+  buyout_definitive: "pink",
+  topline_positive: "pink",
+  pfs: "pink",
+  resource_update: "pink",
+  pre_catalyst_7d: "watch",
+  pre_catalyst_14d: "watch",
+  pre_catalyst_30d: "watch",
+  pre_catalyst_60d: "watch",
+};
+
 function signalLabel(t: string): string {
   return SIGNAL_LABELS[t] ?? t;
+}
+function signalTone(t: string): BadgeTone {
+  return SIGNAL_TONE[t] ?? "neutral";
+}
+function signalTitle(t: string): string {
+  return SIGNAL_DESCRIPTIONS[t] ?? signalLabel(t);
 }
 
 function fmtUsd(v: number, decimals = 0): string {
@@ -327,7 +385,7 @@ function OpenPositionsSection({ positions }: { positions: XinixOpenPosition[] })
                       <div className="line-clamp-1" title={p.entry_reason}>{p.entry_reason}</div>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {p.entry_signal_types.slice(0, 3).map((s, i) => (
-                          <Badge key={`${s}-${i}`} tone="neutral">{signalLabel(s)}</Badge>
+                          <Badge key={`${s}-${i}`} tone={signalTone(s)} title={signalTitle(s)}>{signalLabel(s)}</Badge>
                         ))}
                         {p.entry_signal_types.length > 3 && (
                           <span className="text-[10px] text-neutral-500">+{p.entry_signal_types.length - 3}</span>
@@ -345,8 +403,11 @@ function OpenPositionsSection({ positions }: { positions: XinixOpenPosition[] })
   );
 }
 
+const CLOSED_PAGE = 20;
+
 function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[] }) {
   const [show, setShow] = useState<"all" | "winners" | "losers">("all");
+  const [visibleCount, setVisibleCount] = useState(CLOSED_PAGE);
   const filtered = useMemo(() => {
     if (show === "winners") return positions.filter((p) => p.return_pct > 0);
     if (show === "losers") return positions.filter((p) => p.return_pct < 0);
@@ -354,6 +415,12 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
   }, [positions, show]);
   const winners = positions.filter((p) => p.return_pct > 0).length;
   const losers = positions.filter((p) => p.return_pct < 0).length;
+
+  // Reset paginering bij filter-wissel
+  useEffect(() => { setVisibleCount(CLOSED_PAGE); }, [show]);
+
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = filtered.length > visibleCount;
 
   return (
     <section>
@@ -368,6 +435,9 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
             <Pill tone="neutral" active={show === "all"} count={positions.length} onClick={() => setShow("all")} size="sm">Alles</Pill>
             <Pill tone="lime" active={show === "winners"} count={winners} onClick={() => setShow("winners")} size="sm">Winnaars</Pill>
             <Pill tone="loss" active={show === "losers"} count={losers} onClick={() => setShow("losers")} size="sm">Verliezers</Pill>
+            <span className="ml-auto text-[11px] text-neutral-500 self-center">
+              {Math.min(visibleCount, filtered.length)} van {filtered.length} getoond
+            </span>
           </div>
           <Card className="overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
@@ -382,7 +452,7 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((p) => {
+                {visible.map((p) => {
                   const plTone = p.return_pct > 0 ? "text-fog-lime" : p.return_pct < 0 ? "text-fog-loss" : "text-neutral-300";
                   return (
                     <tr key={p.id} className="border-t border-ink-5 hover:bg-ink-3/40">
@@ -405,7 +475,7 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
                         <div className="line-clamp-1" title={p.entry_reason}>{p.entry_reason}</div>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {p.entry_signal_types.slice(0, 3).map((s, i) => (
-                            <Badge key={`${s}-${i}`} tone="neutral">{signalLabel(s)}</Badge>
+                            <Badge key={`${s}-${i}`} tone={signalTone(s)} title={signalTitle(s)}>{signalLabel(s)}</Badge>
                           ))}
                         </div>
                       </td>
@@ -418,6 +488,16 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
               </tbody>
             </table>
           </Card>
+          {hasMore && (
+            <div className="mt-3 text-center">
+              <button
+                onClick={() => setVisibleCount((c) => c + CLOSED_PAGE)}
+                className="text-xs text-neutral-400 hover:text-neutral-100 border border-ink-5 hover:border-ink-6 rounded-lg px-4 py-2 transition-colors"
+              >
+                Laad meer ({filtered.length - visibleCount} rijen resterend)
+              </button>
+            </div>
+          )}
         </>
       )}
     </section>

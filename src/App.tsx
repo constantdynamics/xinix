@@ -17,7 +17,7 @@ import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, fetchScanResults, fetchZwitserlevenResults, getToken, setToken, type ScanResults, type ZwitserlevenResults } from "./api";
 import type { Dashboard } from "./types";
-import { Button, NavTab, Input, Skeleton, Dot } from "./components/ui";
+import { Button, NavTab, Input, Skeleton, Dot, Toaster } from "./components/ui";
 import { DeviceSync } from "./components/DeviceSync";
 import { DEFAULT_TABS as TABS, type Tab, type TabDef } from "./tabsConfig";
 import { useMarks } from "./hooks/useMarks";
@@ -373,6 +373,8 @@ export function App() {
           <span className="tabular">v2 · {new Date().getFullYear()}</span>
         </div>
       </footer>
+
+      <Toaster />
     </div>
   );
 }
