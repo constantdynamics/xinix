@@ -214,6 +214,25 @@ export function HideFavoritesToggle({
   );
 }
 
+export function StarHeader() {
+  return (
+    <th
+      className="px-2 py-2 text-center w-24"
+      title="Sterren — geef 1–5 sterren (geeft ook automatisch een hartje)"
+    >
+      <span aria-hidden>★</span>
+    </th>
+  );
+}
+
+export function StarCell({ ticker }: { ticker: string }) {
+  return (
+    <td className="px-2 py-1.5 text-center align-middle">
+      <StarRating ticker={ticker} />
+    </td>
+  );
+}
+
 // Sterren-rating 1..5 voor favorieten. Klik op ster N = rating N. Klik
 // op de huidige rating = wissen. Werkt optimistisch via useMarks.
 export function StarRating({ ticker, size = "sm" }: { ticker: string; size?: "sm" | "md" }) {

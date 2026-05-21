@@ -17,6 +17,8 @@ import {
   MarkAllSeenButton,
   HideFavoritesToggle,
   NotYetReviewedTile,
+  StarCell,
+  StarHeader,
 } from "../components/MarkCells";
 
 function fmtPrice(v: number): string {
@@ -521,6 +523,7 @@ export function PoefiesView() {
                   <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
                     <SeenHeader />
                     <HeartHeader />
+                    <StarHeader />
                     <th className="px-3 py-2 text-left w-10">#</th>
                     <th className="px-3 py-2 text-left">Ticker</th>
                     {POEFIE_COLUMNS.map((c) => visibleCols.has(c.key) ? (
@@ -548,6 +551,7 @@ export function PoefiesView() {
                       <tr key={p.ticker} className={(atOrBelow ? "bg-fog-lime/[0.05] " : "") + (seen ? "opacity-50" : "")}>
                         <SeenCell ticker={p.ticker} />
                         <HeartCell ticker={p.ticker} />
+                        <StarCell ticker={p.ticker} />
                         <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2 flex-wrap">
