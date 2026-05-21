@@ -2457,13 +2457,18 @@ export function PhoenixView() {
 }
 
 // ── FamiliesView ────────────────────────────────────────────────────────────
-// Per-groep gemiddelde return + tijd-lijngrafiek over alle groepen heen.
+// Per-groep gemiddelde return + tijd-lijngrafiek. Twee views: ploegen (familie-
+// gemiddelden) en individueel (alle 200 strategieën). Grafiek en tabel hebben
+// elk een eigen toggle — vergelijkbaar met het wiel­rennen-klassement.
 function FamiliesView() {
   const [data, setData] = useState<SimResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set());
-  const [sortBy, setSortBy] = useState<"avg" | "n" | "best" | "worst" | "grp">("avg");
+  const [familySortBy, setFamilySortBy] = useState<"avg" | "n" | "best" | "worst" | "grp">("avg");
+  const [indivSortBy, setIndivSortBy] = useState<"return" | "equity" | "winrate" | "closed">("return");
+  const [chartView, setChartView] = useState<"ploegen" | "individueel">("ploegen");
+  const [tableView, setTableView] = useState<"ploegen" | "individueel">("ploegen");
 
   useEffect(() => {
     setLoading(true);
@@ -2477,8 +2482,14 @@ function FamiliesView() {
   if (!data?.families) return <Card className="p-6 text-sm text-neutral-500">Nog geen familie-data beschikbaar. Wacht tot de eerstvolgende sim-run (22:30 UTC).</Card>;
 
   const { groups, dates } = data.families;
-  const sorted = [...groups].sort((a, b) => {
-    switch (sortBy) {
+
+  const groupColorMap = new Map<string, string>(
+    groups.map((g, idx) => [g.grp, `hsl(${Math.round((idx * 360) / Math.max(groups.length, 1))} 70% 55%)`])
+  );
+  const colorFor = (grp: string) => groupColorMap.get(grp) ?? "#9ca3af";
+
+  const familySorted = [...groups].sort((a, b) => {
+    switch (familySortBy) {
       case "n": return b.n - a.n;
       case "best": return (b.best_return_pct ?? -Infinity) - (a.best_return_pct ?? -Infinity);
       case "worst": return (a.worst_return_pct ?? Infinity) - (b.worst_return_pct ?? Infinity);
@@ -2487,13 +2498,22 @@ function FamiliesView() {
     }
   });
 
-  // ── SVG chart ─────────────────────────────────────────────────────────────
+  const allStrategies = data.strategies ?? [];
+  const indivSorted = [...allStrategies].sort((a, b) => {
+    switch (indivSortBy) {
+      case "equity": return (b.total_equity ?? 0) - (a.total_equity ?? 0);
+      case "winrate": return (b.win_rate ?? 0) - (a.win_rate ?? 0);
+      case "closed": return (b.closed_count ?? 0) - (a.closed_count ?? 0);
+      default: return (b.total_return_pct ?? -Infinity) - (a.total_return_pct ?? -Infinity);
+    }
+  });
+
+  // ── Ploegen-grafiek (lijnen per familie) ───────────────────────────────────
   const W = 900, H = 360;
   const PAD = { l: 50, r: 20, t: 16, b: 36 };
   const cw = W - PAD.l - PAD.r;
   const ch = H - PAD.t - PAD.b;
   const visibleGroups = groups.filter((g) => !hiddenGroups.has(g.grp));
-  // Y-range over alle zichtbare groepen + alle dagen
   let yMin = 0, yMax = 0;
   for (const g of visibleGroups) {
     for (const p of g.series) {
@@ -2502,23 +2522,42 @@ function FamiliesView() {
       if (p.avg_return_pct > yMax) yMax = p.avg_return_pct;
     }
   }
-  // Buffer + symmetry around 0
   const pad = Math.max(0.5, (yMax - yMin) * 0.1);
   yMin -= pad; yMax += pad;
   if (yMin > 0) yMin = 0;
   if (yMax < 0) yMax = 0.5;
-
-  const x = (i: number) => PAD.l + (dates.length <= 1 ? cw / 2 : (i * cw) / (dates.length - 1));
-  const y = (v: number) => PAD.t + (1 - (v - yMin) / (yMax - yMin)) * ch;
-  const yZero = y(0);
-
-  // Genereer kleuren in HSL spread
-  const colorFor = (idx: number, total: number) => `hsl(${Math.round((idx * 360) / Math.max(total, 1))} 70% 55%)`;
-
-  const yTicks: number[] = [];
+  const xLine = (i: number) => PAD.l + (dates.length <= 1 ? cw / 2 : (i * cw) / (dates.length - 1));
+  const yScale = (v: number) => PAD.t + (1 - (v - yMin) / (yMax - yMin)) * ch;
+  const yZero = yScale(0);
   const range = yMax - yMin;
   const tickStep = range >= 50 ? 10 : range >= 10 ? 5 : range >= 2 ? 1 : 0.5;
+  const yTicks: number[] = [];
   for (let v = Math.ceil(yMin / tickStep) * tickStep; v <= yMax; v += tickStep) yTicks.push(v);
+
+  // ── Individueel-grafiek (staafdiagram) ─────────────────────────────────────
+  const BAR_W = 900, BAR_H = 360;
+  const BPAD = { l: 50, r: 20, t: 16, b: 36 };
+  const bcw = BAR_W - BPAD.l - BPAD.r;
+  const bch = BAR_H - BPAD.t - BPAD.b;
+  const barStrategies = [...allStrategies].sort((a, b) => (b.total_return_pct ?? -Infinity) - (a.total_return_pct ?? -Infinity));
+  let byMin = 0, byMax = 0;
+  for (const s of barStrategies) {
+    const v = s.total_return_pct ?? 0;
+    if (v < byMin) byMin = v;
+    if (v > byMax) byMax = v;
+  }
+  const bpad = Math.max(0.5, (byMax - byMin) * 0.1);
+  byMin -= bpad; byMax += bpad;
+  if (byMin > 0) byMin = 0;
+  if (byMax < 0) byMax = 0.5;
+  const byScale = (v: number) => BPAD.t + (1 - (v - byMin) / (byMax - byMin)) * bch;
+  const byZero = byScale(0);
+  const bRange = byMax - byMin;
+  const bTickStep = bRange >= 50 ? 10 : bRange >= 10 ? 5 : bRange >= 2 ? 1 : 0.5;
+  const byTicks: number[] = [];
+  for (let v = Math.ceil(byMin / bTickStep) * bTickStep; v <= byMax; v += bTickStep) byTicks.push(v);
+  const barGap = barStrategies.length > 0 ? bcw / barStrategies.length : 5;
+  const barWidth = Math.max(1, barGap * 0.85);
 
   function toggleGroup(grp: string) {
     setHiddenGroups((prev) => {
@@ -2539,8 +2578,8 @@ function FamiliesView() {
               Gemiddeld rendement per familie (strategie-groep). Elke groep test één dimensie:
               A-Score = score-drempel sweep · K-Profiel = agressieve profielen · X-Hikkertjes =
               momentum-plays op explosieve dagstijgers · Y-Zwitserleven = high-yield fallen angels
-              (incl. dividend). De grafiek toont het gemiddelde verloop per familie over tijd.
-              Klik op een groep in de legenda om te tonen/verbergen.
+              (incl. dividend). Gebruik de knoppen om te schakelen tussen ploegengemiddelden en
+              individuele strategieën.
             </p>
           </div>
         </div>
@@ -2548,113 +2587,182 @@ function FamiliesView() {
 
       {/* Chart */}
       <Card className="p-4">
-        <div className="text-xs text-neutral-500 mb-2">
-          Gemiddelde return% per familie over {dates.length} dagen
-          ({dates.length > 0 ? `${dates[0]} → ${dates[dates.length - 1]}` : "—"})
+        <div className="flex items-center gap-2 mb-3">
+          <button
+            onClick={() => setChartView("ploegen")}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+              chartView === "ploegen"
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            🏆 Ploegengemiddelden
+          </button>
+          <button
+            onClick={() => setChartView("individueel")}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+              chartView === "individueel"
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            🚴 Individueel
+          </button>
+          <span className="text-xs text-neutral-500 ml-2">
+            {chartView === "ploegen"
+              ? `Gemiddelde return% per familie over ${dates.length} dagen (${dates.length > 0 ? `${dates[0]} → ${dates[dates.length - 1]}` : "—"})`
+              : `${barStrategies.length} strategieën gesorteerd op return%`}
+          </span>
         </div>
-        <div className="overflow-x-auto">
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" style={{ minWidth: 600 }}>
-            {/* Y-grid */}
-            {yTicks.map((v, i) => (
-              <g key={i}>
-                <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="#374151" strokeWidth="0.5" strokeDasharray={v === 0 ? "" : "2,3"} />
-                <text x={PAD.l - 6} y={y(v) + 3} textAnchor="end" fill="#9ca3af" fontSize="10">{v.toFixed(range >= 10 ? 0 : 1)}%</text>
-              </g>
-            ))}
-            {/* Zero baseline (highlight) */}
-            <line x1={PAD.l} x2={W - PAD.r} y1={yZero} y2={yZero} stroke="#6b7280" strokeWidth="1" />
 
-            {/* X-axis labels (first, middle, last) */}
-            {dates.length > 0 && (
-              <>
-                <text x={PAD.l} y={H - PAD.b + 16} textAnchor="start" fill="#9ca3af" fontSize="10">{dates[0]}</text>
-                {dates.length > 2 && (
-                  <text x={W / 2} y={H - PAD.b + 16} textAnchor="middle" fill="#9ca3af" fontSize="10">
-                    {dates[Math.floor(dates.length / 2)]}
-                  </text>
-                )}
-                <text x={W - PAD.r} y={H - PAD.b + 16} textAnchor="end" fill="#9ca3af" fontSize="10">{dates[dates.length - 1]}</text>
-              </>
-            )}
-
-            {/* Lines per group */}
-            {groups.map((g, idx) => {
-              const color = colorFor(idx, groups.length);
-              const hidden = hiddenGroups.has(g.grp);
-              if (hidden) return null;
-              const pts: Array<[number, number]> = [];
-              g.series.forEach((p, i) => {
-                if (p.avg_return_pct != null) pts.push([x(i), y(p.avg_return_pct)]);
-              });
-              if (pts.length === 0) return null;
-              const d = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
-              return (
-                <g key={g.grp}>
-                  <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-                  {pts.length === 1 && <circle cx={pts[0][0]} cy={pts[0][1]} r="2" fill={color} />}
+        {chartView === "ploegen" ? (
+          <>
+            <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
+              {yTicks.map((v, i) => (
+                <g key={i}>
+                  <line x1={PAD.l} x2={W - PAD.r} y1={yScale(v)} y2={yScale(v)} stroke="#374151" strokeWidth="0.5" strokeDasharray={v === 0 ? "" : "2,3"} />
+                  <text x={PAD.l - 6} y={yScale(v) + 3} textAnchor="end" fill="#9ca3af" fontSize="10">{v.toFixed(range >= 10 ? 0 : 1)}%</text>
                 </g>
-              );
-            })}
-          </svg>
-        </div>
-
-        {/* Legend / toggles */}
-        <div className="mt-4 flex flex-wrap gap-1.5">
-          {groups.map((g, idx) => {
-            const color = colorFor(idx, groups.length);
-            const hidden = hiddenGroups.has(g.grp);
-            return (
-              <button
-                key={g.grp}
-                onClick={() => toggleGroup(g.grp)}
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
-                  hidden ? "opacity-30 border-ink-5" : "border-ink-5/60 hover:border-ink-5"
-                }`}
-                title={hidden ? "Toon" : "Verberg"}
-              >
-                <span className="w-3 h-1.5 rounded-sm" style={{ backgroundColor: color }} />
-                <span>{g.grp}</span>
-              </button>
-            );
-          })}
-        </div>
+              ))}
+              <line x1={PAD.l} x2={W - PAD.r} y1={yZero} y2={yZero} stroke="#6b7280" strokeWidth="1" />
+              {dates.length > 0 && (
+                <>
+                  <text x={PAD.l} y={H - PAD.b + 16} textAnchor="start" fill="#9ca3af" fontSize="10">{dates[0]}</text>
+                  {dates.length > 2 && (
+                    <text x={W / 2} y={H - PAD.b + 16} textAnchor="middle" fill="#9ca3af" fontSize="10">
+                      {dates[Math.floor(dates.length / 2)]}
+                    </text>
+                  )}
+                  <text x={W - PAD.r} y={H - PAD.b + 16} textAnchor="end" fill="#9ca3af" fontSize="10">{dates[dates.length - 1]}</text>
+                </>
+              )}
+              {groups.map((g) => {
+                if (hiddenGroups.has(g.grp)) return null;
+                const pts: Array<[number, number]> = [];
+                g.series.forEach((p, i) => {
+                  if (p.avg_return_pct != null) pts.push([xLine(i), yScale(p.avg_return_pct)]);
+                });
+                if (pts.length === 0) return null;
+                const d = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+                return (
+                  <g key={g.grp}>
+                    <path d={d} fill="none" stroke={colorFor(g.grp)} strokeWidth="1.5" strokeLinejoin="round" />
+                    {pts.length === 1 && <circle cx={pts[0][0]} cy={pts[0][1]} r="2" fill={colorFor(g.grp)} />}
+                  </g>
+                );
+              })}
+            </svg>
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {groups.map((g) => {
+                const hidden = hiddenGroups.has(g.grp);
+                return (
+                  <button
+                    key={g.grp}
+                    onClick={() => toggleGroup(g.grp)}
+                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+                      hidden ? "opacity-30 border-ink-5" : "border-ink-5/60 hover:border-ink-5"
+                    }`}
+                    title={hidden ? "Toon" : "Verberg"}
+                  >
+                    <span className="w-3 h-1.5 rounded-sm" style={{ backgroundColor: colorFor(g.grp) }} />
+                    <span>{g.grp}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <svg viewBox={`0 0 ${BAR_W} ${BAR_H}`} className="w-full h-auto">
+              {byTicks.map((v, i) => (
+                <g key={i}>
+                  <line x1={BPAD.l} x2={BAR_W - BPAD.r} y1={byScale(v)} y2={byScale(v)} stroke="#374151" strokeWidth="0.5" strokeDasharray={v === 0 ? "" : "2,3"} />
+                  <text x={BPAD.l - 6} y={byScale(v) + 3} textAnchor="end" fill="#9ca3af" fontSize="10">{v.toFixed(bRange >= 10 ? 0 : 1)}%</text>
+                </g>
+              ))}
+              <line x1={BPAD.l} x2={BAR_W - BPAD.r} y1={byZero} y2={byZero} stroke="#6b7280" strokeWidth="1" />
+              {barStrategies.map((s, i) => {
+                const v = s.total_return_pct ?? 0;
+                const bx = BPAD.l + i * barGap + barGap / 2 - barWidth / 2;
+                const barTop = v >= 0 ? byScale(v) : byZero;
+                const barH = Math.abs(byScale(v) - byZero);
+                return (
+                  <rect key={s.slug} x={bx} y={barTop} width={barWidth} height={Math.max(barH, 0.5)} fill={colorFor(s.grp)} opacity="0.85">
+                    <title>{s.name ?? s.slug}: {v >= 0 ? "+" : ""}{v.toFixed(2)}%</title>
+                  </rect>
+                );
+              })}
+            </svg>
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {groups.map((g) => (
+                <div key={g.grp} className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border border-ink-5/60">
+                  <span className="w-3 h-1.5 rounded-sm" style={{ backgroundColor: colorFor(g.grp) }} />
+                  <span>{g.grp}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </Card>
 
       {/* Tabel */}
       <Card className="p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-ink-5 flex items-center justify-between text-sm">
-          <div className="font-semibold">Per-familie statistieken</div>
-          <div className="text-xs text-neutral-500">{groups.length} families · klik kolomkop om te sorteren</div>
+        <div className="px-4 py-3 border-b border-ink-5 flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => setTableView("ploegen")}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              tableView === "ploegen"
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            🏆 Ploegenklassement
+          </button>
+          <button
+            onClick={() => setTableView("individueel")}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              tableView === "individueel"
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            🚴 Individueel klassement
+          </button>
+          <span className="text-xs text-neutral-500 ml-auto">
+            {tableView === "ploegen"
+              ? `${groups.length} families · klik kolomkop om te sorteren`
+              : `${indivSorted.length} strategieën · klik kolomkop om te sorteren`}
+          </span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b border-ink-5 bg-ink-2/40">
-              <tr>
-                {([
-                  ["grp",   "Familie"],
-                  ["n",     "Strategieën"],
-                  ["avg",   "Gem. return"],
-                  ["best",  "Beste"],
-                  ["worst", "Slechtste"],
-                ] as const).map(([key, label]) => (
-                  <th
-                    key={key}
-                    onClick={() => setSortBy(key)}
-                    className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide cursor-pointer hover:text-neutral-200 select-none"
-                  >
-                    {label}{sortBy === key ? " ▼" : " ·"}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-5">
-              {sorted.map((g, idx) => {
-                const color = colorFor(groups.findIndex((x) => x.grp === g.grp), groups.length);
-                return (
+
+        {tableView === "ploegen" ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-ink-5 bg-ink-2/40">
+                <tr>
+                  {([
+                    ["grp",   "Familie"],
+                    ["n",     "Strategieën"],
+                    ["avg",   "Gem. return"],
+                    ["best",  "Beste"],
+                    ["worst", "Slechtste"],
+                  ] as const).map(([key, label]) => (
+                    <th
+                      key={key}
+                      onClick={() => setFamilySortBy(key)}
+                      className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide cursor-pointer hover:text-neutral-200 select-none"
+                    >
+                      {label}{familySortBy === key ? " ▼" : " ·"}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-5">
+                {familySorted.map((g, idx) => (
                   <tr key={g.grp} className="hover:bg-ink-3/30">
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
-                        <span className="w-3 h-1.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+                        <span className="w-3 h-1.5 rounded-sm shrink-0" style={{ backgroundColor: colorFor(g.grp) }} />
                         <span className="font-mono text-xs text-neutral-200">{g.grp}</span>
                         <span className="text-[10px] text-neutral-600 tabular w-6 text-right">#{idx + 1}</span>
                       </div>
@@ -2686,11 +2794,68 @@ function FamiliesView() {
                       ) : "—"}
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-ink-5 bg-ink-2/40">
+                <tr>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Strategie</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Familie</th>
+                  {([
+                    ["return",  "Return%"],
+                    ["equity",  "Equity"],
+                    ["winrate", "Hit-rate"],
+                    ["closed",  "Trades"],
+                  ] as const).map(([key, label]) => (
+                    <th
+                      key={key}
+                      onClick={() => setIndivSortBy(key)}
+                      className="px-3 py-2 text-right text-[11px] font-semibold text-neutral-400 uppercase tracking-wide cursor-pointer hover:text-neutral-200 select-none"
+                    >
+                      {label}{indivSortBy === key ? " ▼" : " ·"}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-5">
+                {indivSorted.map((s, idx) => (
+                  <tr key={s.slug} className="hover:bg-ink-3/30">
+                    <td className="px-3 py-2 text-[10px] text-neutral-600 tabular">{idx + 1}</td>
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-xs text-neutral-200">{s.slug}</div>
+                      {s.name && <div className="text-[10px] text-neutral-500">{s.name}</div>}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: colorFor(s.grp) }} />
+                        <span className="text-[10px] font-mono text-neutral-400">{s.grp}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular font-mono text-sm">
+                      <span className={(s.total_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-fog-loss"}>
+                        {(s.total_return_pct ?? 0) >= 0 ? "+" : ""}{(s.total_return_pct ?? 0).toFixed(2)}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular text-xs text-neutral-300">
+                      ${(s.total_equity ?? 0).toFixed(0)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular text-xs text-neutral-300">
+                      {s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular text-xs text-neutral-400">
+                      {s.closed_count ?? 0}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );
