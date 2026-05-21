@@ -245,6 +245,30 @@ Deno.serve(async (req) => {
       recommendations.push("⏳ Nog onvoldoende gesloten posities voor betrouwbare inzichten. Inzichten worden rijker na 30–60+ dagen.");
     }
 
+    // ── Signal-type statistieken (over alle strategieën, alle gesloten posities) ──
+    const sigStats = new Map<string, { count: number; wins: number; sumRet: number }>();
+    for (const p of (closedRes.data ?? [])) {
+      const signals = (p.entry_signal_types as string[]) ?? [];
+      const ret = Number(p.return_pct ?? 0);
+      for (const s of signals) {
+        if (!s) continue;
+        const cur = sigStats.get(s) ?? { count: 0, wins: 0, sumRet: 0 };
+        cur.count++;
+        if (ret > 0) cur.wins++;
+        cur.sumRet += ret;
+        sigStats.set(s, cur);
+      }
+    }
+    const signal_type_stats = [...sigStats.entries()]
+      .map(([signal_type, v]) => ({
+        signal_type,
+        count: v.count,
+        win_rate: v.count > 0 ? v.wins / v.count : 0,
+        avg_return_pct: v.count > 0 ? v.sumRet / v.count : 0,
+      }))
+      .filter((v) => v.count >= 3)
+      .sort((a, b) => b.avg_return_pct - a.avg_return_pct);
+
     // ── Evolutie-metadata ─────────────────────────────────────────────────────
     const evolveRuns = evolveRunRes.data ?? [];
     const lastEvolveAt = evolveRuns[0]?.ran_at ?? null;
@@ -331,6 +355,7 @@ Deno.serve(async (req) => {
       strategies: results,
       insights: insights.filter(Boolean),
       recommendations,
+      signal_type_stats,
       families: { groups: families, dates: allDates },
       meta: { total: results.length, last_run_at: lastRun, strategies_with_closed_positions: runCount },
       evolution: {

@@ -13,6 +13,7 @@ import {
   type XinixOpenPosition,
   type XinixClosedPosition,
   type SimResults,
+  type SimSignalTypeStat,
   type SimStrategy,
   type SimEvolution,
   type SimPosDetail,
@@ -1284,19 +1285,197 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   );
 }
 
+// ── Horizontale balk voor bar-charts ──────────────────────────────────────────
+function HBar({
+  value,
+  maxAbs,
+  isBest,
+  isWorst,
+}: {
+  value: number;
+  maxAbs: number;
+  isBest?: boolean;
+  isWorst?: boolean;
+}) {
+  const width = maxAbs > 0 ? Math.min(100, (Math.abs(value) / maxAbs) * 100) : 0;
+  const positive = value >= 0;
+  return (
+    <div className="relative h-5 rounded-sm overflow-hidden bg-ink-3/40 flex-1">
+      <div
+        className={`absolute top-0 bottom-0 rounded-sm transition-all ${
+          positive
+            ? isBest ? "bg-fog-lime/60" : "bg-fog-lime/30"
+            : isWorst ? "bg-fog-loss/60" : "bg-fog-loss/30"
+        }`}
+        style={{ width: `${width}%` }}
+      />
+      <span
+        className={`absolute inset-y-0 left-1.5 flex items-center text-[11px] font-mono font-semibold ${
+          positive ? "text-fog-lime" : "text-fog-loss"
+        }`}
+      >
+        {value >= 0 ? "+" : ""}{value.toFixed(1)}%
+      </span>
+    </div>
+  );
+}
+
+// ── Enkelvoudige dimensie-rij met bar-chart ───────────────────────────────────
+function DimensionInsightRow({ ins }: { ins: import("../api").SimInsight }) {
+  const maxAbs = Math.max(...ins.entries.map((e) => Math.abs(e.avgRet)), 0.01);
+  return (
+    <div className="p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-neutral-200">{ins.dimension}</span>
+        <span className="text-[11px] text-neutral-500">
+          spreiding{" "}
+          <span className="text-fog-lime font-mono font-semibold">+{ins.diff.toFixed(1)}%</span>
+        </span>
+      </div>
+      <div className="space-y-1">
+        {ins.entries.map((e) => (
+          <div key={e.value} className="flex items-center gap-2">
+            <span
+              className="text-[11px] font-mono text-neutral-300 shrink-0 text-right"
+              style={{ width: "9rem" }}
+              title={`n=${e.count}`}
+            >
+              {e.value === ins.best ? "🏆 " : e.value === ins.worst ? "▼ " : "   "}
+              {e.value}
+            </span>
+            <HBar value={e.avgRet} maxAbs={maxAbs} isBest={e.value === ins.best} isWorst={e.value === ins.worst} />
+            <span className="text-[10px] text-neutral-500 shrink-0 w-10 text-right">n={e.count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Signaaltype bar-chart ─────────────────────────────────────────────────────
+function SignalTypeChart({ stats }: { stats: SimSignalTypeStat[] }) {
+  const maxAbs = Math.max(...stats.map((s) => Math.abs(s.avg_return_pct)), 0.01);
+  return (
+    <div className="space-y-1.5">
+      {stats.map((s, i) => (
+        <div key={s.signal_type} className="flex items-center gap-2">
+          <span
+            className="text-[11px] font-mono text-neutral-300 shrink-0 text-right"
+            style={{ width: "10rem" }}
+            title={`Win-rate: ${(s.win_rate * 100).toFixed(0)}% · n=${s.count}`}
+          >
+            {i === 0 ? "🏆 " : "   "}
+            {SIGNAL_LABELS[s.signal_type] ?? s.signal_type}
+          </span>
+          <HBar value={s.avg_return_pct} maxAbs={maxAbs} isBest={i === 0} isWorst={i === stats.length - 1} />
+          <span className="text-[10px] text-neutral-500 shrink-0 w-14 text-right">
+            {(s.win_rate * 100).toFixed(0)}% win
+          </span>
+          <span className="text-[10px] text-neutral-500 shrink-0 w-10 text-right">n={s.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── "Wat werkt?" samenvatting ─────────────────────────────────────────────────
+function WatWerktCard({
+  insights,
+  signal_type_stats,
+  meta,
+}: {
+  insights: import("../api").SimInsight[];
+  signal_type_stats?: SimSignalTypeStat[];
+  meta: SimResults["meta"];
+}) {
+  if (meta.strategies_with_closed_positions === 0) {
+    return (
+      <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.04]">
+        <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+          Wat werkt?
+        </div>
+        <p className="text-xs text-neutral-400 italic">
+          ⏳ Nog geen gesloten trades — inzichten verschijnen nadat de eerste posities sluiten
+          (na 20–180 dagen, afhankelijk van strategie).
+        </p>
+      </Card>
+    );
+  }
+
+  const topDims = [...insights]
+    .sort((a, b) => b.diff - a.diff)
+    .slice(0, 3);
+
+  const bestSignal = signal_type_stats?.[0];
+  const worstSignal = signal_type_stats?.[signal_type_stats.length - 1];
+
+  return (
+    <Card className="p-4 border-fog-lime/20 bg-fog-lime/[0.03] space-y-3">
+      <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+        Wat werkt? — Samenvatting
+      </div>
+      <ul className="space-y-1.5 text-xs text-neutral-300 leading-relaxed">
+        {topDims.map((d) => (
+          <li key={d.dimension}>
+            <span className="text-neutral-500">→</span>{" "}
+            <span className="font-semibold text-neutral-200">{d.dimension}:</span>{" "}
+            <span className="text-fog-lime font-mono">{d.best}</span> presteert{" "}
+            <span className="text-fog-lime font-mono">+{d.diff.toFixed(1)}%</span> beter dan{" "}
+            <span className="text-fog-loss font-mono">{d.worst}</span>
+          </li>
+        ))}
+        {bestSignal && (
+          <li>
+            <span className="text-neutral-500">→</span>{" "}
+            <span className="font-semibold text-neutral-200">Beste signaaltype:</span>{" "}
+            <span className="text-fog-lime font-mono">
+              {SIGNAL_LABELS[bestSignal.signal_type] ?? bestSignal.signal_type}
+            </span>{" "}
+            (gem.{" "}
+            <span className="text-fog-lime font-mono">
+              {bestSignal.avg_return_pct >= 0 ? "+" : ""}
+              {bestSignal.avg_return_pct.toFixed(1)}%
+            </span>
+            , win-rate{" "}
+            <span className="font-mono">{(bestSignal.win_rate * 100).toFixed(0)}%</span>
+            , n={bestSignal.count})
+          </li>
+        )}
+        {worstSignal && worstSignal !== bestSignal && (
+          <li>
+            <span className="text-neutral-500">→</span>{" "}
+            <span className="font-semibold text-neutral-200">Zwakste signaaltype:</span>{" "}
+            <span className="text-fog-loss font-mono">
+              {SIGNAL_LABELS[worstSignal.signal_type] ?? worstSignal.signal_type}
+            </span>{" "}
+            (gem.{" "}
+            <span className={`font-mono ${worstSignal.avg_return_pct >= 0 ? "text-fog-lime" : "text-fog-loss"}`}>
+              {worstSignal.avg_return_pct >= 0 ? "+" : ""}
+              {worstSignal.avg_return_pct.toFixed(1)}%
+            </span>
+            , n={worstSignal.count})
+          </li>
+        )}
+      </ul>
+    </Card>
+  );
+}
+
 function SimInsightsSection({ sim }: { sim: SimResults }) {
-  const { insights, recommendations, meta } = sim;
+  const { insights, recommendations, meta, signal_type_stats } = sim;
+
   return (
     <div className="space-y-4">
-      {/* Recommendations */}
+      {/* Wat werkt? samenvatting */}
+      <WatWerktCard insights={insights} signal_type_stats={signal_type_stats} meta={meta} />
+
+      {/* Aanbevelingen */}
       <Card className="p-4 space-y-3">
         <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
-          Aanbevelingen voor het dashboard
+          Aanbevelingen
         </div>
         {meta.strategies_with_closed_positions === 0 ? (
-          <p className="text-xs text-neutral-400 italic">
-            ⏳ Nog geen gesloten trades — inzichten verschijnen nadat de eerste posities sluiten (na 20–180 dagen, afhankelijk van strategie).
-          </p>
+          <p className="text-xs text-neutral-400 italic">Nog geen data.</p>
         ) : (
           <ul className="space-y-2">
             {recommendations.map((r, i) => (
@@ -1306,45 +1485,28 @@ function SimInsightsSection({ sim }: { sim: SimResults }) {
         )}
       </Card>
 
-      {/* Per-dimension insights */}
+      {/* Per-dimension insights met bar-charts */}
       {insights.length > 0 && (
         <Card className="p-0 overflow-hidden">
           <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
-            Resultaten per configuratie-dimensie
+            Rendement per configuratie-dimensie
           </div>
           <div className="divide-y divide-ink-5/40">
             {insights.map((ins) => (
-              <div key={ins.dimension} className="p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-neutral-200">{ins.dimension}</span>
-                  <span className="text-[11px] text-neutral-400">
-                    beste: <span className="text-fog-lime font-mono">{ins.best}</span>
-                    {" vs slechtste: "}
-                    <span className="text-fog-loss font-mono">{ins.worst}</span>
-                    {" ("}
-                    <span className="text-fog-lime">+{ins.diff.toFixed(1)}%</span>
-                    {" verschil)"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {ins.entries.map((e) => (
-                    <span
-                      key={e.value}
-                      title={`${e.value}: gem. ${fmtPct2(e.avgRet)} (n=${e.count})`}
-                      className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
-                        e.value === ins.best
-                          ? "border-fog-lime/50 bg-fog-lime/10 text-fog-lime"
-                          : e.value === ins.worst
-                          ? "border-fog-loss/50 bg-fog-loss/10 text-fog-loss"
-                          : "border-ink-5 text-neutral-400"
-                      }`}
-                    >
-                      {e.value} {fmtPct2(e.avgRet)}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <DimensionInsightRow key={ins.dimension} ins={ins} />
             ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Signaaltype rendement */}
+      {signal_type_stats && signal_type_stats.length > 0 && (
+        <Card className="p-0 overflow-hidden">
+          <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
+            Rendement per signaaltype
+          </div>
+          <div className="p-3">
+            <SignalTypeChart stats={signal_type_stats} />
           </div>
         </Card>
       )}
