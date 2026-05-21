@@ -4,6 +4,7 @@
 // trials_polled_at NULLS FIRST. Dit is de primaire bron van biotech-catalysts.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { checkAuth, checkCron, checkAdminOrCron } from "../_shared/auth.ts";
 
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
@@ -27,9 +28,6 @@ async function logRun(job: string, fn: () => Promise<RunResult>): Promise<RunRes
     throw e;
   }
 }
-function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r) return false; return (req.headers.get("authorization") ?? "") === `Bearer ${r}`; }
-function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
-function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
 function runBackground(job: string, fn: () => Promise<RunResult>) {
   return async (req: Request) => {
     if (req.method === "OPTIONS") return new Response(null, { status: 204 });

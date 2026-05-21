@@ -28,11 +28,8 @@ function getServiceClient() {
   if (!u || !k) throw new Error("env");
   return createClient(u, k, { auth: { persistSession: false, autoRefreshToken: false } });
 }
-function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r) return false; return (req.headers.get("authorization") ?? "") === `Bearer ${r}`; }
-function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
-
-// ── Transactiekosten ──────────────────────────────────────────────────────────
-const TX_COST = 0.001; // 0,1% per transactie (koop + verkoop) — marktconform
+import { checkAuth, checkCron, checkAdminOrCron } from "../_shared/auth.ts";
+import { TX_COST } from "../_shared/constants.ts";
 
 // ── Strategy config type ──────────────────────────────────────────────────────
 interface Cfg {

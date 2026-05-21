@@ -24,6 +24,7 @@ import {
   toast,
 } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
+import { useDebounce } from "../hooks/useDebounce";
 import {
   HeartCell,
   HeartHeader,
@@ -288,8 +289,10 @@ export function TickersView({
     });
   }
 
+  const debouncedWlQuery = useDebounce(wlQuery, 250);
+
   const wlFiltered = useMemo(() => {
-    const q = wlQuery.trim().toLowerCase();
+    const q = debouncedWlQuery.trim().toLowerCase();
     let rows = data.cards;
     if (!showSeen) {
       rows = rows.filter((c) => !marks.isSeen(c.ticker));
@@ -312,7 +315,7 @@ export function TickersView({
       );
     }
     return rows;
-  }, [data.cards, wlQuery, scanFilter, showSeen, hideFavorites, marks]);
+  }, [data.cards, debouncedWlQuery, scanFilter, showSeen, hideFavorites, marks]);
 
   // Reset naar pagina 0 als de filter de huidige pagina overbodig maakt.
   useEffect(() => {

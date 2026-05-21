@@ -39,12 +39,10 @@ async function logRun(job: string, fn: () => Promise<RunResult>): Promise<RunRes
     throw e;
   }
 }
-function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r) return false; return (req.headers.get("authorization") ?? "") === `Bearer ${r}`; }
-function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
-function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
+import { checkAuth, checkCron, checkAdminOrCron } from "../_shared/auth.ts";
+import { TX_COST } from "../_shared/constants.ts";
 
-// TX_COST en RED_SEVERITY_QUALIFIES zijn niet instelbaar via de DB — zij blijven constant.
-const TX_COST = 0.001;            // 0,1% per transactie (marktconforme papierkosten)
+// RED_SEVERITY_QUALIFIES is niet instelbaar via de DB — blijft constant.
 const RED_SEVERITY_QUALIFIES = true;
 
 const POSITIVE_SIGNAL_TYPES = new Set([

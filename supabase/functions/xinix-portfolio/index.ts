@@ -5,6 +5,7 @@
 // posities (win-rate, gem. rendement). Geen auth nodig.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { TX_COST } from "../_shared/constants.ts";
 
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
@@ -117,9 +118,7 @@ Deno.serve(async (req) => {
     }
 
     const now = Date.now();
-    // TX_COST per CLAUDE.md spec — cost basis includes the 0,1% transactiekost
     // die bij entry is betaald (cash -= qty × prijs × (1 + TX_COST)).
-    const TX_COST = 0.001;
     const openPositions: OpenPosition[] = (openRes.data ?? []).map((p: Record<string, unknown>) => {
       const ticker = p.ticker as string;
       const qty = Number(p.qty);

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DashboardView } from "./views/Dashboard";
 import { SettingsView } from "./views/Settings";
 import { TickersView } from "./views/Tickers";
@@ -61,12 +62,24 @@ export function App() {
     setTabRaw(t);
     try { sessionStorage.setItem(TAB_KEY, t); } catch { /* ignore */ }
   };
-  const [data, setData] = useState<Dashboard | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    data,
+    error: queryError,
+    isFetching,
+    dataUpdatedAt,
+    refetch: refresh,
+  } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: fetchDashboard,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+  const loading = isFetching && !data;
+  const error = queryError ? (queryError instanceof Error ? queryError.message : String(queryError)) : null;
+  const lastFetchAt = dataUpdatedAt || null;
+
   const [tokenInput, setTokenInput] = useState(getToken() ?? "");
   const [showTokenBar, setShowTokenBar] = useState(false);
-  const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
   const [uiSettings, setUiSettings] = useState<UiSettings | null>(null);
 
   // UI-settings 1× laden + opnieuw na save (via custom event).
@@ -97,25 +110,6 @@ export function App() {
     return list;
   }, [uiSettings]);
 
-  async function refresh() {
-    try {
-      setLoading(true);
-      const d = await fetchDashboard();
-      setData(d);
-      setError(null);
-      setLastFetchAt(Date.now());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 60_000);
-    return () => clearInterval(id);
-  }, []);
 
   // Counts per tab — kleine cijfers naast tab-label
   const counts = useMemo<Partial<Record<Tab, number>>>(() => {
@@ -221,7 +215,7 @@ export function App() {
             <Button
               size="sm"
               variant="secondary"
-              onClick={refresh}
+              onClick={() => void refresh()}
               disabled={loading}
               title="Vernieuw"
             >

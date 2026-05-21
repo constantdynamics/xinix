@@ -1139,10 +1139,13 @@ function StrategyDetailPanel({ s, all }: { s: SimStrategy; all: SimStrategy[] })
   );
 }
 
+const SIM_PAGE = 50;
+
 function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   const [grpFilter, setGrpFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"rank" | "winrate" | "closed">("rank");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [visibleCount, setVisibleCount] = useState(SIM_PAGE);
 
   const groups = useMemo(() => ["all", ...new Set(strategies.map((s) => s.grp))], [strategies]);
   const filtered = useMemo(() => {
@@ -1151,6 +1154,12 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
     else if (sortBy === "closed") rows = [...rows].sort((a, b) => b.closed_count - a.closed_count);
     return rows;
   }, [strategies, grpFilter, sortBy]);
+
+  // Reset paginering bij filter/sort-wissel
+  useEffect(() => { setVisibleCount(SIM_PAGE); }, [grpFilter, sortBy]);
+
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = filtered.length > visibleCount;
 
   return (
     <div>
@@ -1170,17 +1179,20 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
           </button>
         ))}
       </div>
-      <div className="flex gap-2 mb-3 text-[11px]">
-        <span className="text-neutral-500">Sorteer:</span>
-        {(["rank", "winrate", "closed"] as const).map((k) => (
-          <button
-            key={k}
-            onClick={() => setSortBy(k)}
-            className={`underline-offset-2 ${sortBy === k ? "text-fog-lime underline" : "text-neutral-400 hover:text-neutral-200"}`}
-          >
-            {k === "rank" ? "Rendement" : k === "winrate" ? "Hit-rate" : "Trades"}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2 mb-3 text-[11px]">
+        <div className="flex gap-2">
+          <span className="text-neutral-500">Sorteer:</span>
+          {(["rank", "winrate", "closed"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setSortBy(k)}
+              className={`underline-offset-2 ${sortBy === k ? "text-fog-lime underline" : "text-neutral-400 hover:text-neutral-200"}`}
+            >
+              {k === "rank" ? "Rendement" : k === "winrate" ? "Hit-rate" : "Trades"}
+            </button>
+          ))}
+        </div>
+        <span className="text-neutral-500">{Math.min(visibleCount, filtered.length)} van {filtered.length}</span>
       </div>
 
       <div className="overflow-x-auto">
@@ -1199,7 +1211,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((s) => (
+            {visible.map((s) => (
               <Fragment key={s.id}>
                 <tr
                   className={`border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors cursor-pointer select-none ${s.protected ? "bg-fog-watch/[0.03]" : ""} ${expandedId === s.id ? "bg-ink-3/30" : ""}`}
@@ -1258,6 +1270,16 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
           </tbody>
         </table>
       </div>
+      {hasMore && (
+        <div className="mt-3 text-center">
+          <button
+            onClick={() => setVisibleCount((c) => c + SIM_PAGE)}
+            className="text-xs text-neutral-400 hover:text-neutral-100 border border-ink-5 hover:border-ink-6 rounded-lg px-4 py-2 transition-colors"
+          >
+            Laad meer ({filtered.length - visibleCount} strategieën resterend)
+          </button>
+        </div>
+      )}
     </div>
   );
 }
