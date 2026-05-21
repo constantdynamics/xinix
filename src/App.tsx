@@ -41,6 +41,19 @@ const HELP_PAGE: Record<Tab, string> = {
   settings: "settings",
 };
 
+// Positie-gebaseerde tabkleur — gradient neon-cyber variant 12:
+// #ff00aa → #cc00ff → #00ccff, gespreid over alle zichtbare tabs.
+function tabColor(i: number, n: number): string {
+  const t = n <= 1 ? 0 : i / (n - 1);
+  if (t <= 0.5) {
+    const s = t * 2;
+    return `rgb(${Math.round(255 + s * (204 - 255))},0,${Math.round(170 + s * (255 - 170))})`;
+  } else {
+    const s = (t - 0.5) * 2;
+    return `rgb(${Math.round(204 - s * 204)},${Math.round(s * 204)},255)`;
+  }
+}
+
 // Tab onthouden tussen sessies — bij refresh blijf je op dezelfde tab.
 const TAB_KEY = "xinix_active_tab_v1";
 function loadInitialTab(): Tab {
@@ -233,13 +246,14 @@ export function App() {
 
         {/* Tab nav — onderlijn-stijl, horizontaal scrollbaar op mobiel */}
         <div className="mx-auto max-w-7xl px-4 flex gap-0.5 overflow-x-auto scrollbar-thin items-center">
-          {effectiveTabs.map((t) => (
+          {effectiveTabs.map((t, idx) => (
             <NavTab
               key={t.key}
               active={tab === t.key}
               count={counts[t.key]}
               urgent={urgent[t.key]}
               onClick={() => setTab(t.key)}
+              color={tabColor(idx, effectiveTabs.length)}
             >
               {t.label}
             </NavTab>

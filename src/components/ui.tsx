@@ -153,6 +153,7 @@ export function NavTab({
   count,
   urgent,
   title,
+  color,
 }: {
   active?: boolean;
   onClick?: () => void;
@@ -160,19 +161,26 @@ export function NavTab({
   count?: number;
   urgent?: boolean;
   title?: string;
+  color?: string;
 }) {
+  const btnStyle = color
+    ? active
+      ? { color, borderBottomColor: color }
+      : { color, opacity: 0.45 }
+    : undefined;
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
+      style={btnStyle}
       className={cx(
         "relative inline-flex items-center gap-1.5 px-3 sm:px-3.5 h-10 text-sm font-semibold whitespace-nowrap select-none transition-colors",
         // Bottom-border alleen op active, anders transparent zodat de
         // hoogte gelijk blijft (geen layout-jitter bij toggle).
         active
-          ? "text-neutral-50 border-b-2 border-fog-pink"
-          : "text-neutral-400 hover:text-neutral-100 border-b-2 border-transparent"
+          ? color ? "border-b-2" : "text-neutral-50 border-b-2 border-fog-pink"
+          : color ? "border-b-2 border-transparent" : "text-neutral-400 hover:text-neutral-100 border-b-2 border-transparent"
       )}
     >
       <span>{children}</span>
