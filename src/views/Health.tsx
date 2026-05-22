@@ -126,10 +126,10 @@ export function HealthView() {
       setLoading(false);
     }
   }
+  // Eenmalig laden bij openen. Geen auto-verversing meer (bespaart egress) —
+  // gebruik de "vernieuw"-knop om de jobstatus handmatig bij te werken.
   useEffect(() => {
     load();
-    const id = setInterval(load, 30_000);
-    return () => clearInterval(id);
   }, []);
 
   // Splits "gewone" jobs (met run-history) van "nog nooit gezien" jobs;
