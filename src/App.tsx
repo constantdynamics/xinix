@@ -15,7 +15,7 @@ import { ZwitserlevenView } from "./views/Zwitserleven";
 import { FavorietenView } from "./views/Favorieten";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
-import { fetchDashboard, fetchUiSettings, getToken, setToken, type UiSettings } from "./api";
+import { fetchDashboard, fetchUiSettings, fetchScanResults, fetchZwitserlevenResults, getToken, setToken, type UiSettings, type ScanResults, type ZwitserlevenResults } from "./api";
 import type { Dashboard } from "./types";
 import { Button, NavTab, Input, Skeleton, Dot } from "./components/ui";
 import { DeviceSync } from "./components/DeviceSync";
@@ -83,6 +83,8 @@ export function App() {
   const [showTokenBar, setShowTokenBar] = useState(false);
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
   const [uiSettings, setUiSettings] = useState<UiSettings | null>(null);
+  const [scans, setScans] = useState<ScanResults | null>(null);
+  const [zwit, setZwit] = useState<ZwitserlevenResults | null>(null);
   const marks = useMarks();
 
   // UI-settings 1× laden + opnieuw na save (via custom event).
@@ -133,20 +135,39 @@ export function App() {
     refresh();
   }, []);
 
+  // Scan-resultaten + zwitserleven los laden — alleen voor de tab-tellers
+  // (aantal vondsten dat nog niet als 'gezien' is gemarkeerd).
+  useEffect(() => {
+    fetchScanResults().then(setScans).catch(() => { /* teller blijft leeg */ });
+    fetchZwitserlevenResults().then(setZwit).catch(() => { /* teller blijft leeg */ });
+  }, []);
+
   // Counts per tab — kleine cijfers naast tab-label
   const counts = useMemo<Partial<Record<Tab, number>>>(() => {
-    if (!data) return {};
-    // Hot or Not-teller: alleen Hot-aandelen (rode tegel) die nog niet in
-    // de favorieten staan — een bruikbaar getal in plaats van "999+".
-    const hotNotFav = (data.cards ?? []).filter(
-      (c) => c.color === "red" && !marks.favorites.has(c.ticker.toUpperCase()),
-    ).length;
-    return {
-      dashboard: hotNotFav,
-      tickers: data.cards?.length ?? 0,
-      scores: data.recent_signals?.length ?? 0,
-    };
-  }, [data, marks.favorites, marks.favorites.size, marks.loaded]);
+    const out: Partial<Record<Tab, number>> = {};
+    if (data) {
+      // Hot or Not-teller: alleen Hot-aandelen (rode tegel) die nog niet in
+      // de favorieten staan — een bruikbaar getal in plaats van "999+".
+      out.dashboard = (data.cards ?? []).filter(
+        (c) => c.color === "red" && !marks.favorites.has(c.ticker.toUpperCase()),
+      ).length;
+      out.tickers = data.cards?.length ?? 0;
+      out.scores = data.recent_signals?.length ?? 0;
+    }
+    // Scan-tabbladen: aantal vondsten dat nog niet als 'gezien' is gemarkeerd.
+    const notSeen = (tickers: string[]) => tickers.filter((t) => !marks.isSeen(t)).length;
+    if (scans) {
+      out.feniks = notSeen((scans.phoenix_ranking ?? []).map((r) => r.ticker));
+      out.poefies = notSeen((scans.poefie_ranking ?? []).map((r) => r.ticker));
+      out.hikkertjes = notSeen((scans.hikkertje_ranking ?? []).map((r) => r.ticker));
+    }
+    if (zwit) {
+      out.zwitserleven = notSeen(
+        (zwit.stocks ?? []).filter((s) => s.meets_criteria || s.is_manual).map((s) => s.ticker),
+      );
+    }
+    return out;
+  }, [data, scans, zwit, marks.favorites, marks.favorites.size, marks.seen, marks.seen.size, marks.loaded]);
 
   // Urgentie-indicatoren — rode dot per tab waar iets vraagt om aandacht.
   const urgent = useMemo<Partial<Record<Tab, boolean>>>(() => {
