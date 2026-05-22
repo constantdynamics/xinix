@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { DashboardView } from "./views/Dashboard";
 import { SettingsView } from "./views/Settings";
 import { TickersView } from "./views/Tickers";
@@ -39,6 +39,29 @@ const HELP_PAGE: Record<Tab, string> = {
   favorieten: "favorieten",
   status: "status",
   settings: "settings",
+};
+
+// Hikkertjes tab → W-wave glow (poefjes-variant 05)
+function WaveTabIcon() {
+  return (
+    <svg viewBox="0 0 32 32" style={{ width: "1em", height: "1em", filter: "drop-shadow(0 0 2px currentColor)" }} aria-hidden="true">
+      <polyline points="1,22 6,10 11,22 16,10 21,22 26,10 31,22" fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="miter" strokeLinecap="square"/>
+    </svg>
+  );
+}
+
+// Poefjes tab → S-bolt (hikkertjes-variant 19)
+function SBoltTabIcon() {
+  return (
+    <svg viewBox="0 0 32 32" style={{ width: "1em", height: "1em" }} aria-hidden="true">
+      <path d="M22 2 L12 10 L20 10 L10 22 L18 22 L8 30 L14 30 L24 18 L16 18 L26 6 Z" fill="currentColor"/>
+    </svg>
+  );
+}
+
+const TAB_ICONS: Partial<Record<Tab, React.ReactNode>> = {
+  hikkertjes: <WaveTabIcon />,
+  poefies: <SBoltTabIcon />,
 };
 
 // Positie-gebaseerde tabkleur — gradient neon-cyber variant 12:
@@ -251,6 +274,7 @@ export function App() {
               urgent={urgent[t.key]}
               onClick={() => setTab(t.key)}
               color={tabColor(idx, effectiveTabs.length)}
+              icon={TAB_ICONS[t.key]}
             >
               {t.label}
             </NavTab>
