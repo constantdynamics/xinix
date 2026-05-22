@@ -154,6 +154,7 @@ export function NavTab({
   urgent,
   title,
   color,
+  icon,
 }: {
   active?: boolean;
   onClick?: () => void;
@@ -162,6 +163,7 @@ export function NavTab({
   urgent?: boolean;
   title?: string;
   color?: string;
+  icon?: ReactNode;
 }) {
   const btnStyle = color
     ? active
@@ -183,6 +185,7 @@ export function NavTab({
           : color ? "border-b-2 border-transparent" : "text-neutral-400 hover:text-neutral-100 border-b-2 border-transparent"
       )}
     >
+      {icon && <span className="shrink-0 leading-none">{icon}</span>}
       <span>{children}</span>
       {count != null && count > 0 && (
         <span
