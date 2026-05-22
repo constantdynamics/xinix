@@ -172,13 +172,10 @@ export function App() {
   // Urgentie-indicatoren — rode dot per tab waar iets vraagt om aandacht.
   const urgent = useMemo<Partial<Record<Tab, boolean>>>(() => {
     if (!data) return {};
-    const redCards = data.cards?.filter((c) => c.color === "red").length ?? 0;
-    const redSignals = data.recent_signals?.filter((s) => s.severity === "red").length ?? 0;
     const failedJobs = new Set(
       (data.run_log ?? []).filter((r) => r.ok === false).slice(0, 30).map((r) => r.job)
     );
     return {
-      dashboard: redCards > 0 || redSignals > 0,
       status: failedJobs.size > 0,
     };
   }, [data]);

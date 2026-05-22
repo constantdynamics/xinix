@@ -32,6 +32,8 @@ function TabImageIcon({ src, flip }: { src: string; flip?: boolean }) {
         WebkitMaskSize: "contain",
         maskSize: "contain",
         transform: flip ? "scaleX(-1)" : undefined,
+        // Zachte gloed in de eigen kleur — laat het icoon op zwart feller oogen.
+        filter: "drop-shadow(0 0 2px currentColor)",
       }}
     />
   );

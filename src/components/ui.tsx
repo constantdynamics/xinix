@@ -166,11 +166,12 @@ export function NavTab({
   icon?: ReactNode;
 }) {
   // Actief tabblad: knop gevuld met de steunkleur, tekst + icoon wit.
-  // Inactief: volle steunkleur, geen vervaging — oogt als geselecteerd.
+  // Inactief: volle steunkleur + zachte gloed zodat het op zwart fel en
+  // goed leesbaar oogt — de kleur (hue) zelf blijft ongewijzigd.
   const btnStyle = color
     ? active
       ? { backgroundColor: color, color: "#ffffff" }
-      : { color }
+      : { color, textShadow: `0 0 9px ${color}` }
     : undefined;
   return (
     <button
@@ -179,20 +180,20 @@ export function NavTab({
       title={title}
       style={btnStyle}
       className={cx(
-        "relative inline-flex items-center gap-1.5 px-3 sm:px-3.5 h-10 text-sm font-semibold whitespace-nowrap select-none transition-colors",
+        "relative inline-flex items-center gap-1.5 px-3 sm:px-4 h-11 text-base font-bold whitespace-nowrap select-none transition-colors",
         // border-b-2 altijd aanwezig (transparant) zodat de hoogte gelijk blijft.
         active
           ? color ? "rounded-t-md border-b-2 border-transparent" : "text-neutral-50 border-b-2 border-fog-pink"
           : color ? "border-b-2 border-transparent" : "text-neutral-400 hover:text-neutral-100 border-b-2 border-transparent"
       )}
     >
-      {icon && <span className="shrink-0 leading-none">{icon}</span>}
+      {icon && <span className="shrink-0 leading-none text-[1.15em]">{icon}</span>}
       <span>{children}</span>
       {count != null && count > 0 && (
         <span
           className={cx(
-            "tabular text-[10px] px-1.5 py-0.5 rounded-md",
-            active ? "bg-white/25 text-white" : "bg-ink-3 text-neutral-500"
+            "tabular text-[11px] font-bold px-1.5 py-0.5 rounded-md",
+            active ? "bg-white/25 text-white" : "bg-ink-3 text-neutral-400"
           )}
         >
           {count > 999 ? "999+" : count}
