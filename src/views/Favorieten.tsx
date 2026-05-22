@@ -479,6 +479,11 @@ export function FavorietenView() {
                   <tr>
                     <SeenHeader />
                     <HeartHeader />
+                    {colVisible("rating") && (
+                      <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("rating")}>
+                        Sterren <span className="text-fog-lime text-[9px]">{sortArrow("rating")}</span>
+                      </th>
+                    )}
                     <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("ticker")}>
                       Ticker <span className="text-fog-lime text-[9px]">{sortArrow("ticker")}</span>
                     </th>
@@ -515,11 +520,6 @@ export function FavorietenView() {
                       </th>
                     )}
                     {colVisible("limiet") && <th className="px-3 py-2 text-right" title="Aankooplimiet — klik om in te vullen">Limiet</th>}
-                    {colVisible("rating") && (
-                      <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("rating")}>
-                        Sterren <span className="text-fog-lime text-[9px]">{sortArrow("rating")}</span>
-                      </th>
-                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-5/40">
@@ -529,6 +529,11 @@ export function FavorietenView() {
                       <tr key={r.ticker} className={seen ? "opacity-50" : ""}>
                         <SeenCell ticker={r.ticker} />
                         <HeartCell ticker={r.ticker} />
+                        {colVisible("rating") && (
+                          <td className="px-3 py-2 text-center">
+                            <StarRating ticker={r.ticker} />
+                          </td>
+                        )}
                         <td className="px-3 py-2">
                           <a
                             href={googleFinanceUrl(r.ticker, r.exchange)}
@@ -630,11 +635,6 @@ export function FavorietenView() {
                                 {savingLimit === r.ticker ? "…" : (r.buy_limit != null ? fmtPrice(r.buy_limit) : "+")}
                               </button>
                             )}
-                          </td>
-                        )}
-                        {colVisible("rating") && (
-                          <td className="px-3 py-2 text-center">
-                            <StarRating ticker={r.ticker} />
                           </td>
                         )}
                       </tr>

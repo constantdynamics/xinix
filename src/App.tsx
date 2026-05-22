@@ -50,18 +50,40 @@ function WaveTabIcon() {
   );
 }
 
-// Poefjes tab → S-bolt (hikkertjes-variant 19)
-function SBoltTabIcon() {
+// Tab-iconen uit public/icons/ — een PNG-masker, zodat het icoon de
+// steunkleur van de tab krijgt (en wit wordt als de tab actief is).
+function TabImageIcon({ src, flip }: { src: string; flip?: boolean }) {
   return (
-    <svg viewBox="0 0 32 32" style={{ width: "1em", height: "1em" }} aria-hidden="true">
-      <path d="M22 2 L12 10 L20 10 L10 22 L18 22 L8 30 L14 30 L24 18 L16 18 L26 6 Z" fill="currentColor"/>
-    </svg>
+    <span
+      aria-hidden="true"
+      style={{
+        display: "inline-block",
+        width: "1.15em",
+        height: "1.15em",
+        backgroundColor: "currentColor",
+        WebkitMaskImage: `url(${src})`,
+        maskImage: `url(${src})`,
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+        transform: flip ? "scaleX(-1)" : undefined,
+      }}
+    />
   );
 }
 
+export const ICON_BASE = `${import.meta.env.BASE_URL}icons/`;
 const TAB_ICONS: Partial<Record<Tab, React.ReactNode>> = {
+  dashboard: <TabImageIcon src={`${ICON_BASE}observatory.png`} />,
+  limits: <TabImageIcon src={`${ICON_BASE}low.png`} />,
+  xinix: <TabImageIcon src={`${ICON_BASE}leaderboard.png`} />,
+  feniks: <TabImageIcon src={`${ICON_BASE}phoenix.png`} />,
+  poefies: <TabImageIcon src={`${ICON_BASE}lightning.png`} />,
   hikkertjes: <WaveTabIcon />,
-  poefies: <SBoltTabIcon />,
+  zwitserleven: <TabImageIcon src={`${ICON_BASE}palm-tree.png`} flip />,
 };
 
 // Positie-gebaseerde tabkleur — gradient neon-cyber variant 12:
