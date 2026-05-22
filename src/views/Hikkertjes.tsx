@@ -7,6 +7,7 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
+import { TAB_ICONS } from "../tabIcons";
 import { useMarks } from "../hooks/useMarks";
 import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile, StarRating } from "../components/MarkCells";
 
@@ -111,7 +112,7 @@ export function HikkertjesView() {
       {/* Uitleg */}
       <Card className="p-4 border-yellow-500/30 bg-yellow-500/[0.04]">
         <div className="flex items-start gap-3">
-          <span className="text-2xl">⚡</span>
+          <span className="text-2xl text-yellow-400">{TAB_ICONS.hikkertjes}</span>
           <div className="flex-1">
             <div className="font-semibold text-yellow-400 mb-1">Hikkertjes</div>
             <p className="text-sm text-neutral-300 leading-relaxed">
@@ -125,7 +126,7 @@ export function HikkertjesView() {
 
       {/* Stats + trigger */}
       <div className="flex flex-wrap items-center gap-4">
-        <Stat label="Hikkertjes gevonden" value={hikkertjeCount} />
+        <Stat label="Hikkertjes gevonden" value={hikkertjeCount} icon={TAB_ICONS.hikkertjes} />
         <Stat
           label="Op/onder limiet"
           value={ranking.filter((r) => r.above_limit_pct != null && r.above_limit_pct <= 0).length}

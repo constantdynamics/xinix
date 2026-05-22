@@ -20,6 +20,7 @@ import {
   BlockBar,
 } from "../components/ui";
 import { SeenHeader, HeartHeader, StarHeader, SeenCell, HeartCell, StarCell, HeartInline, StarRating } from "../components/MarkCells";
+import { TAB_ICONS } from "../tabIcons";
 
 const VIEW_KEY = "xinix_limit_view";
 const FILTER_KEY = "xinix_limit_filter_v1";
@@ -305,6 +306,7 @@ export function LimitsView({
   return (
     <div className="space-y-6">
       <SectionHeader
+        icon={TAB_ICONS.limits}
         eyebrow="Aankoop"
         title="Limiet-watcher"
         subtitle={`${allRows.length} met limit · ${buyNowCount} op/onder · ${closeCount} dicht · ${withMedals} met medaille · ${totalGold}× goud totaal`}

@@ -7,6 +7,7 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat, Dot } from "../components/ui";
+import { TAB_ICONS } from "../tabIcons";
 import { useMarks } from "../hooks/useMarks";
 import {
   HeartCell,
@@ -373,7 +374,7 @@ export function PoefiesView() {
         <div className="flex items-start gap-3">
           <Dot tone="watch" />
           <div className="flex-1">
-            <div className="font-bold text-neutral-100">🎆 Poefies</div>
+            <div className="font-bold text-neutral-100 flex items-center gap-2"><span className="text-fog-watch">{TAB_ICONS.poefies}</span>Poefies</div>
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">125% (2,25×)</strong> zijn gegroeid binnen maximaal <strong className="text-neutral-200">7 dagen</strong>.
               Een poefie is een explosieve, kortstondige sprong. De kolommen <em>6m / 1j / 2j / 5j</em> tonen hoe vaak het de afgelopen 6 maanden, 1, 2 en 5 jaar gebeurde.
@@ -389,6 +390,7 @@ export function PoefiesView() {
           label="Poefie-aandelen"
           value={poefieCount}
           hint="is_poefie = true in watchlist"
+          icon={TAB_ICONS.poefies}
         />
         <Stat
           label="Nog te scannen"
