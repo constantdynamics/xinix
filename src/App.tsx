@@ -20,6 +20,7 @@ import type { Dashboard } from "./types";
 import { Button, NavTab, Input, Skeleton, Dot } from "./components/ui";
 import { DeviceSync } from "./components/DeviceSync";
 import { DEFAULT_TABS as TABS, type Tab, type TabDef } from "./tabsConfig";
+import { useMarks } from "./hooks/useMarks";
 
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
 const HELP_PAGE: Record<Tab, string> = {
@@ -78,7 +79,7 @@ function TabImageIcon({ src, flip }: { src: string; flip?: boolean }) {
 export const ICON_BASE = `${import.meta.env.BASE_URL}icons/`;
 const TAB_ICONS: Partial<Record<Tab, React.ReactNode>> = {
   dashboard: <TabImageIcon src={`${ICON_BASE}observatory.png`} />,
-  limits: <TabImageIcon src={`${ICON_BASE}low.png`} />,
+  limits: <TabImageIcon src={`${ICON_BASE}rainbow.png`} />,
   xinix: <TabImageIcon src={`${ICON_BASE}leaderboard.png`} />,
   feniks: <TabImageIcon src={`${ICON_BASE}phoenix.png`} />,
   poefies: <TabImageIcon src={`${ICON_BASE}lightning.png`} />,
@@ -126,6 +127,7 @@ export function App() {
   const [showTokenBar, setShowTokenBar] = useState(false);
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
   const [uiSettings, setUiSettings] = useState<UiSettings | null>(null);
+  const marks = useMarks();
 
   // UI-settings 1× laden + opnieuw na save (via custom event).
   useEffect(() => {
@@ -178,12 +180,17 @@ export function App() {
   // Counts per tab — kleine cijfers naast tab-label
   const counts = useMemo<Partial<Record<Tab, number>>>(() => {
     if (!data) return {};
+    // Hot or Not-teller: alleen Hot-aandelen (rode tegel) die nog niet in
+    // de favorieten staan — een bruikbaar getal in plaats van "999+".
+    const hotNotFav = (data.cards ?? []).filter(
+      (c) => c.color === "red" && !marks.favorites.has(c.ticker.toUpperCase()),
+    ).length;
     return {
-      dashboard: data.cards?.length ?? 0,
+      dashboard: hotNotFav,
       tickers: data.cards?.length ?? 0,
       scores: data.recent_signals?.length ?? 0,
     };
-  }, [data]);
+  }, [data, marks.favorites, marks.favorites.size, marks.loaded]);
 
   // Urgentie-indicatoren — rode dot per tab waar iets vraagt om aandacht.
   const urgent = useMemo<Partial<Record<Tab, boolean>>>(() => {
