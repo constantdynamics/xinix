@@ -18,6 +18,7 @@ import { Card, Button, Badge, Stat } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
+import { GradientTabIcon } from "../tabIcons";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
 
@@ -468,7 +469,7 @@ export function FavorietenView() {
     <div className="space-y-4">
       <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <span className="text-2xl">♥</span>
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="favorieten" /></span>
           <div className="flex-1">
             <div className="font-semibold tab-accent-text mb-1">Favorieten</div>
             <p className="text-sm text-neutral-300 leading-relaxed">

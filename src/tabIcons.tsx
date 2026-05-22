@@ -92,6 +92,22 @@ export const TAB_ICONS: Partial<Record<Tab, ReactNode>> = {
 // elk tabblad. `null` als het tabblad geen icoon heeft.
 export function GradientTabIcon({ tab }: { tab: Tab }) {
   if (tab === "hikkertjes") return <WaveTabIcon gradient />;
+  if (tab === "favorieten") {
+    // ♥ is een tekst-symbool — vul met het Xinix-kleurverloop via background-clip.
+    return (
+      <span
+        style={{
+          background: XINIX_GRADIENT,
+          WebkitBackgroundClip: "text",
+          backgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          color: "transparent",
+        }}
+      >
+        ♥
+      </span>
+    );
+  }
   const img = IMAGE_ICON[tab];
   if (!img) return null;
   return <TabImageIcon file={img.file} flip={img.flip} gradient />;
