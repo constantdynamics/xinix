@@ -191,5 +191,5 @@ Deno.serve(async (req) => {
     last_run: lastPriceRun ? { started_at: lastPriceRun.started_at, ok: lastPriceRun.ok, message: lastPriceRun.message, metrics: lastPriceRun.metrics } : null,
     bench_after_fails: 3, batch_size: 80, interval_minutes: 10,
   };
-  return j(req, { cards, recent_signals: signals.slice(0, 50), upcoming_catalysts: catalysts.slice(0, 50), run_log: runLog, poll_status: pollStatus, generated_at: new Date().toISOString() }, { headers: { "cache-control": "public, max-age=30" } });
+  return j(req, { cards, recent_signals: signals.slice(0, 50), upcoming_catalysts: catalysts.slice(0, 50), run_log: runLog, poll_status: pollStatus, generated_at: new Date().toISOString() }, { headers: { "cache-control": "public, max-age=120" } });
 });
