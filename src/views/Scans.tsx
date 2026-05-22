@@ -314,7 +314,7 @@ export function ScansView() {
                         href={googleFinanceUrl(t.ticker, t.exchange)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-fog-pink hover:underline"
+                        className="tab-accent-text hover:underline"
                       >
                         {t.ticker}
                       </a>

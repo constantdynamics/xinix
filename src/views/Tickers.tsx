@@ -1446,7 +1446,7 @@ export function TickersView({
                           href={googleFinanceUrl(c.ticker, c.exchange)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-fog-pink hover:underline"
+                          className="tab-accent-text hover:underline"
                         >
                           {c.ticker}
                         </a>

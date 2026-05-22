@@ -115,6 +115,13 @@ export function App() {
     return list;
   }, [uiSettings]);
 
+  // Accentkleur van het actieve tabblad — als CSS-variabele (--tab-accent)
+  // beschikbaar voor alle views, zodat de tabkleur op de pagina terugkomt.
+  const tabAccent = useMemo(() => {
+    const idx = effectiveTabs.findIndex((t) => t.key === tab);
+    return idx >= 0 ? tabColor(idx, effectiveTabs.length) : "#ff1f8f";
+  }, [effectiveTabs, tab]);
+
   async function refresh() {
     try {
       setLoading(true);
@@ -320,7 +327,10 @@ export function App() {
         )}
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6">
+      <main
+        className="mx-auto max-w-7xl px-4 py-6"
+        style={{ "--tab-accent": tabAccent } as React.CSSProperties}
+      >
         {error && (
           <div className="mb-4 rounded-xl border border-fog-loss/40 bg-fog-loss/10 p-3 text-sm text-fog-loss">
             <span className="font-semibold">Fout:</span> {error}

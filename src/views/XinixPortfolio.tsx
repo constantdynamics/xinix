@@ -46,6 +46,7 @@ import {
   StarHeader,
 } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
+import { GradientTabIcon } from "../tabIcons";
 
 const SIGNAL_LABELS: Record<string, string> = {
   near_90d_low: "Bij 90d-bodem",
@@ -146,11 +147,11 @@ export function XinixPortfolioView() {
       {mainTab === "portfolio" && <div className="space-y-8">
 
       {/* Intro */}
-      <Card className="p-4 border-fog-pink/30 bg-fog-pink/[0.04]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <Dot tone="pink" pulse />
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="xinix" /></span>
           <div className="flex-1">
-            <div className="font-bold text-neutral-100">Xinix — fictieve $10K portefeuille</div>
+            <div className="font-bold text-base tab-accent-text">Xinix — fictieve $10K portefeuille</div>
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Xinix bestuurt zelf een papieren portefeuille van $10.000 op basis van scores + signalen.
               Strategie: max 8 posities van ~$1200, vast tijdvenster van 60 dagen, stop-loss op -15%.
@@ -286,7 +287,7 @@ function OpenPositionsSection({ positions }: { positions: XinixOpenPosition[] })
                         href={googleFinanceUrl(p.ticker, p.exchange)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-fog-pink hover:underline"
+                        className="tab-accent-text hover:underline"
                       >
                         {p.ticker}
                       </a>
@@ -384,7 +385,7 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
                   return (
                     <tr key={p.id} className="border-t border-ink-5 hover:bg-ink-3/40">
                       <td className="p-3 font-bold whitespace-nowrap">
-                        <span className="text-fog-pink">{p.ticker}</span>
+                        <span className="tab-accent-text">{p.ticker}</span>
                         <div className="text-[10px] font-normal text-neutral-500 truncate max-w-[140px]">
                           {p.company ?? ""}
                         </div>
@@ -961,7 +962,7 @@ function WhyBought({ pos, cfg }: { pos: SimPosDetail; cfg: SimStrategyConfig }) 
         href={googleFinanceUrl(pos.ticker)}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[11px] text-fog-pink font-medium hover:underline shrink-0"
+        className="text-[11px] tab-accent-text font-medium hover:underline shrink-0"
       >
         {pos.ticker}
       </a>
@@ -2107,7 +2108,7 @@ export function PhoenixView() {
               href={googleFinanceUrl(p.ticker, p.exchange)}
               target="_blank"
               rel="noreferrer"
-              className="font-mono text-sm font-semibold text-fog-lime hover:underline"
+              className="font-mono text-sm font-semibold tab-accent-text hover:underline"
             >
               {p.ticker}
             </a>
@@ -2166,11 +2167,11 @@ export function PhoenixView() {
   return (
     <div className="space-y-6">
       {/* Uitlegkaart */}
-      <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.03]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <Dot tone="watch" />
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="feniks" /></span>
           <div className="flex-1">
-            <div className="font-bold text-neutral-100">Feniks-aandelen</div>
+            <div className="font-bold text-base tab-accent-text">Feniks-aandelen</div>
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">50×</strong> zijn gegaan en nu laag staan.
               Klik op een kolomkop om te sorteren. Vink kolommen aan/uit met de checkboxes,

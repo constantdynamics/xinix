@@ -21,7 +21,7 @@ import {
 } from "../components/ui";
 import { SeenHeader, HeartHeader, StarHeader, SeenCell, HeartCell, StarCell, HeartInline, StarRating } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
-import { TAB_ICONS } from "../tabIcons";
+import { GradientTabIcon } from "../tabIcons";
 
 // Tabelkolommen voor de kolom-kiezer. Ticker is de vaste anker-kolom.
 const LIMIT_COLUMNS: ColumnMeta[] = [
@@ -321,7 +321,7 @@ export function LimitsView({
   return (
     <div className="space-y-6">
       <SectionHeader
-        icon={TAB_ICONS.limits}
+        icon={<GradientTabIcon tab="limits" />}
         eyebrow="Aankoop"
         title="Limiet-watcher"
         subtitle={`${allRows.length} met limit · ${buyNowCount} op/onder · ${closeCount} dicht · ${withMedals} met medaille · ${totalGold}× goud totaal`}
@@ -462,7 +462,7 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
             href={googleFinanceUrl(r.ticker, r.exchange)}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-fog-pink hover:underline"
+            className="tab-accent-text hover:underline"
           >
             {r.ticker}
           </a>
