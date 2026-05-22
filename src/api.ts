@@ -530,7 +530,7 @@ export async function fetchXinixPortfolio(): Promise<XinixPortfolio> {
   return (await res.json()) as XinixPortfolio;
 }
 
-// ── Xinix 200-strategie simulatie ──
+// ── Xinix strategie-simulatie (Potje) ──
 export interface SimPosDetail {
   ticker: string;
   entry_signal_types: string[];

@@ -127,7 +127,7 @@ export function XinixPortfolioView() {
     <div className="space-y-6">
       {/* Tab-switcher: Portfolio vs Simulatie */}
       <div className="flex gap-0 border-b border-ink-5">
-        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"], ["families", "🧬 Families"]] as const).map(([key, label]) => (
+        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 Potje"], ["families", "🧬 Families"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMainTab(key)}
@@ -730,7 +730,7 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
   candidates.sort((a, b) => b.score - a.score);
   const fallbacks = [
     `Behoort tot groep "${groupLabel(s.grp)}" — geoptimaliseerd voor die specifieke configuratie-dimensie.`,
-    "Gebalanceerde combinatie van parameters, zonder extreme uitschieters t.o.v. het gemiddelde van de 200 strategieën.",
+    "Gebalanceerde combinatie van parameters, zonder extreme uitschieters t.o.v. het gemiddelde van alle strategieën.",
     `${s.protected ? "Beschermde" : "Cullbare"} ${s.generation > 1 ? `Gen-${s.generation}` : "originele"} strategie met solide parameterruimte.`,
   ];
   while (candidates.length < 3) {
@@ -1544,7 +1544,7 @@ function KnowledgeExportSection({ isAdmin }: { isAdmin: boolean }) {
         </div>
 
         <p className="text-xs text-neutral-400 leading-relaxed mb-3">
-          Elke <strong className="text-neutral-200">1e van de maand</strong> wordt automatisch een volledige snapshot opgeslagen: alle 200 strategieën met hun config + performance, de volledige watchlist met buy-limieten en medailles, alle gesloten posities uitgesplitst per signaaltype + sector, en configuratie-inzichten.
+          Elke <strong className="text-neutral-200">1e van de maand</strong> wordt automatisch een volledige snapshot opgeslagen: alle strategieën met hun config + performance, de volledige watchlist met buy-limieten en medailles, alle gesloten posities uitgesplitst per signaaltype + sector, en configuratie-inzichten.
           Op de <strong className="text-neutral-200">25e</strong> ontvang je een herinnering om de stand ook handmatig door te nemen.
         </p>
 
@@ -1672,7 +1672,7 @@ export function SimulationView() {
   return (
     <section className="space-y-4">
       <SectionHeader
-        title="200 Strategieën — simulatie-ranglijst"
+        title="Potje — simulatie-ranglijst"
         subtitle={
           meta.last_run_at
             ? `Laatste run: ${new Date(meta.last_run_at).toLocaleString("nl-NL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
@@ -2342,7 +2342,7 @@ export function PhoenixView() {
 
 // ── FamiliesView ────────────────────────────────────────────────────────────
 // Per-groep gemiddelde return + tijd-lijngrafiek. Twee views: ploegen (familie-
-// gemiddelden) en individueel (alle 200 strategieën). Grafiek en tabel hebben
+// gemiddelden) en individueel (alle strategieën). Grafiek en tabel hebben
 // elk een eigen toggle — vergelijkbaar met het wiel­rennen-klassement.
 function FamiliesView() {
   const [data, setData] = useState<SimResults | null>(null);
