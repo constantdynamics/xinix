@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchScanResults, type ScanTicker, type ScanRun } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
+import { EditableLimit } from "../components/EditableLimit";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import {
   Card,
@@ -342,13 +343,7 @@ export function ScansView() {
                       {t.last_close != null ? fmtPrice(t.last_close) : "—"}
                     </td>
                     <td className="p-3 text-right tabular text-[12px] whitespace-nowrap">
-                      {t.buy_limit != null ? (
-                        <span className={t.last_close != null && t.last_close <= t.buy_limit ? "text-fog-lime font-bold" : "text-neutral-300"}>
-                          {fmtPrice(t.buy_limit)}
-                        </span>
-                      ) : (
-                        <span className="text-neutral-500">—</span>
-                      )}
+                      <EditableLimit ticker={t.ticker} buyLimit={t.buy_limit} />
                     </td>
                     <td className="p-3 whitespace-nowrap text-[11px] tabular text-neutral-400">
                       {new Date(t.created_at).toLocaleString("nl-NL", {
