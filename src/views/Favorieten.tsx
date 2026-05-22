@@ -19,6 +19,7 @@ import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { GradientTabIcon } from "../tabIcons";
+import { PriceChartModal } from "./PriceChartModal";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
 
@@ -120,6 +121,8 @@ export function FavorietenView() {
   const [limitOverrides, setLimitOverrides] = useState<Record<string, number | null>>({});
   // Bulk-add panel
   const [showAdd, setShowAdd] = useState(false);
+  // Koersgrafiek-popup — geopend door op een bedrijfsnaam te klikken.
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
 
   const isAdmin = !!getToken();
   const { visibleKeys } = useColumnLayout("favorieten", FAV_COLUMNS, "ticker");
@@ -325,7 +328,18 @@ export function FavorietenView() {
           Bedrijf <span className="text-fog-lime text-[9px]">{sortArrow("company")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-neutral-200">{r.company}</td>,
+      td: (r) => (
+        <td className="px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setChartFor({ ticker: r.ticker, company: r.company, exchange: r.exchange })}
+            className="text-left text-neutral-200 hover:text-fog-pink hover:underline transition-colors"
+            title={`Bekijk koersgrafiek van ${r.company}`}
+          >
+            {r.company}
+          </button>
+        </td>
+      ),
     },
     sector: {
       th: <th className="px-3 py-2 text-left">Sector</th>,
@@ -604,7 +618,10 @@ export function FavorietenView() {
           </div>
 
           {viewMode === "tiles" ? (
-            <FavorietenTiles rows={filtered} />
+            <FavorietenTiles
+              rows={filtered}
+              onCompanyClick={(r) => setChartFor({ ticker: r.ticker, company: r.company, exchange: r.exchange })}
+            />
           ) : (
           <>
           {/* Kolom-kiezer — alleen in lijstweergave; keuze synct over devices */}
@@ -640,14 +657,23 @@ export function FavorietenView() {
           )}
         </>
       )}
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
+      )}
     </div>
   );
 }
 
 // Tegelweergave — compacte grid-kaarten, één per favoriet. Toont sterren,
-// afstand tot limiet, medailles en bron-badges. Klik op de kaart opent
-// Google Finance; klik op een ster zet de rating (stopPropagation in StarRating).
-function FavorietenTiles({ rows }: { rows: FavRow[] }) {
+// afstand tot limiet, medailles en bron-badges. Klik op de ticker opent
+// Google Finance; klik op de bedrijfsnaam opent de koersgrafiek.
+function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyClick: (r: FavRow) => void }) {
   const marks = useMarks();
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
@@ -672,7 +698,14 @@ function FavorietenTiles({ rows }: { rows: FavRow[] }) {
               </a>
               {r.sector && <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">{SECTOR_LABEL[r.sector]}</span>}
             </div>
-            <div className="text-[10px] text-neutral-400 truncate mb-1" title={r.company}>{r.company}</div>
+            <button
+              type="button"
+              onClick={() => onCompanyClick(r)}
+              className="block w-full text-left text-[10px] text-neutral-400 truncate mb-1 hover:text-fog-pink transition-colors"
+              title={`Bekijk koersgrafiek van ${r.company}`}
+            >
+              {r.company}
+            </button>
             <div className="font-mono tabular-nums text-base font-bold leading-none">
               {r.above_limit_pct != null ? (
                 <span className={atOrUnder ? "text-fog-lime" : near ? "text-fog-warn" : "text-neutral-300"}>

@@ -41,6 +41,23 @@ export async function fetchDashboard(fresh = false): Promise<Dashboard> {
   return (await res.json()) as Dashboard;
 }
 
+export type PriceRange = "1d" | "5d" | "1mo" | "1y" | "5y" | "max";
+export interface PricePoint { t: number; c: number; }
+export interface PriceHistory {
+  ticker: string;
+  range: PriceRange;
+  currency: string | null;
+  exchange: string | null;
+  previous_close: number | null;
+  market_price: number | null;
+  points: PricePoint[];
+}
+export async function fetchPriceHistory(ticker: string, range: PriceRange): Promise<PriceHistory> {
+  const res = await fetch(apiUrl(`/api/price-history?ticker=${encodeURIComponent(ticker)}&range=${range}`));
+  if (!res.ok) throw new Error(`price-history ${res.status}`);
+  return (await res.json()) as PriceHistory;
+}
+
 export async function fetchSettings(): Promise<Settings> {
   const res = await fetch(apiUrl("/api/settings"), { headers: authHeaders() });
   if (!res.ok) throw new Error(`settings ${res.status}`);
