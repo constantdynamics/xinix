@@ -83,10 +83,11 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
     const closes = pts.map((p) => p.c);
     let min = Math.min(...closes);
     let max = Math.max(...closes);
-    if (min === max) { min -= 1; max += 1; }
+    if (min === max) { const d = Math.abs(min) * 0.05 || 1; min -= d; max += d; }
     const span = max - min;
     const pad = span * 0.08;
-    const lo = min - pad;
+    // Een koers kan nooit negatief zijn — de y-as mag dus niet onder 0 zakken.
+    const lo = Math.max(0, min - pad);
     const hi = max + pad;
     const x = (i: number) => PAD.l + (i / (n - 1)) * PLOT_W;
     const y = (c: number) => PAD.t + (1 - (c - lo) / (hi - lo)) * PLOT_H;
