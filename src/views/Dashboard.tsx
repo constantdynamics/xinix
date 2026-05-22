@@ -96,7 +96,7 @@ function signalMeta(type: string): { label: string; desc: string } {
   return SIGNAL_FRIENDLY[type] ?? { label: type, desc: "" };
 }
 
-type ColorFilter = "catalyst" | "all" | "red" | "orange" | "yellow" | "white";
+type CardColor = "red" | "orange" | "yellow" | "white";
 
 type NavTarget =
   | "dashboard"
@@ -110,8 +110,22 @@ type NavTarget =
   | "settings";
 
 export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh: () => void; onNavigate?: (t: NavTarget) => void }) {
-  // Standaard toont het dashboard alleen aandelen met een geplande catalyst.
-  const [filter, setFilter] = useState<ColorFilter>("catalyst");
+  // Filters: 'Catalyst' is een schakelaar die altijd AND-combineert met de
+  // los aanvinkbare kleur-filters (OR onderling). Standaard alleen catalyst.
+  const [catalystOnly, setCatalystOnly] = useState(true);
+  const [colorSel, setColorSel] = useState<Set<CardColor>>(new Set());
+  function toggleColor(c: CardColor) {
+    setColorSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  }
+  function showAll() {
+    setCatalystOnly(false);
+    setColorSel(new Set());
+  }
   const [tilePrefs, setTilePrefs] = useState<TilePrefs>(loadTilePrefs);
   // Sorteer-modus: "heat" = signaal-heat (standaard) · "score" = inhoudelijke
   // score-engine (signal_scores.final_score). Keuze bewaard in localStorage.
@@ -139,27 +153,30 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
     };
   }, []);
 
-  const counts = useMemo(
-    () =>
-      data.cards.reduce(
-        (acc, c) => {
-          acc[c.color]++;
-          if (c.next_catalyst != null) acc.catalyst++;
-          return acc;
-        },
-        { white: 0, yellow: 0, orange: 0, red: 0, catalyst: 0 }
-      ),
-    [data.cards]
-  );
+  // Tellers: 'all' = over de hele watchlist, 'cat' = alleen catalyst-aandelen.
+  // De kleur-pillen tonen de teller die past bij de Catalyst-schakelaar, zodat
+  // de getallen op elkaar aansluiten.
+  const counts = useMemo(() => {
+    const all = { red: 0, orange: 0, yellow: 0, white: 0 };
+    const cat = { red: 0, orange: 0, yellow: 0, white: 0 };
+    let catalystTotal = 0;
+    for (const c of data.cards) {
+      all[c.color]++;
+      if (c.next_catalyst != null) {
+        catalystTotal++;
+        cat[c.color]++;
+      }
+    }
+    return { all, cat, catalystTotal };
+  }, [data.cards]);
 
   const visibleCards = useMemo(
     () => {
-      const filtered =
-        filter === "all"
-          ? data.cards
-          : filter === "catalyst"
-          ? data.cards.filter((c) => c.next_catalyst != null)
-          : data.cards.filter((c) => c.color === filter);
+      const filtered = data.cards.filter(
+        (c) =>
+          (!catalystOnly || c.next_catalyst != null) &&
+          (colorSel.size === 0 || colorSel.has(c.color)),
+      );
       if (sortMode === "score") {
         // Inhoudelijke sortering: hoogste final_score eerst, ongescoorde onderaan.
         return [...filtered].sort((a, b) => (b.final_score ?? -1) - (a.final_score ?? -1));
@@ -167,7 +184,7 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
       // "heat": de cards komen al heat-gesorteerd uit de edge function.
       return filtered;
     },
-    [data.cards, filter, sortMode]
+    [data.cards, catalystOnly, colorSel, sortMode]
   );
 
   // KPIs
@@ -221,7 +238,7 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
           label="Watchlist"
           value={data.cards.length}
           tone="pink"
-          hint={`${counts.red + counts.orange} actief`}
+          hint={`${counts.all.red + counts.all.orange} actief`}
           icon={TAB_ICONS.dashboard}
         />
         <Stat
@@ -248,61 +265,61 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
         />
       </div>
 
-      {/* Filter pills + jobs */}
+      {/* Filter pills + jobs — Catalyst combineert met de kleur-filters */}
       <div className="flex flex-wrap items-center gap-2">
         <Pill
           tone="cyan"
-          active={filter === "catalyst"}
-          count={counts.catalyst}
-          onClick={() => setFilter("catalyst")}
-          title="Aandelen met een geplande catalyst"
+          active={catalystOnly}
+          count={counts.catalystTotal}
+          onClick={() => setCatalystOnly((v) => !v)}
+          title="Alleen aandelen met een geplande catalyst — combineert met de kleur-filters"
         >
           Catalyst
         </Pill>
         <Pill
-          tone="neutral"
-          active={filter === "all"}
-          count={data.cards.length}
-          onClick={() => setFilter("all")}
-          title="Toon alle tickers"
-        >
-          Alles
-        </Pill>
-        <Pill
           tone="loss"
-          active={filter === "red"}
-          count={counts.red}
-          onClick={() => setFilter("red")}
+          active={colorSel.has("red")}
+          count={catalystOnly ? counts.cat.red : counts.all.red}
+          onClick={() => toggleColor("red")}
           title={COLOR_TIP.red}
         >
           Hot
         </Pill>
         <Pill
           tone="orange"
-          active={filter === "orange"}
-          count={counts.orange}
-          onClick={() => setFilter("orange")}
+          active={colorSel.has("orange")}
+          count={catalystOnly ? counts.cat.orange : counts.all.orange}
+          onClick={() => toggleColor("orange")}
           title={COLOR_TIP.orange}
         >
           Warm
         </Pill>
         <Pill
           tone="watch"
-          active={filter === "yellow"}
-          count={counts.yellow}
-          onClick={() => setFilter("yellow")}
+          active={colorSel.has("yellow")}
+          count={catalystOnly ? counts.cat.yellow : counts.all.yellow}
+          onClick={() => toggleColor("yellow")}
           title={COLOR_TIP.yellow}
         >
           Watchlist
         </Pill>
         <Pill
           tone="lime"
-          active={filter === "white"}
-          count={counts.white}
-          onClick={() => setFilter("white")}
+          active={colorSel.has("white")}
+          count={catalystOnly ? counts.cat.white : counts.all.white}
+          onClick={() => toggleColor("white")}
           title={COLOR_TIP.white}
         >
           Rust
+        </Pill>
+        <Pill
+          tone="neutral"
+          active={!catalystOnly && colorSel.size === 0}
+          count={data.cards.length}
+          onClick={showAll}
+          title="Toon alle tickers"
+        >
+          Alles
         </Pill>
         <div className="ml-auto flex items-center gap-2">
           <div className="flex items-center gap-1">
