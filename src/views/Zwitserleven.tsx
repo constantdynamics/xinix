@@ -8,6 +8,7 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
+import { TAB_ICONS } from "../tabIcons";
 import { useMarks } from "../hooks/useMarks";
 import {
   HeartCell,
@@ -356,7 +357,7 @@ export function ZwitserlevenView() {
       {/* Uitleg */}
       <Card className="p-4 border-emerald-500/30 bg-emerald-500/[0.04]">
         <div className="flex items-start gap-3">
-          <span className="text-2xl">🌴</span>
+          <span className="text-2xl text-emerald-300">{TAB_ICONS.zwitserleven}</span>
           <div className="flex-1">
             <div className="font-semibold text-emerald-300 mb-1">Zwitserleven</div>
             <p className="text-sm text-neutral-300 leading-relaxed">
@@ -376,7 +377,7 @@ export function ZwitserlevenView() {
 
       {/* Stats + scan-knoppen */}
       <div className="flex flex-wrap items-center gap-4">
-        <Stat label="Voldoen aan criteria" value={data?.meets_criteria_count ?? 0} />
+        <Stat label="Voldoen aan criteria" value={data?.meets_criteria_count ?? 0} icon={TAB_ICONS.zwitserleven} />
         <Stat label="Handmatig toegevoegd" value={data?.manual_count ?? 0} />
         <Stat
           label="Universum gescand"

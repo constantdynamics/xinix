@@ -4,6 +4,7 @@ import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import { triggerJob } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { loadTilePrefs, type TilePrefs } from "../tilePrefs";
+import { TAB_ICONS } from "../tabIcons";
 import {
   Card,
   Badge,
@@ -216,6 +217,7 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
           value={data.cards.length}
           tone="pink"
           hint={`${counts.red + counts.orange} actief`}
+          icon={TAB_ICONS.dashboard}
         />
         <Stat
           label="Actieve signalen"

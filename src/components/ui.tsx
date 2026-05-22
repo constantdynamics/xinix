@@ -873,12 +873,14 @@ export function Stat({
   delta,
   hint,
   tone,
+  icon,
 }: {
   label: string;
   value: ReactNode;
   delta?: { value: number; suffix?: string };
   hint?: ReactNode;
   tone?: "pink" | "lime";
+  icon?: ReactNode;
 }) {
   const deltaColor =
     delta && delta.value > 0
@@ -888,7 +890,8 @@ export function Stat({
       : "text-neutral-500";
   return (
     <Card className="p-4" glow={tone}>
-      <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+        {icon && <span className="text-sm text-fog-pink">{icon}</span>}
         {label}
       </div>
       <div className="mt-1 flex items-baseline gap-2">
@@ -912,26 +915,31 @@ export function SectionHeader({
   title,
   subtitle,
   aside,
+  icon,
 }: {
   eyebrow?: string;
   title: ReactNode;
   subtitle?: ReactNode;
   aside?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
     <div className="mb-4 flex items-end justify-between gap-4">
-      <div>
-        {eyebrow && (
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fog-pink mb-1">
-            {eyebrow}
-          </div>
-        )}
-        <h2 className="text-xl font-bold tracking-tight text-neutral-50">
-          {title}
-        </h2>
-        {subtitle && (
-          <div className="mt-0.5 text-xs text-neutral-500">{subtitle}</div>
-        )}
+      <div className="flex items-center gap-3">
+        {icon && <span className="text-2xl text-fog-pink shrink-0 leading-none">{icon}</span>}
+        <div>
+          {eyebrow && (
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fog-pink mb-1">
+              {eyebrow}
+            </div>
+          )}
+          <h2 className="text-xl font-bold tracking-tight text-neutral-50">
+            {title}
+          </h2>
+          {subtitle && (
+            <div className="mt-0.5 text-xs text-neutral-500">{subtitle}</div>
+          )}
+        </div>
       </div>
       {aside && <div className="flex items-center gap-2">{aside}</div>}
     </div>
