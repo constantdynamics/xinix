@@ -147,8 +147,6 @@ Deno.serve(runBackground("poll-prices", async () => {
       const { bars, dividendTtm, exchange } = await fetchYahoo(ticker);
       const valid = bars.filter((b): b is YahooBar & { close: number } => b.close !== null);
       if (valid.length === 0) throw new Error("no valid bars");
-      const rows = bars.filter((b) => b.close !== null).map((b) => ({ ticker, date: b.date, close: b.close, volume: b.volume }));
-      await sb.from("signal_prices").upsert(rows, { onConflict: "ticker,date" });
       const last = valid[valid.length - 1];
       const prev = valid[valid.length - 2];
       const fiveAgo = valid[valid.length - 6];

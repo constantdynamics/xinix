@@ -147,10 +147,10 @@ export function App() {
     }
   }
 
+  // Eenmalig laden bij openen. Geen auto-verversing meer (bespaart egress) —
+  // gebruik de "vernieuw"-knop in de kop om handmatig bij te werken.
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 60_000);
-    return () => clearInterval(id);
   }, []);
 
   // Counts per tab — kleine cijfers naast tab-label
