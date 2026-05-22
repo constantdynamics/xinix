@@ -11,6 +11,8 @@ function j(req: Request, body: unknown, init: ResponseInit = {}) { return new Re
 // (faillissement, trial failed, big drop) en richtingsloze events
 // (8k material agreement, price spike die al gebeurd is, volume spike,
 // near 90d low) dragen NIETS bij en laten een tegel dus Rust (white).
+// Ook limiet-events (limiet geraakt/dichtbij) zijn géén catalyst en
+// kleuren de tegel niet — die status hoort thuis in de Limieten-tab.
 type Sev = "white" | "yellow" | "orange" | "red";
 const SEV_RANK: Record<Sev, number> = { white: 0, yellow: 1, orange: 2, red: 3 };
 const HEAT_CONTRIBUTION: Record<string, Sev> = {
@@ -24,9 +26,7 @@ const HEAT_CONTRIBUTION: Record<string, Sev> = {
   discovery_announcement: "red",
   permit: "red",
   first_pour: "red",
-  buy_limit_hit: "red",
   // Matig positief -> Warm
-  buy_limit_close: "orange",
   bonanza_ag: "orange",
   bonanza_cu: "orange",
   licensing_deal: "orange",
