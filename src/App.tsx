@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardView } from "./views/Dashboard";
 import { SettingsView } from "./views/Settings";
 import { TickersView } from "./views/Tickers";
@@ -15,12 +15,13 @@ import { ZwitserlevenView } from "./views/Zwitserleven";
 import { FavorietenView } from "./views/Favorieten";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
-import { fetchDashboard, fetchUiSettings, fetchScanResults, fetchZwitserlevenResults, getToken, setToken, type UiSettings, type ScanResults, type ZwitserlevenResults } from "./api";
+import { fetchDashboard, fetchScanResults, fetchZwitserlevenResults, getToken, setToken, type ScanResults, type ZwitserlevenResults } from "./api";
 import type { Dashboard } from "./types";
 import { Button, NavTab, Input, Skeleton, Dot } from "./components/ui";
 import { DeviceSync } from "./components/DeviceSync";
 import { DEFAULT_TABS as TABS, type Tab, type TabDef } from "./tabsConfig";
 import { useMarks } from "./hooks/useMarks";
+import { useUiSettings } from "./hooks/useUiSettings";
 import { TAB_ICONS } from "./tabIcons";
 
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
@@ -82,19 +83,11 @@ export function App() {
   const [tokenInput, setTokenInput] = useState(getToken() ?? "");
   const [showTokenBar, setShowTokenBar] = useState(false);
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
-  const [uiSettings, setUiSettings] = useState<UiSettings | null>(null);
   const [scans, setScans] = useState<ScanResults | null>(null);
   const [zwit, setZwit] = useState<ZwitserlevenResults | null>(null);
   const marks = useMarks();
-
-  // UI-settings 1× laden + opnieuw na save (via custom event).
-  useEffect(() => {
-    const load = () => fetchUiSettings().then(setUiSettings).catch(() => { /* fallback naar defaults */ });
-    load();
-    const onUpdate = () => load();
-    window.addEventListener("xinix-ui-settings-updated", onUpdate);
-    return () => window.removeEventListener("xinix-ui-settings-updated", onUpdate);
-  }, []);
+  // UI-config via de gedeelde store — één fetch, gedeeld met alle views.
+  const { settings: uiSettings } = useUiSettings();
 
   // Pas UI-overrides toe op TABS: volgorde, hernoemd, verborgen.
   const effectiveTabs = useMemo<TabDef[]>(() => {
@@ -122,10 +115,12 @@ export function App() {
     return idx >= 0 ? tabColor(idx, effectiveTabs.length) : "#ff1f8f";
   }, [effectiveTabs, tab]);
 
-  async function refresh() {
+  // `fresh` = browser-cache omzeilen; gebruikt door de "vernieuw"-knop.
+  // Een gewone pagina-load gebruikt de cache zodat herladen snel is.
+  async function refresh(fresh = false) {
     try {
       setLoading(true);
-      const d = await fetchDashboard();
+      const d = await fetchDashboard(fresh);
       setData(d);
       setError(null);
       setLastFetchAt(Date.now());
@@ -136,18 +131,22 @@ export function App() {
     }
   }
 
-  // Eenmalig laden bij openen. Geen auto-verversing meer (bespaart egress) —
-  // gebruik de "vernieuw"-knop in de kop om handmatig bij te werken.
+  // Eenmalig laden bij openen — via de cache (snel herladen). Geen auto-
+  // verversing; gebruik de "vernieuw"-knop voor verse data.
   useEffect(() => {
     refresh();
   }, []);
 
-  // Scan-resultaten + zwitserleven los laden — alleen voor de tab-tellers
-  // (aantal vondsten dat nog niet als 'gezien' is gemarkeerd).
+  // Scan-resultaten + zwitserleven los laden voor de tab-tellers — pas ná
+  // het dashboard, zodat ze niet met de zware hoofd-fetch om resources
+  // concurreren. Eenmalig, zodra het dashboard binnen is.
+  const badgesFetched = useRef(false);
   useEffect(() => {
+    if (!data || badgesFetched.current) return;
+    badgesFetched.current = true;
     fetchScanResults().then(setScans).catch(() => { /* teller blijft leeg */ });
     fetchZwitserlevenResults().then(setZwit).catch(() => { /* teller blijft leeg */ });
-  }, []);
+  }, [data]);
 
   // Counts per tab — kleine cijfers naast tab-label
   const counts = useMemo<Partial<Record<Tab, number>>>(() => {
@@ -264,7 +263,7 @@ export function App() {
             <Button
               size="sm"
               variant="secondary"
-              onClick={refresh}
+              onClick={() => refresh(true)}
               disabled={loading}
               title="Vernieuw"
             >
@@ -340,14 +339,14 @@ export function App() {
         {loading && !data && !error && <DashboardSkeleton />}
 
         {tab === "dashboard" && data && (
-          <DashboardView data={data} onRefresh={refresh} onNavigate={setTab} />
+          <DashboardView data={data} onRefresh={() => refresh(true)} onNavigate={setTab} />
         )}
         {tab === "settings" && <SettingsView data={data ?? undefined} />}
         {tab === "tickers" && data && (
-          <TickersView data={data} onRefresh={refresh} />
+          <TickersView data={data} onRefresh={() => refresh(true)} />
         )}
         {tab === "limits" && data && (
-          <LimitsView data={data} onRefresh={refresh} />
+          <LimitsView data={data} onRefresh={() => refresh(true)} />
         )}
         {tab === "backtest" && <BacktestView />}
         {tab === "scores" && <ScoresView exchangeByTicker={data ? new Map(data.cards.map((c) => [c.ticker, c.exchange ?? null])) : undefined} />}

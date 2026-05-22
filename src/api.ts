@@ -33,8 +33,10 @@ function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-export async function fetchDashboard(): Promise<Dashboard> {
-  const res = await fetch(apiUrl("/api/dashboard"));
+// `fresh` omzeilt de browser-cache (voor de handmatige "vernieuw"-knop);
+// een gewone pagina-load gebruikt de cache zodat herladen snel is.
+export async function fetchDashboard(fresh = false): Promise<Dashboard> {
+  const res = await fetch(apiUrl("/api/dashboard"), fresh ? { cache: "reload" } : undefined);
   if (!res.ok) throw new Error(`dashboard ${res.status}`);
   return (await res.json()) as Dashboard;
 }
