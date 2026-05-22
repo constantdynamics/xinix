@@ -96,7 +96,7 @@ function signalMeta(type: string): { label: string; desc: string } {
   return SIGNAL_FRIENDLY[type] ?? { label: type, desc: "" };
 }
 
-type ColorFilter = "all" | "red" | "orange" | "yellow" | "white";
+type ColorFilter = "catalyst" | "all" | "red" | "orange" | "yellow" | "white";
 
 type NavTarget =
   | "dashboard"
@@ -110,7 +110,8 @@ type NavTarget =
   | "settings";
 
 export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh: () => void; onNavigate?: (t: NavTarget) => void }) {
-  const [filter, setFilter] = useState<ColorFilter>("all");
+  // Standaard toont het dashboard alleen aandelen met een geplande catalyst.
+  const [filter, setFilter] = useState<ColorFilter>("catalyst");
   const [tilePrefs, setTilePrefs] = useState<TilePrefs>(loadTilePrefs);
   // Sorteer-modus: "heat" = signaal-heat (standaard) · "score" = inhoudelijke
   // score-engine (signal_scores.final_score). Keuze bewaard in localStorage.
@@ -143,18 +144,22 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
       data.cards.reduce(
         (acc, c) => {
           acc[c.color]++;
+          if (c.next_catalyst != null) acc.catalyst++;
           return acc;
         },
-        { white: 0, yellow: 0, orange: 0, red: 0 }
+        { white: 0, yellow: 0, orange: 0, red: 0, catalyst: 0 }
       ),
     [data.cards]
   );
 
   const visibleCards = useMemo(
     () => {
-      const filtered = filter === "all"
-        ? data.cards
-        : data.cards.filter((c) => c.color === filter);
+      const filtered =
+        filter === "all"
+          ? data.cards
+          : filter === "catalyst"
+          ? data.cards.filter((c) => c.next_catalyst != null)
+          : data.cards.filter((c) => c.color === filter);
       if (sortMode === "score") {
         // Inhoudelijke sortering: hoogste final_score eerst, ongescoorde onderaan.
         return [...filtered].sort((a, b) => (b.final_score ?? -1) - (a.final_score ?? -1));
@@ -245,6 +250,15 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
 
       {/* Filter pills + jobs */}
       <div className="flex flex-wrap items-center gap-2">
+        <Pill
+          tone="cyan"
+          active={filter === "catalyst"}
+          count={counts.catalyst}
+          onClick={() => setFilter("catalyst")}
+          title="Aandelen met een geplande catalyst"
+        >
+          Catalyst
+        </Pill>
         <Pill
           tone="neutral"
           active={filter === "all"}
