@@ -32,6 +32,7 @@ import {
   Stat,
 } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
+import { EditableLimit } from "../components/EditableLimit";
 import {
   HeartCell,
   HeartHeader,
@@ -2318,7 +2319,7 @@ export function PhoenixView() {
                         )}
                         <td className="px-3 py-2 text-right font-mono tabular-nums">
                           {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
-                          {p.buy_limit != null && <div className="text-[10px] text-neutral-500">lim {fmtPrice(p.buy_limit)}</div>}
+                          <div><EditableLimit ticker={p.ticker} buyLimit={p.buy_limit} compact /></div>
                         </td>
                       </tr>
                     );

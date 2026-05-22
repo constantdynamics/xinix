@@ -8,6 +8,7 @@ import {
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
 import { TAB_ICONS } from "../tabIcons";
+import { EditableLimit } from "../components/EditableLimit";
 import { useMarks } from "../hooks/useMarks";
 import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile, StarRating } from "../components/MarkCells";
 
@@ -289,19 +290,13 @@ export function HikkertjesView() {
 
                   {/* Limiet + afstand */}
                   <div className="shrink-0 text-right w-20">
-                    {h.buy_limit != null ? (
-                      <>
-                        <div className="tabular font-mono text-neutral-400">${fmtPrice(h.buy_limit)}</div>
-                        {h.above_limit_pct != null && (
-                          <div className={`text-[10px] tabular font-semibold ${
-                            belowLimit ? "text-yellow-400" : nearLimit ? "text-yellow-600" : "text-neutral-500"
-                          }`}>
-                            {h.above_limit_pct >= 0 ? "+" : ""}{h.above_limit_pct.toFixed(1)}%
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="text-neutral-600 text-xs">geen limiet</div>
+                    <EditableLimit ticker={h.ticker} buyLimit={h.buy_limit} />
+                    {h.buy_limit != null && h.above_limit_pct != null && (
+                      <div className={`text-[10px] tabular font-semibold ${
+                        belowLimit ? "text-yellow-400" : nearLimit ? "text-yellow-600" : "text-neutral-500"
+                      }`}>
+                        {h.above_limit_pct >= 0 ? "+" : ""}{h.above_limit_pct.toFixed(1)}%
+                      </div>
                     )}
                   </div>
                 </div>
