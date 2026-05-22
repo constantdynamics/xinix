@@ -51,7 +51,7 @@ const HEAT_CONTRIBUTION: Record<string, Sev> = {
 Deno.serve(async (req) => {
   const p = pf(req); if (p) return p;
   const supabase = getServiceClient();
-  const [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes, scoresRes] = await Promise.all([
+  const runQueries = () => Promise.all([
     supabase.from("signal_tickers").select("*").eq("active", true),
     supabase.from("signal_price_summary").select("*"),
     supabase.from("signal_events").select("*").or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).order("detected_at", { ascending: false }).limit(500),
@@ -60,6 +60,31 @@ Deno.serve(async (req) => {
     supabase.from("zwitserleven_stocks").select("ticker").eq("meets_criteria", true),
     supabase.from("signal_scores_latest").select("ticker, mode, final_score, action, structural, catalyst, timing").eq("mode", "trader"),
   ]);
+  let [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes, scoresRes] = await runQueries();
+  // signal_tickers is de kern van het dashboard. Faalt die query — meestal door
+  // kortdurende DB-druk van overlappende achtergrondjobs — probeer dan tot 2×
+  // opnieuw voordat we opgeven.
+  for (let attempt = 1; attempt <= 2 && tickersRes.error; attempt++) {
+    console.error(`dashboard: signal_tickers faalde (poging ${attempt}), opnieuw...`, tickersRes.error.message);
+    await new Promise((r) => setTimeout(r, 500 * attempt));
+    [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes, scoresRes] = await runQueries();
+  }
+  // Query-fouten zichtbaar maken. Voorheen viel elke mislukte query stil naar
+  // [] — een trage/getimede signal_tickers-query leverde dan een dashboard mét
+  // status 200 maar zónder cards op, wat in de UI lijkt op "alle data is weg".
+  for (const [name, res] of ([
+    ["signal_tickers", tickersRes], ["signal_price_summary", summaryRes],
+    ["signal_events", signalsRes], ["signal_catalysts", catalystsRes],
+    ["signal_runs", runLogRes], ["zwitserleven_stocks", zwitserlevenRes],
+    ["signal_scores_latest", scoresRes],
+  ] as const)) {
+    if (res.error) console.error(`dashboard: query ${name} faalde:`, res.error.message);
+  }
+  // signal_tickers is de kern van het dashboard — zonder die rijen zijn er geen
+  // cards. Geef bij een fout een echte 500 terug i.p.v. een leeg dashboard.
+  if (tickersRes.error) {
+    return j(req, { error: `signal_tickers kon niet geladen worden: ${tickersRes.error.message}` }, { status: 500 });
+  }
   const tickers = tickersRes.data ?? [];
   const summaries = summaryRes.data ?? [];
   const signals = signalsRes.data ?? [];
