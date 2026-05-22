@@ -471,7 +471,7 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
               href={googleFinanceUrl(c.ticker, c.exchange)}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-bold text-base tracking-tight text-neutral-50 group-hover:text-fog-pink transition"
+              className="font-bold text-base tracking-tight tab-accent-text transition"
               title={`Open ${c.ticker} op Google Finance`}
             >
               {c.ticker}
@@ -822,7 +822,7 @@ function Catalysts({ data }: { data: Dashboard }) {
                       href={googleFinanceUrl(c.ticker, exchangeByTicker.get(c.ticker))}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-fog-pink hover:underline"
+                      className="tab-accent-text hover:underline"
                     >
                       {c.ticker}
                     </a>

@@ -6,8 +6,8 @@ import {
   type PoefieRankEntry,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Button, Pill, Stat, Dot } from "../components/ui";
-import { TAB_ICONS } from "../tabIcons";
+import { Card, Button, Pill, Stat } from "../components/ui";
+import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { EditableLimit } from "../components/EditableLimit";
 import { useMarks } from "../hooks/useMarks";
 import {
@@ -400,7 +400,7 @@ export function PoefiesView() {
               href={googleFinanceUrl(p.ticker, p.exchange)}
               target="_blank"
               rel="noreferrer"
-              className="font-mono text-sm font-semibold text-fog-lime hover:underline"
+              className="font-mono text-sm font-semibold tab-accent-text hover:underline"
             >
               {p.ticker}
             </a>
@@ -463,11 +463,11 @@ export function PoefiesView() {
   return (
     <div className="space-y-6">
       {/* Uitlegkaart */}
-      <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.03]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <Dot tone="watch" />
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="poefies" /></span>
           <div className="flex-1">
-            <div className="font-bold text-neutral-100 flex items-center gap-2"><span className="text-fog-watch">{TAB_ICONS.poefies}</span>Poefies</div>
+            <div className="font-bold text-base tab-accent-text">Poefies</div>
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">125% (2,25×)</strong> zijn gegroeid binnen maximaal <strong className="text-neutral-200">7 dagen</strong>.
               Een poefie is een explosieve, kortstondige sprong. De kolommen <em>6m / 1j / 2j / 5j</em> tonen hoe vaak het de afgelopen 6 maanden, 1, 2 en 5 jaar gebeurde.

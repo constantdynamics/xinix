@@ -304,7 +304,7 @@ export function FavorietenView() {
       ),
       td: (r) => (
         <td className="px-3 py-2">
-          <a href={googleFinanceUrl(r.ticker, r.exchange)} target="_blank" rel="noreferrer" className="font-mono font-semibold text-red-300 hover:underline">
+          <a href={googleFinanceUrl(r.ticker, r.exchange)} target="_blank" rel="noreferrer" className="font-mono font-semibold tab-accent-text hover:underline">
             {r.ticker}
           </a>
         </td>
@@ -466,11 +466,11 @@ export function FavorietenView() {
 
   return (
     <div className="space-y-4">
-      <Card className="p-4 border-red-500/30 bg-red-500/[0.04]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
           <span className="text-2xl">♥</span>
           <div className="flex-1">
-            <div className="font-semibold text-red-400 mb-1">Favorieten</div>
+            <div className="font-semibold tab-accent-text mb-1">Favorieten</div>
             <p className="text-sm text-neutral-300 leading-relaxed">
               Aandelen die je hebt aangemerkt met het hartje op een ander tabblad.
               De badges tonen op welke lijst ze voorkomen (Feniks, Poefie, Hikkertje, Zwitserleven of alleen watchlist).
@@ -665,7 +665,7 @@ function FavorietenTiles({ rows }: { rows: FavRow[] }) {
                 href={googleFinanceUrl(r.ticker, r.exchange)}
                 target="_blank"
                 rel="noreferrer"
-                className="font-mono font-bold text-sm text-red-300 hover:underline truncate"
+                className="font-mono font-bold text-sm tab-accent-text hover:underline truncate"
               >
                 {r.ticker}
               </a>

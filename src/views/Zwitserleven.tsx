@@ -8,7 +8,7 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
-import { TAB_ICONS } from "../tabIcons";
+import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { useMarks } from "../hooks/useMarks";
 import {
   HeartCell,
@@ -335,7 +335,7 @@ export function ZwitserlevenView() {
       td: (s) => (
         <td className="px-3 py-2.5">
           <div className="flex items-center gap-1.5">
-            <a href={googleFinanceUrl(s.ticker, s.exchange)} target="_blank" rel="noopener noreferrer" className="font-mono font-semibold text-emerald-400 hover:underline">
+            <a href={googleFinanceUrl(s.ticker, s.exchange)} target="_blank" rel="noopener noreferrer" className="font-mono font-semibold tab-accent-text hover:underline">
               {s.ticker}
             </a>
             {s.is_manual && (
@@ -539,11 +539,11 @@ export function ZwitserlevenView() {
   return (
     <div className="space-y-6">
       {/* Uitleg */}
-      <Card className="p-4 border-emerald-500/30 bg-emerald-500/[0.04]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <span className="text-2xl text-emerald-300">{TAB_ICONS.zwitserleven}</span>
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="zwitserleven" /></span>
           <div className="flex-1">
-            <div className="font-semibold text-emerald-300 mb-1">Zwitserleven</div>
+            <div className="font-semibold tab-accent-text mb-1">Zwitserleven</div>
             <p className="text-sm text-neutral-300 leading-relaxed">
               Fallen angels met dividendzekerheid — aandelen met een <strong>TTM-dividend ≥6,5%</strong>,
               die minstens <strong>50% onder hun 5-jaars-hoog</strong> noteren, én die in de afgelopen
