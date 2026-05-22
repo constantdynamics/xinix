@@ -403,11 +403,18 @@ export async function removeZwitserlevenStock(ticker: string): Promise<{ ok: boo
 }
 
 // ── UI settings (tab-aanpassingen) ───────────────────────────────────────────
+// Per-tab kolominstelling: volgorde van kolom-keys + welke verborgen zijn.
+export interface TableColumnPref {
+  order: string[];
+  hidden: string[];
+}
+
 export interface UiSettings {
   id: number;
   tab_order: string[];
   tab_labels: Record<string, string>;
   tab_hidden: string[];
+  table_columns: Record<string, TableColumnPref>;
   updated_at: string;
 }
 

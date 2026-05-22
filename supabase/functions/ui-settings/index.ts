@@ -9,11 +9,17 @@ import {
   textResponse,
 } from "../_shared/cors.ts";
 
+interface TableColumnPref {
+  order: string[];
+  hidden: string[];
+}
+
 interface UiSettings {
   id: number;
   tab_order: string[];
   tab_labels: Record<string, string>;
   tab_hidden: string[];
+  table_columns: Record<string, TableColumnPref>;
   updated_at: string;
 }
 
@@ -23,6 +29,7 @@ function defaults(): UiSettings {
     tab_order: [],
     tab_labels: {},
     tab_hidden: [],
+    table_columns: {},
     updated_at: new Date().toISOString(),
   };
 }
@@ -65,6 +72,18 @@ Deno.serve(async (req) => {
   }
   if (Array.isArray(body.tab_hidden)) {
     update.tab_hidden = body.tab_hidden.filter((x): x is string => typeof x === "string").slice(0, 64);
+  }
+  if (body.table_columns && typeof body.table_columns === "object" && !Array.isArray(body.table_columns)) {
+    const strings = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 128) : [];
+    const clean: Record<string, TableColumnPref> = {};
+    for (const [tab, pref] of Object.entries(body.table_columns).slice(0, 64)) {
+      if (typeof tab !== "string" || tab.length > 64) continue;
+      if (!pref || typeof pref !== "object" || Array.isArray(pref)) continue;
+      const p = pref as Record<string, unknown>;
+      clean[tab] = { order: strings(p.order), hidden: strings(p.hidden) };
+    }
+    update.table_columns = clean;
   }
 
   const { data, error } = await sb
