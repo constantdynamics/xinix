@@ -91,7 +91,16 @@ Deno.serve(async (req) => {
       else if (t.goud_score >= 65) baselineSev = "orange";
       else if (t.goud_score >= 35) baselineSev = "yellow";
     }
-    const finalSev: Sev = SEV_RANK[signalSev] > SEV_RANK[baselineSev] ? signalSev : baselineSev;
+    let finalSev: Sev = SEV_RANK[signalSev] > SEV_RANK[baselineSev] ? signalSev : baselineSev;
+    // Hot/Warm-poort: een Hot/Warm-tegel die puur op curatie (goud_score)
+    // berust vereist medailles (>=1 zilver of >=3 brons). Signaal-gedreven
+    // heat (bonanza, permit, catalyst, approval, ...) is altijd een geldige
+    // inhoudelijke reden en wordt nooit teruggezet.
+    const medalOK = (t.medal_silver ?? 0) >= 1 || (t.medal_bronze ?? 0) >= 3;
+    const signalDriven = SEV_RANK[signalSev] >= SEV_RANK.orange;
+    if ((finalSev === "red" || finalSev === "orange") && !signalDriven && !medalOK) {
+      finalSev = "yellow";
+    }
     const nextCatalyst = tCatalysts[0];
     const daysToNext = nextCatalyst?.expected_date
       ? Math.ceil((new Date(nextCatalyst.expected_date).getTime() - Date.now()) / 86400000)
