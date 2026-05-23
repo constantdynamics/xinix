@@ -1144,6 +1144,150 @@ function StrategyDetailPanel({ s, all }: { s: SimStrategy; all: SimStrategy[] })
           </div>
         )}
       </div>
+
+      <KpiBlock s={s} />
+      <ExitStrategyPanel s={s} />
+      {(s.rank ?? 999) <= 10 && <FoodForThought s={s} />}
+    </div>
+  );
+}
+
+// Uitgebreide KPI-strook met distributie- en capture-metrics.
+function KpiBlock({ s }: { s: SimStrategy }) {
+  const closed = s.closed_count;
+  const pf = s.profit_factor ?? 0;
+  const pfDisplay = !Number.isFinite(pf) || pf >= 999 ? "∞" : pf.toFixed(2);
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+        Uitgebreide KPI's
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+        <KpiTile label="Mediaan winst" value={closed > 0 ? `${(s.median_return_pct ?? 0).toFixed(1)}%` : "—"} tone={(s.median_return_pct ?? 0) >= 0 ? "lime" : "loss"} />
+        <KpiTile label="Beste trade" value={closed > 0 ? `+${(s.best_trade_pct ?? 0).toFixed(0)}%` : "—"} tone="lime" />
+        <KpiTile label="Slechtste trade" value={closed > 0 ? `${(s.worst_trade_pct ?? 0).toFixed(0)}%` : "—"} tone={(s.worst_trade_pct ?? 0) >= 0 ? "lime" : "loss"} />
+        <KpiTile label="Profit factor" value={closed > 0 ? pfDisplay : "—"} tone={pf >= 1.5 ? "lime" : pf >= 1 ? "neutral" : "loss"} hint="Som winsten ($) ÷ som verliezen ($). >1 = winstgevend; >2 = sterk." />
+        <KpiTile label="Verwachte winst/trade" value={closed > 0 ? `${(s.expectancy_pct ?? 0).toFixed(2)}%` : "—"} tone={(s.expectancy_pct ?? 0) >= 0 ? "lime" : "loss"} />
+        <KpiTile label="Unieke tickers" value={`${s.unique_tickers ?? 0}`} hint="Aantal verschillende aandelen ooit aangekocht door deze strategie." />
+        <KpiTile label="Feniksen gevangen" value={`${s.phoenix_captured ?? 0}`} hint="Unieke gesloten tickers die op de Feniks-lijst staan." />
+        <KpiTile label="Hikkertjes gevangen" value={`${s.hikkertje_captured ?? 0}`} />
+        <KpiTile label="Poefies gevangen" value={`${s.poefie_captured ?? 0}`} />
+        <KpiTile label="🏆 Goud-trades" value={`${s.gold_trades ?? 0}`} hint="Gesloten posities waarvan de ticker ≥1 goud heeft (huidige stand)." />
+        <KpiTile label="🥈 Zilver-trades" value={`${s.silver_trades ?? 0}`} />
+        <KpiTile label="🥉 Brons-trades" value={`${s.bronze_trades ?? 0}`} />
+      </div>
+    </div>
+  );
+}
+
+function KpiTile({ label, value, tone, hint }: { label: string; value: string; tone?: "lime" | "loss" | "neutral"; hint?: string }) {
+  const color = tone === "lime" ? "text-fog-lime" : tone === "loss" ? "text-fog-loss" : "text-neutral-200";
+  return (
+    <div className="rounded border border-ink-5/60 bg-ink-3/30 px-2 py-1.5" title={hint}>
+      <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold leading-tight">{label}</div>
+      <div className={`text-sm font-bold tabular-nums mt-0.5 ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+// Exit-strategie: laat zien hoe gesloten posities zijn verkocht.
+function ExitStrategyPanel({ s }: { s: SimStrategy }) {
+  const reasons = s.exit_reasons ?? [];
+  if (reasons.length === 0 && (s.partial_count ?? 0) === 0) return null;
+  const total = reasons.reduce((sum, r) => sum + r.count, 0) || 1;
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+        Verkoopstrategie — hoe werden posities gesloten
+      </div>
+      <div className="space-y-1">
+        {reasons.map((r) => {
+          const pct = (r.count / total) * 100;
+          const tone = r.avg_return_pct >= 0 ? "text-fog-lime" : "text-fog-loss";
+          return (
+            <div key={r.reason} className="flex items-center gap-2 text-[11px]">
+              <span className="w-32 shrink-0 text-neutral-300">{exitReasonLabel(r.reason)}</span>
+              <span className="text-neutral-500 tabular-nums w-14 text-right">{r.count}× · {pct.toFixed(0)}%</span>
+              <div className="flex-1 h-1.5 rounded-full bg-ink-3 overflow-hidden">
+                <div className="h-full bg-fog-pink/40" style={{ width: `${pct}%` }} />
+              </div>
+              <span className={`tabular-nums w-16 text-right ${tone}`}>
+                {r.avg_return_pct >= 0 ? "+" : ""}{r.avg_return_pct.toFixed(1)}%
+              </span>
+            </div>
+          );
+        })}
+        {(s.partial_count ?? 0) > 0 && (
+          <div className="text-[11px] text-neutral-400 mt-2 pt-2 border-t border-ink-5/40">
+            <strong className="text-neutral-300">Deelverkopen:</strong>{" "}
+            {s.partial_count}× partial TP, gemiddeld {(s.partial_avg_qty_pct ?? 0).toFixed(0)}% van de positie verkocht per keer
+            {(s.partial_total_usd ?? 0) > 0 && <> (samen ${(s.partial_total_usd ?? 0).toFixed(0)} cash opgehaald)</>}.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function exitReasonLabel(r: string): string {
+  switch (r) {
+    case "stop_loss":            return "🛑 Stop-loss geraakt";
+    case "trailing_stop":        return "↗️ Trailing-stop geraakt";
+    case "take_profit":          return "🎯 Take-profit geraakt";
+    case "partial_take_profit":  return "💰 Deelwinst gepakt";
+    case "time_exit":            return "⏰ Tijdvenster afgelopen";
+    case "signal_decay":         return "📉 Signaal verlopen + verlies";
+    case "opportunity_replace":  return "🔄 Vervangen door betere kandidaat";
+    default:                     return r;
+  }
+}
+
+// "Food for thought" voor top-10 strategieën: regelgebaseerde suggesties
+// op basis van de verkoopstrategie en distributie van trades.
+function FoodForThought({ s }: { s: SimStrategy }) {
+  const tips: string[] = [];
+  const closed = s.closed_count;
+  if (closed >= 5) {
+    const reasons = s.exit_reasons ?? [];
+    const total = reasons.reduce((sum, r) => sum + r.count, 0) || 1;
+    const countBy = (key: string) => reasons.find((r) => r.reason === key)?.count ?? 0;
+    const stopPct = (countBy("stop_loss") + countBy("trailing_stop")) / total;
+    const oppPct = countBy("opportunity_replace") / total;
+    const best = s.best_trade_pct ?? 0;
+    const avg = s.avg_return_pct ?? 0;
+    const tpCfg = s.config.tp != null ? Number(s.config.tp) * 100 : null;
+
+    if (stopPct >= 0.4) {
+      tips.push(`Veel exits via stop-loss (${(stopPct * 100).toFixed(0)}%) — overweeg een ruimere stop of strenger entry-filter om vroegtijdige verliezen te beperken.`);
+    }
+    if (oppPct >= 0.25) {
+      tips.push(`Veel rotatie via opportunity-replace (${(oppPct * 100).toFixed(0)}%) — let op cumulatieve transactiekosten (0,1% × elke trade).`);
+    }
+    if (best > 100 && avg < 15) {
+      tips.push(`Eén grote winnaar (+${best.toFixed(0)}%) tilt het gemiddelde — trailing-stop kan helpen om winnaars langer vast te houden i.p.v. via vast TP te verkopen.`);
+    }
+    if (tpCfg != null && best > tpCfg * 2) {
+      tips.push(`Beste trade (+${best.toFixed(0)}%) overschreed je TP (+${tpCfg.toFixed(0)}%) met factor ${(best / tpCfg).toFixed(1)}× — een hogere TP of partial-TP zou meer rendement gevangen hebben.`);
+    }
+    if ((s.win_rate ?? 0) >= 0.7 && (s.worst_trade_pct ?? 0) < -25) {
+      tips.push(`Hoge hit-rate (${((s.win_rate ?? 0) * 100).toFixed(0)}%) maar zware verliezers (slechtste ${(s.worst_trade_pct ?? 0).toFixed(0)}%) — risk/reward asymmetrisch; krappere stop zou veel rendement redden.`);
+    }
+    if ((s.partial_count ?? 0) === 0 && (s.win_rate ?? 0) >= 0.5 && best > 50) {
+      tips.push(`Geen deelverkopen gebruikt — bij +25% half verkopen had risico verlaagd zonder de upside van de andere helft op te geven.`);
+    }
+  }
+
+  if (tips.length === 0) return null;
+  return (
+    <div className="border-l-2 border-fog-warn/60 pl-3">
+      <div className="text-[10px] uppercase tracking-wider text-fog-warn font-bold mb-1.5">
+        💡 Food for thought — wat had beter gekund
+      </div>
+      <ul className="space-y-1.5">
+        {tips.map((t, i) => (
+          <li key={i} className="text-[11px] text-neutral-300 leading-relaxed">{t}</li>
+        ))}
+      </ul>
     </div>
   );
 }

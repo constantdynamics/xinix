@@ -603,9 +603,36 @@ export interface SimStrategy {
   // Aandeel equity-snapshots waarop de portefeuille positief stond (0..1).
   positive_days_pct?: number;
   total_days?: number;
+  // Distributie-metrics
+  median_return_pct?: number;
+  best_trade_pct?: number;
+  worst_trade_pct?: number;
+  profit_factor?: number;
+  expectancy_pct?: number;
+  // Universum & capture
+  unique_tickers?: number;
+  phoenix_captured?: number;
+  hikkertje_captured?: number;
+  poefie_captured?: number;
+  // Medaille-trades (huidige medaille-stand op gesloten ticker als proxy)
+  gold_trades?: number;
+  silver_trades?: number;
+  bronze_trades?: number;
+  // Exit-strategie breakdown
+  exit_reasons?: SimExitReason[];
+  partial_count?: number;
+  partial_avg_qty_pct?: number;
+  partial_total_usd?: number;
   last_run_at: string | null;
   open_pos_detail: SimPosDetail[];
   closed_pos_detail: SimPosDetail[];
+}
+
+export interface SimExitReason {
+  reason: string;
+  count: number;
+  avg_return_pct: number;
+  sum_usd: number;
 }
 
 export interface SimDimensionEntry {
