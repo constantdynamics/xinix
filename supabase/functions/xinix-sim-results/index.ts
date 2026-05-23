@@ -29,10 +29,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   try {
     const sb = getServiceClient();
-    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, equityRes] = await Promise.all([
+    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, equityRes, tickerMetaRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected, parent_id").eq("active", true),
       sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, last_run_at, started_at"),
-      sb.from("xinix_strategy_positions").select("strategy_id, return_usd, return_pct, entry_signal_types, entry_sector").not("closed_at","is",null),
+      sb.from("xinix_strategy_positions").select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, closed_reason, qty, avg_price, partial_exits").not("closed_at","is",null),
       sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price, entry_signal_types, entry_sector, entry_date, entry_reason").is("closed_at", null),
       sb.from("signal_price_summary").select("ticker, last_close"),
       sb.from("xinix_strategies").select("id, slug, name, grp, generation, retired_at, config")
@@ -52,13 +52,33 @@ Deno.serve(async (req) => {
       sb.from("xinix_strategy_equity")
         .select("strategy_id, date, total_equity")
         .order("date", { ascending: true }),
+      // Ticker-metadata voor capture-tellers (poefie/feniks/hikkertje) +
+      // medaille-trades. We gebruiken de huidige stand als proxy voor
+      // "is deze ticker op die lijst (geweest)".
+      sb.from("signal_tickers")
+        .select("ticker, is_phoenix, is_hikkertje, is_poefie, medal_gold, medal_silver, medal_bronze"),
     ]);
+
+    type TickerMeta = { phoenix: boolean; hikkertje: boolean; poefie: boolean; gold: number; silver: number; bronze: number };
+    const tickerMeta = new Map<string, TickerMeta>();
+    for (const r of (tickerMetaRes.data ?? [])) {
+      tickerMeta.set(r.ticker as string, {
+        phoenix:   !!r.is_phoenix,
+        hikkertje: !!r.is_hikkertje,
+        poefie:    !!r.is_poefie,
+        gold:   Number(r.medal_gold   ?? 0),
+        silver: Number(r.medal_silver ?? 0),
+        bronze: Number(r.medal_bronze ?? 0),
+      });
+    }
 
     const priceMap = new Map<string, number>();
     for (const r of (summaryRes.data ?? [])) {
       if (r.last_close != null) priceMap.set(r.ticker as string, Number(r.last_close));
     }
 
+    type CloseReasonStat = { count: number; sumRetPct: number; sumUsd: number };
+    type PartialStat = { count: number; sumQtyPct: number; sumTriggerPct: number; sumUsd: number };
     type Agg = {
       realizedUsd: number;
       closed: number;
@@ -66,14 +86,49 @@ Deno.serve(async (req) => {
       sumRetPct: number;
       // Drempel-tellers: gesloten posities met return_pct ≥ N%.
       wins5: number; wins10: number; wins25: number; wins50: number; wins100: number;
+      // Voor mediaan + best/slechtste trade
+      returns: number[];
+      bestRetPct: number;
+      worstRetPct: number;
+      // Profit factor: som winsten ($) / som verliezen ($, absoluut)
+      sumWinUsd: number;
+      sumLossUsd: number;  // positief; absolute waarde
+      // Capture-tellers (unieke tickers in gesloten posities)
+      tickers: Set<string>;
+      phoenixTickers: Set<string>;
+      hikkertjeTickers: Set<string>;
+      poefieTickers: Set<string>;
+      goldTrades: number;
+      silverTrades: number;
+      bronzeTrades: number;
+      // Exit-strategie breakdown
+      byCloseReason: Map<string, CloseReasonStat>;
+      // Deelwinst-verkopen aggregaten
+      partial: PartialStat;
     };
+
+    function newAgg(): Agg {
+      return {
+        realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0,
+        wins5: 0, wins10: 0, wins25: 0, wins50: 0, wins100: 0,
+        returns: [], bestRetPct: -Infinity, worstRetPct: Infinity,
+        sumWinUsd: 0, sumLossUsd: 0,
+        tickers: new Set(), phoenixTickers: new Set(), hikkertjeTickers: new Set(), poefieTickers: new Set(),
+        goldTrades: 0, silverTrades: 0, bronzeTrades: 0,
+        byCloseReason: new Map(),
+        partial: { count: 0, sumQtyPct: 0, sumTriggerPct: 0, sumUsd: 0 },
+      };
+    }
+
     const agg = new Map<number, Agg>();
     for (const p of (closedRes.data ?? [])) {
       const sid = p.strategy_id as number;
-      const a = agg.get(sid) ?? { realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0, wins5: 0, wins10: 0, wins25: 0, wins50: 0, wins100: 0 };
-      a.realizedUsd += Number(p.return_usd ?? 0);
-      a.closed++;
+      let a = agg.get(sid);
+      if (!a) { a = newAgg(); agg.set(sid, a); }
+      const usd = Number(p.return_usd ?? 0);
       const r = Number(p.return_pct ?? 0);
+      a.realizedUsd += usd;
+      a.closed++;
       if (r > 0) a.wins++;
       if (r >= 5) a.wins5++;
       if (r >= 10) a.wins10++;
@@ -81,7 +136,43 @@ Deno.serve(async (req) => {
       if (r >= 50) a.wins50++;
       if (r >= 100) a.wins100++;
       a.sumRetPct += r;
-      agg.set(sid, a);
+      a.returns.push(r);
+      if (r > a.bestRetPct) a.bestRetPct = r;
+      if (r < a.worstRetPct) a.worstRetPct = r;
+      if (usd >= 0) a.sumWinUsd += usd; else a.sumLossUsd += -usd;
+
+      // Capture + medaille-trades op huidige ticker-stand
+      const t = (p.ticker as string) ?? "";
+      if (t) {
+        a.tickers.add(t);
+        const m = tickerMeta.get(t);
+        if (m) {
+          if (m.phoenix)   a.phoenixTickers.add(t);
+          if (m.hikkertje) a.hikkertjeTickers.add(t);
+          if (m.poefie)    a.poefieTickers.add(t);
+          if (m.gold   >= 1) a.goldTrades++;
+          if (m.silver >= 1) a.silverTrades++;
+          if (m.bronze >= 1) a.bronzeTrades++;
+        }
+      }
+
+      // Exit-strategie aggregaat
+      const reason = (p.closed_reason as string) ?? "onbekend";
+      const cr = a.byCloseReason.get(reason) ?? { count: 0, sumRetPct: 0, sumUsd: 0 };
+      cr.count++; cr.sumRetPct += r; cr.sumUsd += usd;
+      a.byCloseReason.set(reason, cr);
+
+      // Deelwinst-verkopen: partial_exits is JSONB array [{qty_sold, net_proceeds, at, reason}]
+      const partials = p.partial_exits as Array<{ qty_sold?: number; net_proceeds?: number; at?: string; reason?: string }> | null;
+      if (Array.isArray(partials) && partials.length > 0) {
+        const origQty = Number(p.qty ?? 0) + partials.reduce((s, x) => s + Number(x.qty_sold ?? 0), 0);
+        for (const x of partials) {
+          a.partial.count++;
+          const qty = Number(x.qty_sold ?? 0);
+          a.partial.sumQtyPct += origQty > 0 ? (qty / origQty) * 100 : 0;
+          a.partial.sumUsd += Number(x.net_proceeds ?? 0);
+        }
+      }
     }
 
     type OpenDetail = { ticker: string; entry_signal_types: string[]; entry_sector: string | null; entry_date: string; entry_reason: string };
@@ -151,6 +242,7 @@ Deno.serve(async (req) => {
       posDaysByStrat.set(sid, cur);
     }
 
+    interface ExitReason { reason: string; count: number; avg_return_pct: number; sum_usd: number }
     interface StratResult {
       id: number; slug: string; name: string; grp: string; config: Record<string, unknown>;
       generation: number; protected: boolean; parent_id: number | null;
@@ -163,9 +255,35 @@ Deno.serve(async (req) => {
       win_rate_5pct: number; win_rate_10pct: number; win_rate_25pct: number; win_rate_50pct: number; win_rate_100pct: number;
       // Aandeel equity-snapshots waarop de portefeuille positief stond (0..1).
       positive_days_pct: number; total_days: number;
+      // Nieuwe KPI's
+      median_return_pct: number;
+      best_trade_pct: number;
+      worst_trade_pct: number;
+      profit_factor: number;       // som winsten $ / som verliezen $
+      expectancy_pct: number;      // verwachte % per trade (= avg_return_pct)
+      unique_tickers: number;
+      phoenix_captured: number;    // # unieke tickers in closed positions met is_phoenix=true
+      hikkertje_captured: number;
+      poefie_captured: number;
+      gold_trades: number;         // # gesloten posities op ticker met >=1 goud
+      silver_trades: number;
+      bronze_trades: number;
+      // Exit-strategie: per reden teller + gemiddelde return
+      exit_reasons: ExitReason[];
+      // Deelwinsten: aantal partials + gem. verkochte % per partial
+      partial_count: number;
+      partial_avg_qty_pct: number;
+      partial_total_usd: number;
       last_run_at: string | null;
       open_pos_detail: OpenDetail[];
       closed_pos_detail: ClosedDetail[];
+    }
+
+    function median(arr: number[]): number {
+      if (arr.length === 0) return 0;
+      const sorted = [...arr].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     }
 
     const results: StratResult[] = [];
@@ -182,10 +300,20 @@ Deno.serve(async (req) => {
       const totalEquity = cash + posVal;
       const totalReturnUsd = totalEquity - initial;
       const totalReturnPct = initial > 0 ? (totalReturnUsd / initial) * 100 : 0;
-      const a = agg.get(sid) ?? { realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0, wins5: 0, wins10: 0, wins25: 0, wins50: 0, wins100: 0 };
+      const a = agg.get(sid) ?? newAgg();
       // Marktwaarde open posities − werkelijke aankoopkost (incl. transactiekosten).
       const unrealizedUsd = posVal - openCost;
       const pd = posDaysByStrat.get(sid) ?? { pos: 0, total: 0 };
+      const exitReasons: ExitReason[] = [...a.byCloseReason.entries()]
+        .map(([reason, v]) => ({
+          reason,
+          count: v.count,
+          avg_return_pct: v.count > 0 ? v.sumRetPct / v.count : 0,
+          sum_usd: v.sumUsd,
+        }))
+        .sort((x, y) => y.count - x.count);
+      // Profit factor: behandel "geen verliezen" als zeer hoog (toon ∞ in UI).
+      const profitFactor = a.sumLossUsd > 0 ? a.sumWinUsd / a.sumLossUsd : (a.sumWinUsd > 0 ? Number.POSITIVE_INFINITY : 0);
       results.push({
         id: sid, slug: strat.slug as string, name: strat.name as string,
         grp: strat.grp as string, config: strat.config as Record<string, unknown>,
@@ -205,6 +333,22 @@ Deno.serve(async (req) => {
         win_rate_100pct: a.closed > 0 ? a.wins100 / a.closed : 0,
         positive_days_pct: pd.total > 0 ? pd.pos / pd.total : 0,
         total_days: pd.total,
+        median_return_pct: median(a.returns),
+        best_trade_pct: a.bestRetPct === -Infinity ? 0 : a.bestRetPct,
+        worst_trade_pct: a.worstRetPct === Infinity ? 0 : a.worstRetPct,
+        profit_factor: Number.isFinite(profitFactor) ? profitFactor : 999,
+        expectancy_pct: a.closed > 0 ? a.sumRetPct / a.closed : 0,
+        unique_tickers: a.tickers.size,
+        phoenix_captured: a.phoenixTickers.size,
+        hikkertje_captured: a.hikkertjeTickers.size,
+        poefie_captured: a.poefieTickers.size,
+        gold_trades: a.goldTrades,
+        silver_trades: a.silverTrades,
+        bronze_trades: a.bronzeTrades,
+        exit_reasons: exitReasons,
+        partial_count: a.partial.count,
+        partial_avg_qty_pct: a.partial.count > 0 ? a.partial.sumQtyPct / a.partial.count : 0,
+        partial_total_usd: a.partial.sumUsd,
         last_run_at: (state.last_run_at as string | null) ?? null,
         open_pos_detail: openDetailMap.get(sid) ?? [],
         closed_pos_detail: closedDetailMap.get(sid) ?? [],
