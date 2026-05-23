@@ -13,6 +13,7 @@ import {
   type XinixOpenPosition,
   type XinixClosedPosition,
   type SimResults,
+  type SimSignalTypeStat,
   type SimStrategy,
   type SimEvolution,
   type SimPosDetail,
@@ -74,8 +75,66 @@ const SIGNAL_LABELS: Record<string, string> = {
   near5y_low_gem: "5y-bodem + track",
   macro_tide: "Macro-stroming",
 };
+
+const SIGNAL_DESCRIPTIONS: Record<string, string> = {
+  near_90d_low: "Koers nabij het laagste punt van de afgelopen 90 dagen — mogelijke bodem",
+  big_drop: "Forse koersdaling van minstens 15% in korte tijd — contrarian kans",
+  price_spike_up: "Plotse koerssprong omhoog — mogelijk aankondiging of nieuws",
+  volume_spike: "Ongewoon hoog handelsvolume — markt reageert op iets",
+  jv_strategic: "Joint venture of strategische deal aangekondigd",
+  "8k_material": "Materiële gebeurtenis gemeld via SEC 8-K formulier",
+  buy_limit_hit: "Koers heeft de ingestelde buy-limit bereikt",
+  buy_limit_warmup: "Koers nadert de buy-limit van onderen",
+  buy_limit_close: "Koers staat vlak boven de buy-limit",
+  pre_catalyst_7d: "Verwachte katalysator (trial, vergunning, rapport) binnen 7 dagen",
+  pre_catalyst_14d: "Verwachte katalysator binnen 14 dagen",
+  pre_catalyst_30d: "Verwachte katalysator binnen 30 dagen",
+  pre_catalyst_60d: "Verwachte katalysator binnen 60 dagen",
+  financing: "Nieuwe financieringsronde aangekondigd",
+  takeover_bid: "Overnamebod uitgebracht op dit bedrijf",
+  buyout_definitive: "Definitieve overnameverklaring getekend",
+  topline_positive: "Positieve primaire eindpunten van een klinische trial",
+  pfs: "Pre-feasibility studie voor mijnbouwproject gepubliceerd",
+  resource_update: "Bijgewerkte resource- of reserveschatting gepubliceerd",
+  loser_gem: "Forse daler met sterk historisch track-record op eerder dieptepunten",
+  near5y_low_gem: "Nabij 5-jaars dieptepunt + bewezen track-record van herstel",
+  macro_tide: "Gunstige macro-economische trend voor de sector",
+};
+
+type BadgeTone = "pink" | "lime" | "orange" | "cyan" | "neutral" | "loss" | "watch";
+const SIGNAL_TONE: Record<string, BadgeTone> = {
+  near_90d_low: "lime",
+  near5y_low_gem: "lime",
+  buy_limit_hit: "lime",
+  buy_limit_warmup: "lime",
+  buy_limit_close: "lime",
+  loser_gem: "lime",
+  big_drop: "orange",
+  price_spike_up: "cyan",
+  volume_spike: "cyan",
+  macro_tide: "cyan",
+  jv_strategic: "pink",
+  "8k_material": "pink",
+  financing: "pink",
+  takeover_bid: "pink",
+  buyout_definitive: "pink",
+  topline_positive: "pink",
+  pfs: "pink",
+  resource_update: "pink",
+  pre_catalyst_7d: "watch",
+  pre_catalyst_14d: "watch",
+  pre_catalyst_30d: "watch",
+  pre_catalyst_60d: "watch",
+};
+
 function signalLabel(t: string): string {
   return SIGNAL_LABELS[t] ?? t;
+}
+function signalTone(t: string): BadgeTone {
+  return SIGNAL_TONE[t] ?? "neutral";
+}
+function signalTitle(t: string): string {
+  return SIGNAL_DESCRIPTIONS[t] ?? signalLabel(t);
 }
 
 function fmtUsd(v: number, decimals = 0): string {
@@ -327,7 +386,7 @@ function OpenPositionsSection({ positions }: { positions: XinixOpenPosition[] })
                       <div className="line-clamp-1" title={p.entry_reason}>{p.entry_reason}</div>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {p.entry_signal_types.slice(0, 3).map((s, i) => (
-                          <Badge key={`${s}-${i}`} tone="neutral">{signalLabel(s)}</Badge>
+                          <Badge key={`${s}-${i}`} tone={signalTone(s)} title={signalTitle(s)}>{signalLabel(s)}</Badge>
                         ))}
                         {p.entry_signal_types.length > 3 && (
                           <span className="text-[10px] text-neutral-500">+{p.entry_signal_types.length - 3}</span>
@@ -345,8 +404,11 @@ function OpenPositionsSection({ positions }: { positions: XinixOpenPosition[] })
   );
 }
 
+const CLOSED_PAGE = 20;
+
 function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[] }) {
   const [show, setShow] = useState<"all" | "winners" | "losers">("all");
+  const [visibleCount, setVisibleCount] = useState(CLOSED_PAGE);
   const filtered = useMemo(() => {
     if (show === "winners") return positions.filter((p) => p.return_pct > 0);
     if (show === "losers") return positions.filter((p) => p.return_pct < 0);
@@ -354,6 +416,12 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
   }, [positions, show]);
   const winners = positions.filter((p) => p.return_pct > 0).length;
   const losers = positions.filter((p) => p.return_pct < 0).length;
+
+  // Reset paginering bij filter-wissel
+  useEffect(() => { setVisibleCount(CLOSED_PAGE); }, [show]);
+
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = filtered.length > visibleCount;
 
   return (
     <section>
@@ -368,6 +436,9 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
             <Pill tone="neutral" active={show === "all"} count={positions.length} onClick={() => setShow("all")} size="sm">Alles</Pill>
             <Pill tone="lime" active={show === "winners"} count={winners} onClick={() => setShow("winners")} size="sm">Winnaars</Pill>
             <Pill tone="loss" active={show === "losers"} count={losers} onClick={() => setShow("losers")} size="sm">Verliezers</Pill>
+            <span className="ml-auto text-[11px] text-neutral-500 self-center">
+              {Math.min(visibleCount, filtered.length)} van {filtered.length} getoond
+            </span>
           </div>
           <Card className="overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
@@ -382,7 +453,7 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((p) => {
+                {visible.map((p) => {
                   const plTone = p.return_pct > 0 ? "text-fog-lime" : p.return_pct < 0 ? "text-fog-loss" : "text-neutral-300";
                   return (
                     <tr key={p.id} className="border-t border-ink-5 hover:bg-ink-3/40">
@@ -405,7 +476,7 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
                         <div className="line-clamp-1" title={p.entry_reason}>{p.entry_reason}</div>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {p.entry_signal_types.slice(0, 3).map((s, i) => (
-                            <Badge key={`${s}-${i}`} tone="neutral">{signalLabel(s)}</Badge>
+                            <Badge key={`${s}-${i}`} tone={signalTone(s)} title={signalTitle(s)}>{signalLabel(s)}</Badge>
                           ))}
                         </div>
                       </td>
@@ -418,6 +489,16 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
               </tbody>
             </table>
           </Card>
+          {hasMore && (
+            <div className="mt-3 text-center">
+              <button
+                onClick={() => setVisibleCount((c) => c + CLOSED_PAGE)}
+                className="text-xs text-neutral-400 hover:text-neutral-100 border border-ink-5 hover:border-ink-6 rounded-lg px-4 py-2 transition-colors"
+              >
+                Laad meer ({filtered.length - visibleCount} rijen resterend)
+              </button>
+            </div>
+          )}
         </>
       )}
     </section>
@@ -1189,19 +1270,197 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   );
 }
 
+// ── Horizontale balk voor bar-charts ──────────────────────────────────────────
+function HBar({
+  value,
+  maxAbs,
+  isBest,
+  isWorst,
+}: {
+  value: number;
+  maxAbs: number;
+  isBest?: boolean;
+  isWorst?: boolean;
+}) {
+  const width = maxAbs > 0 ? Math.min(100, (Math.abs(value) / maxAbs) * 100) : 0;
+  const positive = value >= 0;
+  return (
+    <div className="relative h-5 rounded-sm overflow-hidden bg-ink-3/40 flex-1">
+      <div
+        className={`absolute top-0 bottom-0 rounded-sm transition-all ${
+          positive
+            ? isBest ? "bg-fog-lime/60" : "bg-fog-lime/30"
+            : isWorst ? "bg-fog-loss/60" : "bg-fog-loss/30"
+        }`}
+        style={{ width: `${width}%` }}
+      />
+      <span
+        className={`absolute inset-y-0 left-1.5 flex items-center text-[11px] font-mono font-semibold ${
+          positive ? "text-fog-lime" : "text-fog-loss"
+        }`}
+      >
+        {value >= 0 ? "+" : ""}{value.toFixed(1)}%
+      </span>
+    </div>
+  );
+}
+
+// ── Enkelvoudige dimensie-rij met bar-chart ───────────────────────────────────
+function DimensionInsightRow({ ins }: { ins: import("../api").SimInsight }) {
+  const maxAbs = Math.max(...ins.entries.map((e) => Math.abs(e.avgRet)), 0.01);
+  return (
+    <div className="p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-neutral-200">{ins.dimension}</span>
+        <span className="text-[11px] text-neutral-500">
+          spreiding{" "}
+          <span className="text-fog-lime font-mono font-semibold">+{ins.diff.toFixed(1)}%</span>
+        </span>
+      </div>
+      <div className="space-y-1">
+        {ins.entries.map((e) => (
+          <div key={e.value} className="flex items-center gap-2">
+            <span
+              className="text-[11px] font-mono text-neutral-300 shrink-0 text-right"
+              style={{ width: "9rem" }}
+              title={`n=${e.count}`}
+            >
+              {e.value === ins.best ? "🏆 " : e.value === ins.worst ? "▼ " : "   "}
+              {e.value}
+            </span>
+            <HBar value={e.avgRet} maxAbs={maxAbs} isBest={e.value === ins.best} isWorst={e.value === ins.worst} />
+            <span className="text-[10px] text-neutral-500 shrink-0 w-10 text-right">n={e.count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Signaaltype bar-chart ─────────────────────────────────────────────────────
+function SignalTypeChart({ stats }: { stats: SimSignalTypeStat[] }) {
+  const maxAbs = Math.max(...stats.map((s) => Math.abs(s.avg_return_pct)), 0.01);
+  return (
+    <div className="space-y-1.5">
+      {stats.map((s, i) => (
+        <div key={s.signal_type} className="flex items-center gap-2">
+          <span
+            className="text-[11px] font-mono text-neutral-300 shrink-0 text-right"
+            style={{ width: "10rem" }}
+            title={`Win-rate: ${(s.win_rate * 100).toFixed(0)}% · n=${s.count}`}
+          >
+            {i === 0 ? "🏆 " : "   "}
+            {SIGNAL_LABELS[s.signal_type] ?? s.signal_type}
+          </span>
+          <HBar value={s.avg_return_pct} maxAbs={maxAbs} isBest={i === 0} isWorst={i === stats.length - 1} />
+          <span className="text-[10px] text-neutral-500 shrink-0 w-14 text-right">
+            {(s.win_rate * 100).toFixed(0)}% win
+          </span>
+          <span className="text-[10px] text-neutral-500 shrink-0 w-10 text-right">n={s.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── "Wat werkt?" samenvatting ─────────────────────────────────────────────────
+function WatWerktCard({
+  insights,
+  signal_type_stats,
+  meta,
+}: {
+  insights: import("../api").SimInsight[];
+  signal_type_stats?: SimSignalTypeStat[];
+  meta: SimResults["meta"];
+}) {
+  if (meta.strategies_with_closed_positions === 0) {
+    return (
+      <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.04]">
+        <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
+          Wat werkt?
+        </div>
+        <p className="text-xs text-neutral-400 italic">
+          ⏳ Nog geen gesloten trades — inzichten verschijnen nadat de eerste posities sluiten
+          (na 20–180 dagen, afhankelijk van strategie).
+        </p>
+      </Card>
+    );
+  }
+
+  const topDims = [...insights]
+    .sort((a, b) => b.diff - a.diff)
+    .slice(0, 3);
+
+  const bestSignal = signal_type_stats?.[0];
+  const worstSignal = signal_type_stats?.[signal_type_stats.length - 1];
+
+  return (
+    <Card className="p-4 border-fog-lime/20 bg-fog-lime/[0.03] space-y-3">
+      <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+        Wat werkt? — Samenvatting
+      </div>
+      <ul className="space-y-1.5 text-xs text-neutral-300 leading-relaxed">
+        {topDims.map((d) => (
+          <li key={d.dimension}>
+            <span className="text-neutral-500">→</span>{" "}
+            <span className="font-semibold text-neutral-200">{d.dimension}:</span>{" "}
+            <span className="text-fog-lime font-mono">{d.best}</span> presteert{" "}
+            <span className="text-fog-lime font-mono">+{d.diff.toFixed(1)}%</span> beter dan{" "}
+            <span className="text-fog-loss font-mono">{d.worst}</span>
+          </li>
+        ))}
+        {bestSignal && (
+          <li>
+            <span className="text-neutral-500">→</span>{" "}
+            <span className="font-semibold text-neutral-200">Beste signaaltype:</span>{" "}
+            <span className="text-fog-lime font-mono">
+              {SIGNAL_LABELS[bestSignal.signal_type] ?? bestSignal.signal_type}
+            </span>{" "}
+            (gem.{" "}
+            <span className="text-fog-lime font-mono">
+              {bestSignal.avg_return_pct >= 0 ? "+" : ""}
+              {bestSignal.avg_return_pct.toFixed(1)}%
+            </span>
+            , win-rate{" "}
+            <span className="font-mono">{(bestSignal.win_rate * 100).toFixed(0)}%</span>
+            , n={bestSignal.count})
+          </li>
+        )}
+        {worstSignal && worstSignal !== bestSignal && (
+          <li>
+            <span className="text-neutral-500">→</span>{" "}
+            <span className="font-semibold text-neutral-200">Zwakste signaaltype:</span>{" "}
+            <span className="text-fog-loss font-mono">
+              {SIGNAL_LABELS[worstSignal.signal_type] ?? worstSignal.signal_type}
+            </span>{" "}
+            (gem.{" "}
+            <span className={`font-mono ${worstSignal.avg_return_pct >= 0 ? "text-fog-lime" : "text-fog-loss"}`}>
+              {worstSignal.avg_return_pct >= 0 ? "+" : ""}
+              {worstSignal.avg_return_pct.toFixed(1)}%
+            </span>
+            , n={worstSignal.count})
+          </li>
+        )}
+      </ul>
+    </Card>
+  );
+}
+
 function SimInsightsSection({ sim }: { sim: SimResults }) {
-  const { insights, recommendations, meta } = sim;
+  const { insights, recommendations, meta, signal_type_stats } = sim;
+
   return (
     <div className="space-y-4">
-      {/* Recommendations */}
+      {/* Wat werkt? samenvatting */}
+      <WatWerktCard insights={insights} signal_type_stats={signal_type_stats} meta={meta} />
+
+      {/* Aanbevelingen */}
       <Card className="p-4 space-y-3">
         <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
-          Aanbevelingen voor het dashboard
+          Aanbevelingen
         </div>
         {meta.strategies_with_closed_positions === 0 ? (
-          <p className="text-xs text-neutral-400 italic">
-            ⏳ Nog geen gesloten trades — inzichten verschijnen nadat de eerste posities sluiten (na 20–180 dagen, afhankelijk van strategie).
-          </p>
+          <p className="text-xs text-neutral-400 italic">Nog geen data.</p>
         ) : (
           <ul className="space-y-2">
             {recommendations.map((r, i) => (
@@ -1211,45 +1470,28 @@ function SimInsightsSection({ sim }: { sim: SimResults }) {
         )}
       </Card>
 
-      {/* Per-dimension insights */}
+      {/* Per-dimension insights met bar-charts */}
       {insights.length > 0 && (
         <Card className="p-0 overflow-hidden">
           <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
-            Resultaten per configuratie-dimensie
+            Rendement per configuratie-dimensie
           </div>
           <div className="divide-y divide-ink-5/40">
             {insights.map((ins) => (
-              <div key={ins.dimension} className="p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-neutral-200">{ins.dimension}</span>
-                  <span className="text-[11px] text-neutral-400">
-                    beste: <span className="text-fog-lime font-mono">{ins.best}</span>
-                    {" vs slechtste: "}
-                    <span className="text-fog-loss font-mono">{ins.worst}</span>
-                    {" ("}
-                    <span className="text-fog-lime">+{ins.diff.toFixed(1)}%</span>
-                    {" verschil)"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {ins.entries.map((e) => (
-                    <span
-                      key={e.value}
-                      title={`${e.value}: gem. ${fmtPct2(e.avgRet)} (n=${e.count})`}
-                      className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
-                        e.value === ins.best
-                          ? "border-fog-lime/50 bg-fog-lime/10 text-fog-lime"
-                          : e.value === ins.worst
-                          ? "border-fog-loss/50 bg-fog-loss/10 text-fog-loss"
-                          : "border-ink-5 text-neutral-400"
-                      }`}
-                    >
-                      {e.value} {fmtPct2(e.avgRet)}
-                    </span>
-                  ))}
-                </div>
-              </div>
+              <DimensionInsightRow key={ins.dimension} ins={ins} />
             ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Signaaltype rendement */}
+      {signal_type_stats && signal_type_stats.length > 0 && (
+        <Card className="p-0 overflow-hidden">
+          <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
+            Rendement per signaaltype
+          </div>
+          <div className="p-3">
+            <SignalTypeChart stats={signal_type_stats} />
           </div>
         </Card>
       )}

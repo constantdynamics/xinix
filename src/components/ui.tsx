@@ -516,14 +516,17 @@ export function Badge({
   tone = "neutral",
   children,
   className,
+  title,
 }: {
   tone?: PillTone;
   children: ReactNode;
   className?: string;
+  title?: string;
 }) {
   const t = PILL_TONE[tone];
   return (
     <span
+      title={title}
       className={cx(
         "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
         t.border,
@@ -982,5 +985,60 @@ export function MiniDelta({ value }: { value: number }) {
       {pos ? "+" : ""}
       {value.toFixed(1)}%
     </span>
+  );
+}
+
+// ─── Toast — kortstondige melding rechtsonder ──────────────────────────
+// Gebruik `toast("Ticker toegevoegd")` of `toast("Fout", "error")` vanuit
+// elke component. Toaster rendert in App.tsx één keer op root-niveau.
+
+type ToastKind = "success" | "error" | "info";
+interface ToastEntry { id: number; message: string; kind: ToastKind; }
+
+let _toastId = 0;
+const _toasts: ToastEntry[] = [];
+const _toastListeners = new Set<() => void>();
+
+export function toast(message: string, kind: ToastKind = "success") {
+  const entry: ToastEntry = { id: ++_toastId, message, kind };
+  _toasts.push(entry);
+  _toastListeners.forEach((l) => l());
+  setTimeout(() => {
+    const idx = _toasts.findIndex((t) => t.id === entry.id);
+    if (idx !== -1) _toasts.splice(idx, 1);
+    _toastListeners.forEach((l) => l());
+  }, 3500);
+}
+
+export function Toaster() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const l = () => setTick((n) => n + 1);
+    _toastListeners.add(l);
+    return () => { _toastListeners.delete(l); };
+  }, []);
+
+  const items = [..._toasts];
+  if (items.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+      {items.map((t) => (
+        <div
+          key={t.id}
+          className={cx(
+            "px-4 py-2.5 rounded-xl border text-sm font-semibold shadow-lg pointer-events-auto animate-fade-up",
+            t.kind === "success"
+              ? "bg-fog-lime/10 border-fog-lime/40 text-fog-lime"
+              : t.kind === "error"
+              ? "bg-fog-loss/10 border-fog-loss/40 text-fog-loss"
+              : "bg-ink-3 border-ink-6 text-neutral-200"
+          )}
+        >
+          {t.kind === "success" ? "✓ " : t.kind === "error" ? "✕ " : "ℹ "}
+          {t.message}
+        </div>
+      ))}
+    </div>
   );
 }
