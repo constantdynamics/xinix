@@ -8,6 +8,7 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
+import { TickerSparkline } from "../components/TickerSparkline";
 import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { useMarks } from "../hooks/useMarks";
 import {
@@ -97,7 +98,7 @@ type SortKey =
   | "risk_label";
 
 type ColKey =
-  | "idx" | "ticker" | "company" | "exchange" | "sector" | "price"
+  | "idx" | "ticker" | "company" | "exchange" | "sector" | "price" | "sparkline"
   | "yield" | "tax" | "net_yield"
   | "under5y" | "max_gain" | "growth_years"
   | "year1" | "year2" | "year3" | "year4" | "year5"
@@ -112,6 +113,7 @@ const COLUMNS_BASE: ColDef[] = [
   { key: "exchange",     label: "Beurs / Land",   defaultVisible: true,  align: "left" },
   { key: "sector",       label: "Sector",         defaultVisible: true,  align: "left" },
   { key: "price",        label: "Koers",          defaultVisible: true,  align: "right" },
+  { key: "sparkline",    label: "Trend (1m)",     defaultVisible: true,  align: "center" },
   { key: "yield",        label: "Div % bruto",    defaultVisible: true,  align: "left",  sortable: "dividend_yield_pct" },
   { key: "tax",          label: "Bronbel %",      defaultVisible: true,  align: "left",  sortable: "tax_rate" },
   { key: "net_yield",    label: "Div % netto",    defaultVisible: true,  align: "left",  sortable: "net_yield_pct" },
@@ -371,6 +373,14 @@ export function ZwitserlevenView() {
     price: {
       th: <th className="px-3 py-2 text-right text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Koers</th>,
       td: (s) => <td className="px-3 py-2.5 text-right tabular font-mono text-neutral-200 text-xs">{fmtCurrency(s.last_close, s.currency)}</td>,
+    },
+    sparkline: {
+      th: <th className="px-3 py-2 text-center text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-20">Trend</th>,
+      td: (s) => (
+        <td className="px-3 py-2.5 text-center">
+          <TickerSparkline ticker={s.ticker} width={64} height={18} />
+        </td>
+      ),
     },
     yield: {
       th: <SortHeader col="dividend_yield_pct" label="Div % bruto" />,

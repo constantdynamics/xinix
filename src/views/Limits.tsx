@@ -22,6 +22,7 @@ import {
 import { SeenHeader, HeartHeader, StarHeader, SeenCell, HeartCell, StarCell, HeartInline, StarRating } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { GradientTabIcon } from "../tabIcons";
+import { PriceChartModal } from "./PriceChartModal";
 
 // Tabelkolommen voor de kolom-kiezer. Ticker is de vaste anker-kolom.
 const LIMIT_COLUMNS: ColumnMeta[] = [
@@ -178,6 +179,7 @@ export function LimitsView({
   data: Dashboard;
   onRefresh: () => void;
 }) {
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
   const [view, setView] = useState<"list" | "tiles">(() => {
     const saved = localStorage.getItem(VIEW_KEY);
     return saved === "tiles" ? "tiles" : "list";
@@ -437,17 +439,28 @@ export function LimitsView({
           Geen tickers in deze filter.
         </Card>
       ) : view === "list" ? (
-        <LimitTable rows={rows} sortBy={sortBy} />
+        <LimitTable rows={rows} sortBy={sortBy} onOpenChart={setChartFor} />
       ) : (
-        <LimitTiles rows={rows} sortBy={sortBy} />
+        <LimitTiles rows={rows} sortBy={sortBy} onOpenChart={setChartFor} />
       )}
 
       <BulkPaste data={data} onRefresh={onRefresh} />
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
+      )}
     </div>
   );
 }
 
-function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
+type OpenChart = (t: { ticker: string; company: string; exchange: string | null }) => void;
+
+function LimitTable({ rows, sortBy, onOpenChart }: { rows: LimitRow[]; sortBy: SortBy; onOpenChart?: OpenChart }) {
   const showRank = sortBy === "medals" || sortBy === "medals_price" || sortBy === "gold";
   const { visibleKeys } = useColumnLayout("limits", LIMIT_COLUMNS, "ticker");
 
@@ -471,7 +484,18 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
     },
     company: {
       th: <th className="text-left p-3 font-semibold">Bedrijf</th>,
-      td: (r) => <td className="p-3 text-neutral-300 truncate max-w-xs">{r.company}</td>,
+      td: (r) => (
+        <td className="p-3 truncate max-w-xs">
+          <button
+            type="button"
+            onClick={() => onOpenChart?.({ ticker: r.ticker, company: r.company, exchange: r.exchange })}
+            className="text-neutral-300 hover:text-neutral-100 hover:underline text-left transition-colors"
+            title={`${r.company} — klik voor koersgrafiek`}
+          >
+            {r.company}
+          </button>
+        </td>
+      ),
     },
     medals: {
       th: <th className="text-left p-3 font-semibold">Medailles</th>,
@@ -577,7 +601,7 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
   );
 }
 
-function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
+function LimitTiles({ rows, sortBy, onOpenChart }: { rows: LimitRow[]; sortBy: SortBy; onOpenChart?: OpenChart }) {
   const showRank = sortBy === "medals" || sortBy === "medals_price" || sortBy === "gold";
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
@@ -594,18 +618,17 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
             className={`rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5`}
           >
             <div className="flex items-center justify-between gap-1 mb-1">
-              <a
-                href={googleFinanceUrl(r.ticker, r.exchange)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold text-sm text-ink-0 truncate hover:underline"
-                title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🏆${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}`}
+              <button
+                type="button"
+                onClick={() => onOpenChart?.({ ticker: r.ticker, company: r.company, exchange: r.exchange })}
+                className="font-bold text-sm text-ink-0 truncate hover:underline text-left"
+                title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🏆${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}\nKlik voor koersgrafiek`}
               >
                 {showRank && (
                   <span className="text-ink-0/60 mr-1">#{i + 1}</span>
                 )}
                 {r.ticker}
-              </a>
+              </button>
               <span className="text-[9px] uppercase tracking-wider text-ink-0/70 font-bold">
                 {SECTOR_LABEL[r.sector]}
               </span>
