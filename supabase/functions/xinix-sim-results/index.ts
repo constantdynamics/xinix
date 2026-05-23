@@ -4,6 +4,7 @@
 // Geeft evolutie-info: cycli, laatste cull, volgende verwachte cyclus, gepensioneerden.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { TX_COST } from "../_shared/constants.ts";
 
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
@@ -73,9 +74,8 @@ Deno.serve(async (req) => {
     type OpenDetail = { ticker: string; entry_signal_types: string[]; entry_sector: string | null; entry_date: string; entry_reason: string };
     type ClosedDetail = OpenDetail & { return_pct: number; closed_at: string; closed_reason: string };
 
-    // TX_COST per CLAUDE.md spec — gebruikt om de echte cost basis te bepalen
-    // i.p.v. een schatting (initial / maxPos).
-    const TX_COST = 0.001;
+    // TX_COST komt uit _shared/constants.ts — gebruikt om de echte cost basis
+    // te bepalen i.p.v. een schatting (initial / maxPos).
     const openVal = new Map<number, { val: number; cnt: number; cost: number }>();
     const openDetailMap = new Map<number, OpenDetail[]>();
     for (const p of (openRes.data ?? [])) {

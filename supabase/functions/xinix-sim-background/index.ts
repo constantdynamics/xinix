@@ -32,7 +32,8 @@ function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r
 function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
 
 // ── Transactiekosten ──────────────────────────────────────────────────────────
-const TX_COST = 0.001; // 0,1% per transactie (koop + verkoop) — marktconform
+// Bron: _shared/constants.ts — wijzig daar, niet hier.
+import { TX_COST } from "../_shared/constants.ts";
 
 // ── Strategy config type ──────────────────────────────────────────────────────
 interface Cfg {

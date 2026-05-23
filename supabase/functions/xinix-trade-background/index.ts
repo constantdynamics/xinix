@@ -44,7 +44,8 @@ function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r
 function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
 
 // TX_COST en RED_SEVERITY_QUALIFIES zijn niet instelbaar via de DB — zij blijven constant.
-const TX_COST = 0.001;            // 0,1% per transactie (marktconforme papierkosten)
+// TX_COST komt uit _shared/constants.ts — wijzig daar, niet hier.
+import { TX_COST } from "../_shared/constants.ts";
 const RED_SEVERITY_QUALIFIES = true;
 
 const POSITIVE_SIGNAL_TYPES = new Set([
