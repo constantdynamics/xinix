@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
     const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, equityRes, tickerMetaRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected, parent_id").eq("active", true),
       sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, last_run_at, started_at"),
-      sb.from("xinix_strategy_positions").select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, closed_reason, qty, avg_price, partial_exits").not("closed_at","is",null),
+      sb.from("xinix_strategy_positions").select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, closed_reason, qty, avg_price, partial_exits, entry_date, closed_at").not("closed_at","is",null),
       sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price, entry_signal_types, entry_sector, entry_date, entry_reason").is("closed_at", null),
       sb.from("signal_price_summary").select("ticker, last_close"),
       sb.from("xinix_strategies").select("id, slug, name, grp, generation, retired_at, config")
@@ -52,23 +52,26 @@ Deno.serve(async (req) => {
       sb.from("xinix_strategy_equity")
         .select("strategy_id, date, total_equity")
         .order("date", { ascending: true }),
-      // Ticker-metadata voor capture-tellers (poefie/feniks/hikkertje) +
-      // medaille-trades. We gebruiken de huidige stand als proxy voor
-      // "is deze ticker op die lijst (geweest)".
+      // Datums waarop een ticker zijn feniks- of poefie-event had.
+      // Gebruiken we voor date-overlap met de hold-periode van een
+      // gesloten positie — eindelijk een accurate "capture"-teller.
+      // Voor medailles en hikkertje-spikes hebben we geen earned-date;
+      // die KPI's zijn vervangen door return-drempels.
       sb.from("signal_tickers")
-        .select("ticker, is_phoenix, is_hikkertje, is_poefie, medal_gold, medal_silver, medal_bronze"),
+        .select("ticker, phoenix_50x_date, poefie_last_date"),
     ]);
 
-    type TickerMeta = { phoenix: boolean; hikkertje: boolean; poefie: boolean; gold: number; silver: number; bronze: number };
-    const tickerMeta = new Map<string, TickerMeta>();
+    type TickerDates = { phoenixDate: number | null; poefieDate: number | null };
+    const tickerDates = new Map<string, TickerDates>();
+    function parseDate(d: unknown): number | null {
+      if (!d || typeof d !== "string") return null;
+      const t = new Date(d).getTime();
+      return Number.isFinite(t) ? t : null;
+    }
     for (const r of (tickerMetaRes.data ?? [])) {
-      tickerMeta.set(r.ticker as string, {
-        phoenix:   !!r.is_phoenix,
-        hikkertje: !!r.is_hikkertje,
-        poefie:    !!r.is_poefie,
-        gold:   Number(r.medal_gold   ?? 0),
-        silver: Number(r.medal_silver ?? 0),
-        bronze: Number(r.medal_bronze ?? 0),
+      tickerDates.set(r.ticker as string, {
+        phoenixDate: parseDate(r.phoenix_50x_date),
+        poefieDate:  parseDate(r.poefie_last_date),
       });
     }
 
@@ -85,7 +88,10 @@ Deno.serve(async (req) => {
       wins: number;
       sumRetPct: number;
       // Drempel-tellers: gesloten posities met return_pct ≥ N%.
-      wins5: number; wins10: number; wins25: number; wins50: number; wins100: number;
+      // Hogere drempels (200%, 500%) zijn vervangers voor de oude
+      // medaille-tellers, omdat we geen "medaille verdiend op"-datum hebben.
+      wins5: number; wins10: number; wins25: number; wins50: number;
+      wins100: number; wins200: number; wins500: number;
       // Voor mediaan + best/slechtste trade
       returns: number[];
       bestRetPct: number;
@@ -93,14 +99,12 @@ Deno.serve(async (req) => {
       // Profit factor: som winsten ($) / som verliezen ($, absoluut)
       sumWinUsd: number;
       sumLossUsd: number;  // positief; absolute waarde
-      // Capture-tellers (unieke tickers in gesloten posities)
+      // Capture-tellers — DATE-OVERLAP based: een feniks/poefie geldt als
+      // "gevangen" wanneer de respectievelijke event-datum binnen de
+      // hold-periode van de positie viel.
       tickers: Set<string>;
-      phoenixTickers: Set<string>;
-      hikkertjeTickers: Set<string>;
-      poefieTickers: Set<string>;
-      goldTrades: number;
-      silverTrades: number;
-      bronzeTrades: number;
+      phoenixCaptured: Set<string>;
+      poefieCaptured: Set<string>;
       // Exit-strategie breakdown
       byCloseReason: Map<string, CloseReasonStat>;
       // Deelwinst-verkopen aggregaten
@@ -110,11 +114,10 @@ Deno.serve(async (req) => {
     function newAgg(): Agg {
       return {
         realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0,
-        wins5: 0, wins10: 0, wins25: 0, wins50: 0, wins100: 0,
+        wins5: 0, wins10: 0, wins25: 0, wins50: 0, wins100: 0, wins200: 0, wins500: 0,
         returns: [], bestRetPct: -Infinity, worstRetPct: Infinity,
         sumWinUsd: 0, sumLossUsd: 0,
-        tickers: new Set(), phoenixTickers: new Set(), hikkertjeTickers: new Set(), poefieTickers: new Set(),
-        goldTrades: 0, silverTrades: 0, bronzeTrades: 0,
+        tickers: new Set(), phoenixCaptured: new Set(), poefieCaptured: new Set(),
         byCloseReason: new Map(),
         partial: { count: 0, sumQtyPct: 0, sumTriggerPct: 0, sumUsd: 0 },
       };
@@ -130,29 +133,35 @@ Deno.serve(async (req) => {
       a.realizedUsd += usd;
       a.closed++;
       if (r > 0) a.wins++;
-      if (r >= 5) a.wins5++;
-      if (r >= 10) a.wins10++;
-      if (r >= 25) a.wins25++;
-      if (r >= 50) a.wins50++;
+      if (r >= 5)   a.wins5++;
+      if (r >= 10)  a.wins10++;
+      if (r >= 25)  a.wins25++;
+      if (r >= 50)  a.wins50++;
       if (r >= 100) a.wins100++;
+      if (r >= 200) a.wins200++;
+      if (r >= 500) a.wins500++;
       a.sumRetPct += r;
       a.returns.push(r);
       if (r > a.bestRetPct) a.bestRetPct = r;
       if (r < a.worstRetPct) a.worstRetPct = r;
       if (usd >= 0) a.sumWinUsd += usd; else a.sumLossUsd += -usd;
 
-      // Capture + medaille-trades op huidige ticker-stand
+      // Date-overlap capture: viel de feniks-/poefie-datum binnen de
+      // hold-periode van deze positie? Pas dan "gevangen" — als de event
+      // ooit later (na sluiting) gebeurde telt die NIET.
       const t = (p.ticker as string) ?? "";
       if (t) {
         a.tickers.add(t);
-        const m = tickerMeta.get(t);
-        if (m) {
-          if (m.phoenix)   a.phoenixTickers.add(t);
-          if (m.hikkertje) a.hikkertjeTickers.add(t);
-          if (m.poefie)    a.poefieTickers.add(t);
-          if (m.gold   >= 1) a.goldTrades++;
-          if (m.silver >= 1) a.silverTrades++;
-          if (m.bronze >= 1) a.bronzeTrades++;
+        const dates = tickerDates.get(t);
+        const entry = parseDate(p.entry_date);
+        const close = parseDate(p.closed_at);
+        if (dates && entry != null && close != null) {
+          if (dates.phoenixDate != null && dates.phoenixDate >= entry && dates.phoenixDate <= close) {
+            a.phoenixCaptured.add(t);
+          }
+          if (dates.poefieDate != null && dates.poefieDate >= entry && dates.poefieDate <= close) {
+            a.poefieCaptured.add(t);
+          }
         }
       }
 
@@ -201,6 +210,26 @@ Deno.serve(async (req) => {
         entry_reason: (p.entry_reason as string) ?? "",
       });
       openDetailMap.set(sid, d);
+      // Open posities ook meetellen in unique-tickers en in capture
+      // (event-datum mag ook na entry vallen — positie is nog niet
+      // gesloten, dus elke event-datum tussen entry en nu telt).
+      const tk = (p.ticker as string) ?? "";
+      if (tk) {
+        let a = agg.get(sid);
+        if (!a) { a = newAgg(); agg.set(sid, a); }
+        a.tickers.add(tk);
+        const dates = tickerDates.get(tk);
+        const entry = parseDate(p.entry_date);
+        const nowMs = Date.now();
+        if (dates && entry != null) {
+          if (dates.phoenixDate != null && dates.phoenixDate >= entry && dates.phoenixDate <= nowMs) {
+            a.phoenixCaptured.add(tk);
+          }
+          if (dates.poefieDate != null && dates.poefieDate >= entry && dates.poefieDate <= nowMs) {
+            a.poefieCaptured.add(tk);
+          }
+        }
+      }
     }
 
     const closedDetailMap = new Map<number, ClosedDetail[]>();
@@ -253,6 +282,12 @@ Deno.serve(async (req) => {
       win_rate: number; avg_return_pct: number;
       // Aandeel gesloten posities met return ≥ N% (0..1).
       win_rate_5pct: number; win_rate_10pct: number; win_rate_25pct: number; win_rate_50pct: number; win_rate_100pct: number;
+      // Absolute aantallen trades met ≥X% rendement (vervangen de oude
+      // misleidende medaille-tellers).
+      trades_50pct_count: number;
+      trades_100pct_count: number;
+      trades_200pct_count: number;
+      trades_500pct_count: number;
       // Aandeel equity-snapshots waarop de portefeuille positief stond (0..1).
       positive_days_pct: number; total_days: number;
       // Nieuwe KPI's
@@ -262,12 +297,9 @@ Deno.serve(async (req) => {
       profit_factor: number;       // som winsten $ / som verliezen $
       expectancy_pct: number;      // verwachte % per trade (= avg_return_pct)
       unique_tickers: number;
-      phoenix_captured: number;    // # unieke tickers in closed positions met is_phoenix=true
-      hikkertje_captured: number;
+      // Capture op date-overlap: event-datum binnen hold-periode.
+      phoenix_captured: number;
       poefie_captured: number;
-      gold_trades: number;         // # gesloten posities op ticker met >=1 goud
-      silver_trades: number;
-      bronze_trades: number;
       // Exit-strategie: per reden teller + gemiddelde return
       exit_reasons: ExitReason[];
       // Deelwinsten: aantal partials + gem. verkochte % per partial
@@ -331,6 +363,10 @@ Deno.serve(async (req) => {
         win_rate_25pct:  a.closed > 0 ? a.wins25  / a.closed : 0,
         win_rate_50pct:  a.closed > 0 ? a.wins50  / a.closed : 0,
         win_rate_100pct: a.closed > 0 ? a.wins100 / a.closed : 0,
+        trades_50pct_count:  a.wins50,
+        trades_100pct_count: a.wins100,
+        trades_200pct_count: a.wins200,
+        trades_500pct_count: a.wins500,
         positive_days_pct: pd.total > 0 ? pd.pos / pd.total : 0,
         total_days: pd.total,
         median_return_pct: median(a.returns),
@@ -339,12 +375,8 @@ Deno.serve(async (req) => {
         profit_factor: Number.isFinite(profitFactor) ? profitFactor : 999,
         expectancy_pct: a.closed > 0 ? a.sumRetPct / a.closed : 0,
         unique_tickers: a.tickers.size,
-        phoenix_captured: a.phoenixTickers.size,
-        hikkertje_captured: a.hikkertjeTickers.size,
-        poefie_captured: a.poefieTickers.size,
-        gold_trades: a.goldTrades,
-        silver_trades: a.silverTrades,
-        bronze_trades: a.bronzeTrades,
+        phoenix_captured: a.phoenixCaptured.size,
+        poefie_captured: a.poefieCaptured.size,
         exit_reasons: exitReasons,
         partial_count: a.partial.count,
         partial_avg_qty_pct: a.partial.count > 0 ? a.partial.sumQtyPct / a.partial.count : 0,

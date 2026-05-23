@@ -611,13 +611,15 @@ export interface SimStrategy {
   expectancy_pct?: number;
   // Universum & capture
   unique_tickers?: number;
+  // Gevangen feniks/poefie: event-datum viel binnen de hold-periode.
   phoenix_captured?: number;
-  hikkertje_captured?: number;
   poefie_captured?: number;
-  // Medaille-trades (huidige medaille-stand op gesloten ticker als proxy)
-  gold_trades?: number;
-  silver_trades?: number;
-  bronze_trades?: number;
+  // Absolute aantallen trades met ≥X% rendement (vervangen de oude
+  // misleidende medaille-tellers).
+  trades_50pct_count?: number;
+  trades_100pct_count?: number;
+  trades_200pct_count?: number;
+  trades_500pct_count?: number;
   // Exit-strategie breakdown
   exit_reasons?: SimExitReason[];
   partial_count?: number;

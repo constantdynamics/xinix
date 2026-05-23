@@ -160,7 +160,7 @@ function fmtDate(s: string): string {
 }
 
 export function XinixPortfolioView() {
-  const [mainTab, setMainTab] = useState<"portfolio" | "sim" | "families">("portfolio");
+  const [mainTab, setMainTab] = useState<"portfolio" | "sim" | "families">("sim");
   const [data, setData] = useState<XinixPortfolio | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -189,7 +189,7 @@ export function XinixPortfolioView() {
     <div className="space-y-6">
       {/* Tab-switcher: Portfolio vs Simulatie */}
       <div className="flex gap-0 border-b border-ink-5">
-        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 Potje"], ["families", "🧬 Families"]] as const).map(([key, label]) => (
+        {([["sim", "🔬 Potje"], ["families", "🧬 Families"], ["portfolio", "📈 Referentie-portefeuille"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMainTab(key)}
@@ -1168,13 +1168,13 @@ function KpiBlock({ s }: { s: SimStrategy }) {
         <KpiTile label="Slechtste trade" value={closed > 0 ? `${(s.worst_trade_pct ?? 0).toFixed(0)}%` : "—"} tone={(s.worst_trade_pct ?? 0) >= 0 ? "lime" : "loss"} />
         <KpiTile label="Profit factor" value={closed > 0 ? pfDisplay : "—"} tone={pf >= 1.5 ? "lime" : pf >= 1 ? "neutral" : "loss"} hint="Som winsten ($) ÷ som verliezen ($). >1 = winstgevend; >2 = sterk." />
         <KpiTile label="Verwachte winst/trade" value={closed > 0 ? `${(s.expectancy_pct ?? 0).toFixed(2)}%` : "—"} tone={(s.expectancy_pct ?? 0) >= 0 ? "lime" : "loss"} />
-        <KpiTile label="Unieke tickers" value={`${s.unique_tickers ?? 0}`} hint="Aantal verschillende aandelen ooit aangekocht door deze strategie." />
-        <KpiTile label="Feniksen gevangen" value={`${s.phoenix_captured ?? 0}`} hint="Unieke gesloten tickers die op de Feniks-lijst staan." />
-        <KpiTile label="Hikkertjes gevangen" value={`${s.hikkertje_captured ?? 0}`} />
-        <KpiTile label="Poefies gevangen" value={`${s.poefie_captured ?? 0}`} />
-        <KpiTile label="🏆 Goud-trades" value={`${s.gold_trades ?? 0}`} hint="Gesloten posities waarvan de ticker ≥1 goud heeft (huidige stand)." />
-        <KpiTile label="🥈 Zilver-trades" value={`${s.silver_trades ?? 0}`} />
-        <KpiTile label="🥉 Brons-trades" value={`${s.bronze_trades ?? 0}`} />
+        <KpiTile label="Unieke tickers" value={`${s.unique_tickers ?? 0}`} hint="Aantal verschillende aandelen ooit aangekocht door deze strategie (open + gesloten)." />
+        <KpiTile label="Feniksen gevangen" value={`${s.phoenix_captured ?? 0}`} hint="Posities waar de 50× feniks-piek binnen de hold-periode viel." />
+        <KpiTile label="Poefies gevangen" value={`${s.poefie_captured ?? 0}`} hint="Posities waar de laatste poefie-event binnen de hold-periode viel." />
+        <KpiTile label="Trades ≥ 50%" value={`${s.trades_50pct_count ?? 0}`} tone="lime" hint="# gesloten posities met minimaal 50% winst." />
+        <KpiTile label="Trades ≥ 100%" value={`${s.trades_100pct_count ?? 0}`} tone="lime" hint="# gesloten posities met minimaal 100% winst." />
+        <KpiTile label="Trades ≥ 200%" value={`${s.trades_200pct_count ?? 0}`} tone="lime" hint="# gesloten posities met minimaal 200% winst." />
+        <KpiTile label="Trades ≥ 500%" value={`${s.trades_500pct_count ?? 0}`} tone="lime" hint="# gesloten posities met minimaal 500% winst." />
       </div>
     </div>
   );
@@ -1321,7 +1321,7 @@ function ThresholdsCell({ s }: { s: SimStrategy }) {
 // Alle KPI's waarop je een leaderboard kunt opvragen. Per KPI definieert
 // `value` de sortier-sleutel (altijd: hoger = beter) en `format` hoe de
 // waarde naast de strategie in de tabel verschijnt.
-type LeaderboardCat = "Rendement" | "Drempels" | "Risico" | "Activiteit" | "Capture" | "Medailles";
+type LeaderboardCat = "Rendement" | "Drempels" | "Risico" | "Activiteit" | "Capture" | "Mega-winners";
 interface LeaderboardDef {
   key: string;
   label: string;
@@ -1400,26 +1400,28 @@ const LEADERBOARDS: LeaderboardDef[] = [
   { key: "unique",      label: "Unieke tickers",  cat: "Activiteit",
     value: (s) => s.unique_tickers ?? 0,
     format: (s) => `${s.unique_tickers ?? 0}` },
-  // Capture
-  { key: "feniks_cap",     label: "Feniksen gevangen",    cat: "Capture",
+  // Capture (date-overlap: event-datum viel binnen hold-periode)
+  { key: "feniks_cap",     label: "Feniksen gevangen", cat: "Capture",
     value: (s) => s.phoenix_captured ?? 0,
-    format: (s) => `${s.phoenix_captured ?? 0}` },
-  { key: "hikkertje_cap",  label: "Hikkertjes gevangen",  cat: "Capture",
-    value: (s) => s.hikkertje_captured ?? 0,
-    format: (s) => `${s.hikkertje_captured ?? 0}` },
-  { key: "poefie_cap",     label: "Poefies gevangen",     cat: "Capture",
+    format: (s) => `${s.phoenix_captured ?? 0}`,
+    hint: "Posities waar de 50× feniks-piek binnen de hold-periode viel." },
+  { key: "poefie_cap",     label: "Poefies gevangen",  cat: "Capture",
     value: (s) => s.poefie_captured ?? 0,
-    format: (s) => `${s.poefie_captured ?? 0}` },
-  // Medailles
-  { key: "gold",   label: "🏆 Goud-trades",    cat: "Medailles",
-    value: (s) => s.gold_trades ?? 0,
-    format: (s) => `${s.gold_trades ?? 0}` },
-  { key: "silver", label: "🥈 Zilver-trades", cat: "Medailles",
-    value: (s) => s.silver_trades ?? 0,
-    format: (s) => `${s.silver_trades ?? 0}` },
-  { key: "bronze", label: "🥉 Brons-trades",  cat: "Medailles",
-    value: (s) => s.bronze_trades ?? 0,
-    format: (s) => `${s.bronze_trades ?? 0}` },
+    format: (s) => `${s.poefie_captured ?? 0}`,
+    hint: "Posities waar de laatste poefie-event binnen de hold-periode viel." },
+  // Mega-winners (vervangen de oude misleidende medaille-tellers)
+  { key: "t50",  label: "# trades ≥ 50%",  cat: "Mega-winners",
+    value: (s) => s.trades_50pct_count ?? 0,
+    format: (s) => `${s.trades_50pct_count ?? 0}` },
+  { key: "t100", label: "# trades ≥ 100%", cat: "Mega-winners",
+    value: (s) => s.trades_100pct_count ?? 0,
+    format: (s) => `${s.trades_100pct_count ?? 0}` },
+  { key: "t200", label: "# trades ≥ 200%", cat: "Mega-winners",
+    value: (s) => s.trades_200pct_count ?? 0,
+    format: (s) => `${s.trades_200pct_count ?? 0}` },
+  { key: "t500", label: "# trades ≥ 500%", cat: "Mega-winners",
+    value: (s) => s.trades_500pct_count ?? 0,
+    format: (s) => `${s.trades_500pct_count ?? 0}` },
 ];
 
 // Aggregeert per familie (groep) een synthetische SimStrategy-rij met
@@ -1474,11 +1476,11 @@ function aggregateFamilies(strategies: SimStrategy[]): SimStrategy[] {
       expectancy_pct:    avg((s) => s.expectancy_pct),
       unique_tickers:    avg((s) => s.unique_tickers),
       phoenix_captured:  avg((s) => s.phoenix_captured),
-      hikkertje_captured: avg((s) => s.hikkertje_captured),
       poefie_captured:   avg((s) => s.poefie_captured),
-      gold_trades:       avg((s) => s.gold_trades),
-      silver_trades:     avg((s) => s.silver_trades),
-      bronze_trades:     avg((s) => s.bronze_trades),
+      trades_50pct_count:  avg((s) => s.trades_50pct_count),
+      trades_100pct_count: avg((s) => s.trades_100pct_count),
+      trades_200pct_count: avg((s) => s.trades_200pct_count),
+      trades_500pct_count: avg((s) => s.trades_500pct_count),
       exit_reasons: [],
       partial_count: 0,
       partial_avg_qty_pct: 0,
@@ -1496,7 +1498,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   // Standaard sorteren we op rendement (de "rank"-volgorde uit backend).
   // Elke andere keuze opent een leaderboard.
   const [leaderboard, setLeaderboard] = useState<string>("totaal_pct");
-  const [scope, setScope] = useState<"individual" | "family">("individual");
+  const [scope, setScope] = useState<"individual" | "family">("family");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const activeBoard = LEADERBOARDS.find((b) => b.key === leaderboard) ?? LEADERBOARDS[0];
@@ -1518,7 +1520,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   }, [source, scope, grpFilter, activeBoard]);
 
   // Categorieën in vaste volgorde voor de picker.
-  const categories: LeaderboardCat[] = ["Rendement", "Drempels", "Risico", "Activiteit", "Capture", "Medailles"];
+  const categories: LeaderboardCat[] = ["Rendement", "Drempels", "Risico", "Activiteit", "Capture", "Mega-winners"];
 
   return (
     <div>
