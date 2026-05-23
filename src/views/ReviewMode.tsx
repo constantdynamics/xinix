@@ -455,13 +455,13 @@ function ReviewModeModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-3 pb-3 bg-black/80 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         className="w-full max-w-md bg-ink-2 border border-ink-5 rounded-2xl shadow-2xl flex flex-col"
         style={{
-          maxHeight: "min(94vh, 720px)",
+          maxHeight: "min(calc(100vh - 5rem), 720px)",
           borderColor: "color-mix(in srgb, #cc00ff 30%, #262626)",
         }}
         onClick={(e) => e.stopPropagation()}
