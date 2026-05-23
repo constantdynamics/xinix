@@ -50,6 +50,7 @@ import {
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
+import { FacetFilterBar } from "../components/FacetFilterBar";
 
 const SIGNAL_LABELS: Record<string, string> = {
   near_90d_low: "Bij 90d-bodem",
@@ -2478,112 +2479,64 @@ export function PhoenixView() {
         )}
       </div>
 
-      {/* Layout: links facet-filters, rechts tabel */}
+      {/* Layout: filters boven, tabel onder — tabel krijgt volle breedte zodat
+          ticker-rijen niet meer hoeven te wrappen. */}
       {ranking.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
-          {/* Facet-filters */}
-          <Card className="p-4 space-y-5 lg:sticky lg:top-3 lg:self-start lg:max-h-[calc(100vh-1rem)] lg:overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <div className="text-[11px] uppercase tracking-wider text-neutral-400 font-bold">
-                Filters {activeFilterCount > 0 && <span className="text-fog-pink">({activeFilterCount})</span>}
-              </div>
-              {activeFilterCount > 0 && (
-                <button
-                  onClick={clearAllFilters}
-                  className="text-[11px] text-fog-lime hover:underline"
-                >
-                  wissen
-                </button>
-              )}
-            </div>
-
-            <div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
-                <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
-                <MarkAllSeenButton tickers={filteredRanking.map((p) => p.ticker)} />
-              </div>
-              <div className="mt-2">
-                <NotYetReviewedTile
-                  tickers={ranking.map((p) => p.ticker)}
-                  onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
-                />
-              </div>
-              <div className="mt-1 text-[10px] text-neutral-500">
-                {marks.seen.size} gezien · standaard verborgen
-              </div>
-            </div>
-
-            {FACET_GROUPS.map((g) => (
-              <div key={g.key}>
-                <div className="text-[11px] font-bold text-neutral-200 mb-1.5">{g.label}</div>
-                <div className="space-y-1">
-                  {g.buckets.map((b) => {
-                    const count = bucketCounts[`${g.key}::${b.id}`] ?? 0;
-                    const checked = selectedBuckets[g.key].has(b.id);
-                    const disabled = count === 0 && !checked;
-                    return (
-                      <label
-                        key={b.id}
-                        className={`flex items-center gap-2 text-[11px] ${disabled ? "text-neutral-600 cursor-not-allowed" : "text-neutral-300 cursor-pointer hover:text-neutral-100"}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={disabled}
-                          onChange={() => toggleBucket(g.key, b.id)}
-                          className="accent-fog-pink"
-                        />
-                        <span className="flex-1">{b.label}</span>
-                        <span className="text-[10px] text-neutral-500 font-mono tabular-nums">{count}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            <div className="pt-2 border-t border-ink-5/40 text-[11px] text-neutral-500">
-              {filteredRanking.length} van {ranking.length} getoond
-            </div>
-          </Card>
+        <div className="space-y-3">
+          {/* Filter-balk */}
+          <FacetFilterBar
+            facetGroups={FACET_GROUPS}
+            selectedBuckets={selectedBuckets}
+            bucketCounts={bucketCounts}
+            onToggleBucket={toggleBucket}
+            onClearAll={clearAllFilters}
+            activeFilterCount={activeFilterCount}
+            shownCount={filteredRanking.length}
+            totalCount={ranking.length}
+            showSeen={showSeen}
+            onShowSeen={setShowSeen}
+            hideFavorites={hideFavorites}
+            onHideFavorites={setHideFavorites}
+            seenCount={marks.seen.size}
+            tickers={ranking.map((p) => p.ticker)}
+            filteredTickers={filteredRanking.map((p) => p.ticker)}
+            onActivateNotYetReviewed={() => { setShowSeen(false); setHideFavorites(true); }}
+          />
 
           {/* Tabel */}
-          <div className="space-y-2">
-            <div className="flex justify-end">
-              <ColumnPicker tabKey="feniks" columns={PHOENIX_COL_META} lockedKey="ticker" />
-            </div>
-            <Card className="p-0 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
-                      <SeenHeader />
-                      <HeartHeader />
-                      <StarHeader />
-                      <th className="px-3 py-2 text-left w-10">#</th>
-                      {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-ink-5/40">
-                    {filteredRanking.map((p, i) => {
-                      const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
-                      const seen = marks.isSeen(p.ticker);
-                      return (
-                        <tr key={p.ticker} className={(atOrBelow ? "bg-fog-lime/[0.05] " : "") + (seen ? "opacity-50" : "")}>
-                          <SeenCell ticker={p.ticker} />
-                          <HeartCell ticker={p.ticker} />
-                          <StarCell ticker={p.ticker} />
-                          <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
-                          {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(p)}</Fragment>)}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+          <div className="flex justify-end">
+            <ColumnPicker tabKey="feniks" columns={PHOENIX_COL_META} lockedKey="ticker" />
           </div>
+          <Card className="p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                    <SeenHeader />
+                    <HeartHeader />
+                    <StarHeader />
+                    <th className="px-3 py-2 text-left w-10">#</th>
+                    {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-5/40">
+                  {filteredRanking.map((p, i) => {
+                    const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
+                    const seen = marks.isSeen(p.ticker);
+                    return (
+                      <tr key={p.ticker} className={(atOrBelow ? "bg-fog-lime/[0.05] " : "") + (seen ? "opacity-50" : "")}>
+                        <SeenCell ticker={p.ticker} />
+                        <HeartCell ticker={p.ticker} />
+                        <StarCell ticker={p.ticker} />
+                        <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
+                        {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(p)}</Fragment>)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         </div>
       )}
 
