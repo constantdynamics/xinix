@@ -593,6 +593,16 @@ export interface SimStrategy {
   closed_count: number;
   win_rate: number;
   avg_return_pct: number;
+  // Aandeel gesloten posities met return ≥ N% (0..1). Optioneel — oude
+  // edge functions sturen ze nog niet, frontend valt dan terug op 0.
+  win_rate_5pct?: number;
+  win_rate_10pct?: number;
+  win_rate_25pct?: number;
+  win_rate_50pct?: number;
+  win_rate_100pct?: number;
+  // Aandeel equity-snapshots waarop de portefeuille positief stond (0..1).
+  positive_days_pct?: number;
+  total_days?: number;
   last_run_at: string | null;
   open_pos_detail: SimPosDetail[];
   closed_pos_detail: SimPosDetail[];
