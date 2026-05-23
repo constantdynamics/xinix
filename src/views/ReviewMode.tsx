@@ -1,0 +1,641 @@
+// ReviewMode — swipe-door-beoordeling van aandelen per lijst.
+// Knop rechtsboven in de header → stap 1: lijstkeuze → stap 2: één voor één beoordelen.
+
+import { useEffect, useState } from "react";
+import {
+  fetchPriceHistory,
+  type ScanResults,
+  type ZwitserlevenResults,
+} from "../api";
+import type { Dashboard } from "../types";
+import { googleFinanceUrl } from "../tickerLinks";
+import { useMarks } from "../hooks/useMarks";
+
+// ── Chart helper ──────────────────────────────────────────────────────────────
+// Eenvoudige 1-jaar koersgrafiek, ingesloten in de review-kaart.
+// Geen as, geen hover — alleen de vorm van het koersverloop.
+
+function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | null }) {
+  const [pts, setPts] = useState<{ t: number; c: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setPts([]);
+    fetchPriceHistory(ticker, "1y")
+      .then((h) => { if (!cancelled) setPts(h.points ?? []); })
+      .catch(() => { /* stil falen */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [ticker]);
+
+  if (loading) {
+    return (
+      <div className="w-full h-28 flex items-center justify-center text-xs text-neutral-600 animate-pulse">
+        grafiek laden…
+      </div>
+    );
+  }
+  if (pts.length < 2) {
+    return (
+      <div className="w-full h-28 flex items-center justify-center text-xs text-neutral-600">
+        geen koersdata
+      </div>
+    );
+  }
+
+  const W = 600;
+  const H = 112;
+  const PAD = { l: 0, r: 0, t: 4, b: 4 };
+  const PW = W - PAD.l - PAD.r;
+  const PH = H - PAD.t - PAD.b;
+
+  const closes = pts.map((p) => p.c);
+  const lo = Math.min(...closes);
+  const hi = Math.max(...closes);
+  const span = hi - lo || 1;
+  const up = closes[closes.length - 1] >= closes[0];
+  const color = up ? "#1ae85a" : "#ff1a1a";
+
+  const x = (i: number) => PAD.l + (i / (pts.length - 1)) * PW;
+  const y = (c: number) => PAD.t + (1 - (c - lo) / span) * PH;
+
+  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.c).toFixed(1)}`).join(" ");
+  const area = `${line} L${x(pts.length - 1).toFixed(1)},${(PAD.t + PH).toFixed(1)} L${x(0).toFixed(1)},${(PAD.t + PH).toFixed(1)} Z`;
+
+  const gfUrl = googleFinanceUrl(ticker, exchange);
+  const changePct = closes[0] !== 0 ? ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100 : 0;
+
+  return (
+    <a href={gfUrl} target="_blank" rel="noopener noreferrer" className="block w-full group" title={`Open ${ticker} op Google Finance`}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full block rounded-lg overflow-hidden group-hover:opacity-80 transition-opacity"
+        style={{ height: "7rem" }}
+      >
+        <path d={area} fill={color} fillOpacity={0.12} />
+        <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+      <div className="text-center mt-1 text-[11px] font-semibold tabular-nums" style={{ color }}>
+        {up ? "+" : ""}{changePct.toFixed(1)}% (1 jaar)
+      </div>
+    </a>
+  );
+}
+
+// ── Typen ─────────────────────────────────────────────────────────────────────
+
+export type ReviewList = "favorieten" | "feniks" | "hikkertjes" | "zwitserleven" | "watchlist";
+
+interface ReviewItem {
+  ticker: string;
+  company: string | null;
+  exchange: string | null;
+  sector: string | null;
+  medal_gold?: number | null;
+  medal_silver?: number | null;
+  medal_bronze?: number | null;
+  buy_limit?: number | null;
+  last_close?: number | null;
+  dividend_yield_pct?: number | null;
+  hikkertje_spikes?: number | null;
+}
+
+// ── List picker (stap 1) ──────────────────────────────────────────────────────
+
+const LIST_OPTIONS: { key: ReviewList; emoji: string; label: string; desc: string }[] = [
+  { key: "favorieten", emoji: "♥", label: "Favorieten", desc: "Favorieten zonder sterren-beoordeling" },
+  { key: "feniks", emoji: "🦅", label: "Feniks", desc: "Feniks-aandelen nog niet bekeken of favoriet" },
+  { key: "hikkertjes", emoji: "⚡", label: "Hikkertjes", desc: "Hikkertjes nog niet bekeken of favoriet" },
+  { key: "zwitserleven", emoji: "🇨🇭", label: "Zwitserleven", desc: "Dividend-aandelen nog niet bekeken of favoriet" },
+  { key: "watchlist", emoji: "📋", label: "Watchlist", desc: "Alle watchlist-aandelen nog niet bekeken of favoriet" },
+];
+
+function buildQueue(
+  list: ReviewList,
+  data: Dashboard | null,
+  scans: ScanResults | null,
+  zwit: ZwitserlevenResults | null,
+  marks: ReturnType<typeof useMarks>,
+): ReviewItem[] {
+  const notReviewed = (ticker: string) => {
+    const T = ticker.toUpperCase();
+    if (list === "favorieten") {
+      // Hart aanwezig maar geen sterren
+      return marks.favorites.has(T) && marks.getRating(T) === null;
+    }
+    return !marks.favorites.has(T) && !marks.seen.has(T);
+  };
+
+  switch (list) {
+    case "favorieten": {
+      const items: ReviewItem[] = [];
+      for (const t of marks.favorites) {
+        if (notReviewed(t)) {
+          // Zoek extra info in data.cards
+          const card = data?.cards?.find((c) => c.ticker.toUpperCase() === t);
+          items.push({
+            ticker: t,
+            company: card?.company ?? null,
+            exchange: card?.exchange ?? null,
+            sector: card?.sector ?? null,
+            medal_gold: card?.medal_gold ?? null,
+            medal_silver: card?.medal_silver ?? null,
+            medal_bronze: card?.medal_bronze ?? null,
+            buy_limit: card?.buy_limit ?? null,
+            last_close: null,
+            dividend_yield_pct: card?.dividend_yield ?? null,
+          });
+        }
+      }
+      return items;
+    }
+    case "feniks":
+      return (scans?.phoenix_ranking ?? [])
+        .filter((p) => notReviewed(p.ticker))
+        .map((p) => ({
+          ticker: p.ticker,
+          company: p.company,
+          exchange: p.exchange,
+          sector: p.sector,
+          medal_gold: p.medal_gold,
+          medal_silver: p.medal_silver,
+          medal_bronze: p.medal_bronze,
+          buy_limit: p.buy_limit,
+          last_close: p.last_close,
+        }));
+    case "hikkertjes":
+      return (scans?.hikkertje_ranking ?? [])
+        .filter((h) => notReviewed(h.ticker))
+        .map((h) => ({
+          ticker: h.ticker,
+          company: h.company,
+          exchange: h.exchange,
+          sector: h.sector,
+          medal_gold: h.medal_gold,
+          medal_silver: h.medal_silver,
+          medal_bronze: h.medal_bronze,
+          buy_limit: h.buy_limit,
+          last_close: h.last_close,
+          hikkertje_spikes: h.hikkertje_spikes,
+        }));
+    case "zwitserleven":
+      return (zwit?.stocks ?? [])
+        .filter((s) => (s.meets_criteria || s.is_manual) && notReviewed(s.ticker))
+        .map((s) => ({
+          ticker: s.ticker,
+          company: s.company,
+          exchange: s.exchange,
+          sector: s.sector,
+          last_close: s.last_close,
+          dividend_yield_pct: s.dividend_yield_pct,
+        }));
+    case "watchlist":
+      return (data?.cards ?? [])
+        .filter((c) => notReviewed(c.ticker))
+        .map((c) => ({
+          ticker: c.ticker,
+          company: c.company,
+          exchange: c.exchange ?? null,
+          sector: c.sector,
+          medal_gold: c.medal_gold,
+          medal_silver: c.medal_silver,
+          medal_bronze: c.medal_bronze,
+          buy_limit: c.buy_limit ?? null,
+          last_close: null,
+          dividend_yield_pct: c.dividend_yield ?? null,
+        }));
+  }
+}
+
+// ── Review card (stap 2) ──────────────────────────────────────────────────────
+
+function HeartSvg({ filled }: { filled: boolean }) {
+  return (
+    <svg viewBox="0 0 32 32" className="w-6 h-6" aria-hidden>
+      <path
+        d="M16 27.5 C5 19.5,1 13,1 9 C1 4.5,4.5 2,8.5 2 C11.5 2,14 4,16 7.5 C18 4,20.5 2,23.5 2 C27.5 2,31 4.5,31 9 C31 13,27 19.5,16 27.5 Z"
+        fill={filled ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth={filled ? 0 : 2}
+      />
+    </svg>
+  );
+}
+
+function StarSvg({ filled }: { filled: boolean }) {
+  return (
+    <svg viewBox="0 0 32 32" className="w-5 h-5" aria-hidden>
+      <polygon
+        points="16,2 19.5,12 30,12 21.5,18.5 24.5,29 16,23 7.5,29 10.5,18.5 2,12 12.5,12"
+        fill={filled ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth={filled ? 0 : 1.5}
+      />
+    </svg>
+  );
+}
+
+function ReviewCard({
+  item,
+  idx,
+  total,
+  onAction,
+  onSkip,
+  onPrev,
+}: {
+  item: ReviewItem;
+  idx: number;
+  total: number;
+  onAction: (kind: "heart" | "star" | "seen", stars?: number) => void;
+  onSkip: () => void;
+  onPrev: () => void;
+}) {
+  const marks = useMarks();
+  const isFav = marks.isFavorite(item.ticker);
+  const currentStars = marks.getRating(item.ticker) ?? 0;
+  const isSeen = marks.isSeen(item.ticker);
+
+  function fmtPrice(v: number | null | undefined): string {
+    if (v == null) return "—";
+    if (v < 1) return `$${v.toFixed(4)}`;
+    if (v < 10) return `$${v.toFixed(3)}`;
+    return `$${v.toFixed(2)}`;
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Voortgang + sluiten */}
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          onClick={onPrev}
+          disabled={idx === 0}
+          className="text-neutral-500 hover:text-neutral-200 disabled:opacity-30 text-lg leading-none px-1"
+          title="Vorige"
+        >
+          ←
+        </button>
+        <div className="flex-1 text-center text-xs text-neutral-500 font-mono">
+          {idx + 1} / {total}
+        </div>
+        <button
+          onClick={onSkip}
+          className="text-neutral-500 hover:text-neutral-200 text-xs px-2 py-1 rounded border border-ink-5 hover:border-neutral-500"
+          title="Sla over — ga naar volgende zonder beoordelen"
+        >
+          sla over
+        </button>
+      </div>
+
+      {/* Ticker info */}
+      <div className="mb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-xl font-bold text-neutral-50 leading-tight truncate">
+              {item.company ?? item.ticker}
+            </div>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              <a
+                href={googleFinanceUrl(item.ticker, item.exchange)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-sm font-semibold text-[#ff1f8f] hover:underline"
+              >
+                {item.ticker}
+              </a>
+              {item.exchange && <span className="text-[11px] text-neutral-500">{item.exchange}</span>}
+              {item.sector && (
+                <span className="text-[10px] uppercase font-semibold text-neutral-400 bg-ink-3 px-1.5 py-0.5 rounded">
+                  {item.sector}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            {item.last_close != null && (
+              <div className="font-mono font-bold text-neutral-100">{fmtPrice(item.last_close)}</div>
+            )}
+            {item.buy_limit != null && (
+              <div className="text-[11px] text-neutral-500 font-mono">limit {fmtPrice(item.buy_limit)}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Medailles + extra data */}
+        <div className="flex items-center gap-3 mt-2 flex-wrap text-sm">
+          {(item.medal_gold ?? 0) > 0 && <span>🏆{item.medal_gold}</span>}
+          {(item.medal_silver ?? 0) > 0 && <span>🥈{item.medal_silver}</span>}
+          {(item.medal_bronze ?? 0) > 0 && <span>🥉{item.medal_bronze}</span>}
+          {item.dividend_yield_pct != null && item.dividend_yield_pct > 0 && (
+            <span className="text-emerald-400 font-semibold">💰 {item.dividend_yield_pct.toFixed(1)}%</span>
+          )}
+          {item.hikkertje_spikes != null && (
+            <span className="text-yellow-400 font-semibold">⚡ {item.hikkertje_spikes}× spike</span>
+          )}
+        </div>
+      </div>
+
+      {/* Koersgrafiek */}
+      <div className="flex-1 min-h-0 mb-3">
+        <ReviewChart ticker={item.ticker} exchange={item.exchange} />
+      </div>
+
+      {/* Actieknoppen onderin — altijd zichtbaar, geen scrollen nodig */}
+      <div className="space-y-2 pt-2 border-t border-ink-5">
+        {/* Hart */}
+        <button
+          onClick={() => onAction("heart")}
+          className={
+            "w-full flex items-center justify-center gap-2 py-3 rounded-xl text-base font-bold border-2 transition-all " +
+            (isFav
+              ? "border-[#8855ff] text-[#8855ff] bg-[#8855ff]/10 hover:bg-[#8855ff]/20"
+              : "border-ink-5 text-neutral-400 hover:border-[#8855ff] hover:text-[#8855ff] hover:bg-[#8855ff]/5")
+          }
+        >
+          <HeartSvg filled={isFav} />
+          {isFav ? "Favoriet (klik om te verwijderen)" : "Favoriet"}
+        </button>
+
+        {/* Sterren */}
+        <div className="flex gap-1.5">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              onClick={() => onAction("star", n === currentStars ? undefined : n)}
+              className={
+                "flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl border-2 font-bold text-sm transition-all " +
+                (n <= currentStars
+                  ? "border-[#ff00cc] text-[#ff00cc] bg-[#ff00cc]/10 hover:bg-[#ff00cc]/20"
+                  : "border-ink-5 text-neutral-400 hover:border-[#ff00cc]/60 hover:text-[#ff00cc]/80")
+              }
+              title={n === currentStars ? `${n} sterren — klik om te wissen` : `${n} sterren`}
+            >
+              <StarSvg filled={n <= currentStars} />
+              <span className="text-[10px] mt-0.5">{n}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Gezien */}
+        <button
+          onClick={() => onAction("seen")}
+          className={
+            "w-full flex items-center justify-center gap-2 py-3 rounded-xl text-base font-bold border-2 transition-all " +
+            (isSeen
+              ? "border-fog-lime text-fog-lime bg-fog-lime/10 hover:bg-fog-lime/20"
+              : "border-ink-5 text-neutral-400 hover:border-fog-lime hover:text-fog-lime hover:bg-fog-lime/5")
+          }
+        >
+          <span className="text-lg">🔭</span>
+          {isSeen ? "Gezien (klik om te wissen)" : "Markeer als gezien"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── ReviewModeModal ───────────────────────────────────────────────────────────
+
+function ReviewModeModal({
+  onClose,
+  data,
+  scans,
+  zwit,
+}: {
+  onClose: () => void;
+  data: Dashboard | null;
+  scans: ScanResults | null;
+  zwit: ZwitserlevenResults | null;
+}) {
+  const marks = useMarks();
+  const [selectedList, setSelectedList] = useState<ReviewList | null>(null);
+  const [queueIdx, setQueueIdx] = useState(0);
+  // Queue wordt eenmalig vastgelegd bij lijstkeuze — wijzigt niet mee als
+  // marks tussentijds veranderen, zodat de index stabiel blijft.
+  const [queue, setQueue] = useState<ReviewItem[]>([]);
+
+  // Sluit bij Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  function handleAction(kind: "heart" | "star" | "seen", stars?: number) {
+    const item = queue[queueIdx];
+    if (!item) return;
+    if (kind === "heart") void marks.toggle("favorite", item.ticker);
+    else if (kind === "star") void marks.setRating(item.ticker, stars ?? null);
+    else if (kind === "seen") void marks.toggle("seen", item.ticker);
+    // Ga naar volgende na actie
+    setTimeout(() => goNext(), 200);
+  }
+
+  function goNext() {
+    if (queueIdx < queue.length - 1) setQueueIdx((i) => i + 1);
+    else onClose();
+  }
+
+  function goPrev() {
+    if (queueIdx > 0) setQueueIdx((i) => i - 1);
+  }
+
+  function handleSkip() {
+    setSkipped((s) => new Set(s).add(queueIdx));
+    goNext();
+  }
+
+  const currentItem = queue[queueIdx] ?? null;
+  const isDone = selectedList && queue.length > 0 && queueIdx >= queue.length;
+  const isEmpty = selectedList && queue.length === 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-ink-2 border border-ink-5 rounded-2xl shadow-2xl flex flex-col"
+        style={{
+          maxHeight: "min(92vh, 700px)",
+          borderColor: "color-mix(in srgb, #cc00ff 30%, #262626)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-ink-5 shrink-0">
+          <div className="font-bold text-neutral-100 flex items-center gap-2">
+            <span
+              className="text-base font-black"
+              style={{
+                background: "linear-gradient(135deg, #ff00aa 0%, #cc00ff 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+              }}
+            >
+              ♥/👎
+            </span>
+            <span>Beoordelen</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-neutral-500 hover:text-neutral-100 text-lg leading-none px-2"
+            title="Sluit"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4 min-h-0">
+          {/* Stap 1: Lijstkeuze */}
+          {!selectedList && (
+            <div className="space-y-2">
+              <div className="text-sm text-neutral-400 mb-3">
+                Kies welke aandelen je wilt beoordelen:
+              </div>
+              {LIST_OPTIONS.map((opt) => {
+                const q = buildQueue(opt.key, data, scans, zwit, marks);
+                const cnt = q.length;
+                return (
+                  <button
+                    key={opt.key}
+                    onClick={() => {
+                      setSelectedList(opt.key);
+                      setQueue(buildQueue(opt.key, data, scans, zwit, marks));
+                      setQueueIdx(0);
+                    }}
+                    disabled={cnt === 0}
+                    className={
+                      "w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all " +
+                      (cnt > 0
+                        ? "border-ink-5 hover:border-[#cc00ff]/50 hover:bg-[#cc00ff]/5 cursor-pointer"
+                        : "border-ink-5/40 opacity-40 cursor-not-allowed")
+                    }
+                  >
+                    <span className="text-2xl leading-none shrink-0">{opt.emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-neutral-100">{opt.label}</div>
+                      <div className="text-xs text-neutral-500 mt-0.5">{opt.desc}</div>
+                    </div>
+                    <span
+                      className={
+                        "text-sm font-bold tabular-nums shrink-0 " +
+                        (cnt > 0 ? "text-[#cc00ff]" : "text-neutral-600")
+                      }
+                    >
+                      {cnt}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Stap 2: Leeg */}
+          {isEmpty && (
+            <div className="text-center py-8 space-y-3">
+              <div className="text-4xl">✅</div>
+              <div className="text-neutral-300 font-semibold">Alles al beoordeeld!</div>
+              <div className="text-xs text-neutral-500">
+                Alle aandelen in deze lijst hebben al een hartje, sterren of gezien-markering.
+              </div>
+              <button
+                onClick={() => { setSelectedList(null); setQueue([]); }}
+                className="mt-3 px-4 py-2 rounded-lg border border-ink-5 text-sm text-neutral-300 hover:text-neutral-100 hover:border-neutral-500"
+              >
+                ← Andere lijst kiezen
+              </button>
+            </div>
+          )}
+
+          {/* Stap 2: Klaar */}
+          {isDone && (
+            <div className="text-center py-8 space-y-3">
+              <div className="text-4xl">🎉</div>
+              <div className="text-neutral-300 font-semibold">Klaar met beoordelen!</div>
+              <div className="text-xs text-neutral-500">
+                Je hebt alle {queue.length} aandelen doorlopen.
+              </div>
+              <button
+                onClick={() => { setSelectedList(null); setQueue([]); }}
+                className="mt-3 px-4 py-2 rounded-lg border border-ink-5 text-sm text-neutral-300 hover:text-neutral-100 hover:border-neutral-500"
+              >
+                ← Andere lijst kiezen
+              </button>
+            </div>
+          )}
+
+          {/* Stap 2: Review card */}
+          {selectedList && currentItem && !isDone && (
+            <ReviewCard
+              item={currentItem}
+              idx={queueIdx}
+              total={queue.length}
+              onAction={handleAction}
+              onSkip={handleSkip}
+              onPrev={goPrev}
+            />
+          )}
+        </div>
+
+        {/* Footer: terug naar lijstkeuze */}
+        {selectedList && (
+          <div className="px-4 py-2 border-t border-ink-5 shrink-0">
+            <button
+              onClick={() => { setSelectedList(null); setQueue([]); }}
+              className="text-[11px] text-neutral-500 hover:text-neutral-300"
+            >
+              ← Andere lijst kiezen
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── ReviewModeButton ──────────────────────────────────────────────────────────
+// Kleine knop voor in de header (rechtsboven). Opent het review-modal.
+
+export function ReviewModeButton({
+  data,
+  scans,
+  zwit,
+}: {
+  data: Dashboard | null;
+  scans: ScanResults | null;
+  zwit: ZwitserlevenResults | null;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="Beoordeel aandelen: hartje, sterren of gezien"
+        className="inline-flex items-center justify-center h-7 px-2.5 text-xs rounded-lg font-bold transition active:scale-95 select-none"
+        style={{
+          background: "linear-gradient(135deg, #ff00aa 0%, #cc00ff 100%)",
+          color: "#fff",
+          boxShadow: "0 0 10px -2px #cc00ff80",
+        }}
+      >
+        <span className="text-sm leading-none">♥</span>
+        <span className="mx-1 opacity-60">/</span>
+        <span className="text-sm leading-none">👎</span>
+        <span className="hidden sm:inline ml-1.5">beoordeel</span>
+      </button>
+
+      {open && (
+        <ReviewModeModal
+          onClose={() => setOpen(false)}
+          data={data}
+          scans={scans}
+          zwit={zwit}
+        />
+      )}
+    </>
+  );
+}

@@ -33,6 +33,7 @@ import {
 } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { EditableLimit } from "../components/EditableLimit";
+import { TickerSparkline } from "../components/TickerSparkline";
 import {
   HeartCell,
   HeartHeader,
@@ -1798,11 +1799,12 @@ const PHOENIX_COLUMNS: PhoenixColumn[] = [
   { key: "phoenix_50x_date", label: "Laatste 50× datum", short: "Laatste 50×", defaultDir: "desc", hint: "Datum van het meest recente 50×-incident" },
 ];
 
-// Kolommen voor de kolom-kiezer: Ticker (vast) + alle data-kolommen + Koers.
+// Kolommen voor de kolom-kiezer: Ticker (vast) + alle data-kolommen + Koers + Trend.
 const PHOENIX_COL_META: ColumnMeta[] = [
   { key: "ticker", label: "Ticker" },
   ...PHOENIX_COLUMNS.map((c) => ({ key: c.key, label: c.short })),
   { key: "koers", label: "Koers" },
+  { key: "sparkline", label: "Trend" },
 ];
 
 function daysAgo(dateStr: string | null): number | null {
@@ -2159,6 +2161,14 @@ export function PhoenixView() {
         <td className="px-3 py-2 text-right font-mono tabular-nums">
           {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
           <div><EditableLimit ticker={p.ticker} buyLimit={p.buy_limit} compact /></div>
+        </td>
+      ),
+    },
+    sparkline: {
+      th: <th className="px-3 py-2 text-center w-20">Trend</th>,
+      td: (p) => (
+        <td className="px-3 py-2 text-center">
+          <TickerSparkline ticker={p.ticker} width={64} height={18} />
         </td>
       ),
     },

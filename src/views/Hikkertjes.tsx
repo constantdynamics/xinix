@@ -7,6 +7,7 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
+import { TickerSparkline } from "../components/TickerSparkline";
 import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { EditableLimit } from "../components/EditableLimit";
 import { useMarks } from "../hooks/useMarks";
@@ -272,6 +273,11 @@ export function HikkertjesView() {
                         <Pill>{h.sector}</Pill>
                       </div>
                     )}
+                  </div>
+
+                  {/* Koerstrend sparkline */}
+                  <div className="shrink-0 hidden sm:block">
+                    <TickerSparkline ticker={h.ticker} width={64} height={20} />
                   </div>
 
                   {/* Spikes */}

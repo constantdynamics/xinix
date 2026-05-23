@@ -5,6 +5,7 @@ import { triggerJob } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { loadTilePrefs, type TilePrefs } from "../tilePrefs";
 import { TAB_ICONS } from "../tabIcons";
+import { PriceChartModal } from "./PriceChartModal";
 import {
   Card,
   Badge,
@@ -109,7 +110,10 @@ type NavTarget =
   | "status"
   | "settings";
 
+type ChartTarget = { ticker: string; company: string; exchange: string | null };
+
 export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh: () => void; onNavigate?: (t: NavTarget) => void }) {
+  const [chartFor, setChartFor] = useState<ChartTarget | null>(null);
   // Filters: 'Catalyst' is een schakelaar die altijd AND-combineert met de
   // los aanvinkbare kleur-filters (OR onderling). Standaard alleen catalyst.
   const [catalystOnly, setCatalystOnly] = useState(true);
@@ -356,7 +360,7 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
       </div>
 
       {/* Cards grid */}
-      <CardGrid cards={visibleCards} prefs={tilePrefs} />
+      <CardGrid cards={visibleCards} prefs={tilePrefs} onOpenChart={setChartFor} />
 
       {/* Catalysts */}
       <Catalysts data={data} />
@@ -366,6 +370,15 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
 
       {/* Run log */}
       <RunLog data={data} onNavigate={onNavigate} />
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -423,7 +436,7 @@ function JobControls() {
   );
 }
 
-function CardGrid({ cards, prefs }: { cards: CardData[]; prefs: TilePrefs }) {
+function CardGrid({ cards, prefs, onOpenChart }: { cards: CardData[]; prefs: TilePrefs; onOpenChart?: (t: ChartTarget) => void }) {
   if (cards.length === 0) {
     return (
       <Card className="p-10 text-center text-neutral-400 text-sm">
@@ -434,13 +447,13 @@ function CardGrid({ cards, prefs }: { cards: CardData[]; prefs: TilePrefs }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 items-start">
       {cards.map((c) => (
-        <CardTile key={c.ticker} card={c} prefs={prefs} />
+        <CardTile key={c.ticker} card={c} prefs={prefs} onOpenChart={onOpenChart} />
       ))}
     </div>
   );
 }
 
-function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
+function CardTile({ card: c, prefs, onOpenChart }: { card: CardData; prefs: TilePrefs; onOpenChart?: (t: ChartTarget) => void }) {
   const px = c.summary;
   const tone = COLOR_TONE[c.color];
   const detailMeta =
@@ -501,9 +514,14 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
               </span>
             )}
           </div>
-          <div className="text-xs text-neutral-400 truncate mt-0.5" title={c.company}>
+          <button
+            type="button"
+            onClick={() => onOpenChart?.({ ticker: c.ticker, company: c.company, exchange: c.exchange ?? null })}
+            className="text-xs text-neutral-400 truncate mt-0.5 text-left hover:text-neutral-200 hover:underline transition-colors w-full"
+            title={`${c.company} — klik voor koersgrafiek`}
+          >
             {c.company}
-          </div>
+          </button>
           {prefs.showMedals && (
             <div className="mt-1.5">
               <MedalPills

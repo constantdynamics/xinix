@@ -23,6 +23,7 @@ import { DEFAULT_TABS as TABS, type Tab, type TabDef } from "./tabsConfig";
 import { useMarks } from "./hooks/useMarks";
 import { useUiSettings } from "./hooks/useUiSettings";
 import { TAB_ICONS } from "./tabIcons";
+import { ReviewModeButton } from "./views/ReviewMode";
 
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
 const HELP_PAGE: Record<Tab, string> = {
@@ -226,6 +227,7 @@ export function App() {
                 })}
               </span>
             )}
+            <ReviewModeButton data={data} scans={scans} zwit={zwit} />
             <Button
               size="sm"
               variant={tab === "settings" ? "secondary" : "ghost"}
