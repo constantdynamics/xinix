@@ -113,6 +113,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
   const [bronFilter, setBronFilter] = useState<Set<Bron>>(new Set());
   const [sectorFilter, setSectorFilter] = useState<Set<Sector>>(new Set());
   const [showSeen, setShowSeen] = useState(false);
+  const [showOrphans, setShowOrphans] = useState(false);
   // Minimum sterren-filter: 0 = alles, 1..5 = alleen rijen met ≥ N sterren.
   const [minRating, setMinRating] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>(
@@ -275,6 +276,9 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
 
   const filtered = useMemo(() => {
     let list = rows;
+    // Verberg orphans (favorieten zonder data) tenzij de toggle aan staat.
+    // Anders zou een rij met overal "—" altijd verschijnen, wat verwarrend is.
+    if (!showOrphans) list = list.filter((r) => !r.orphan);
     if (!showSeen) list = list.filter((r) => !marks.isSeen(r.ticker));
     if (bronFilter.size > 0) {
       list = list.filter((r) => r.bronnen.some((b) => bronFilter.has(b)));
@@ -307,7 +311,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
       return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
     });
     return list;
-  }, [rows, sortKey, sortDir, bronFilter, sectorFilter, showSeen, minRating, marks]);
+  }, [rows, sortKey, sortDir, bronFilter, sectorFilter, showSeen, showOrphans, minRating, marks]);
 
   function startEditLimit(row: FavRow) {
     if (!isAdmin) return;
@@ -576,25 +580,29 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         </div>
       </div>
 
-      {/* Reparatie-banner: favorieten zonder data terugzetten in watchlist. */}
+      {/* Compacte reparatie-balk voor orphans (favorieten zonder data).
+          Default verborgen uit de tabel — de banner is je enige aanwijzing. */}
       {orphans.length > 0 && (
-        <Card className="p-3 border-fog-warn/40 bg-fog-warn/[0.06]">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-fog-warn">
-                {orphans.length} {orphans.length === 1 ? "favoriet ontbreekt" : "favorieten ontbreken"} in de watchlist
-              </div>
-              <div className="text-xs text-neutral-400 mt-0.5 leading-snug">
-                Deze tickers ({orphans.slice(0, 5).map((o) => o.ticker).join(", ")}{orphans.length > 5 ? `, …` : ""}) staan als favoriet
-                maar zijn niet (meer) actief in de watchlist — daarom missen koers, sector en medailles. Klik op
-                "Repareren" om ze terug in de watchlist te zetten; de data wordt bij de volgende poll opgehaald.
-              </div>
-              {repairMsg && (
-                <div className={`text-xs mt-1 ${repairMsg.startsWith("Fout") ? "text-fog-loss" : "text-fog-lime"}`}>
-                  {repairMsg}
-                </div>
-              )}
-            </div>
+        <Card className="p-2 border-fog-warn/30 bg-fog-warn/[0.04]">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-fog-warn font-semibold">
+              {orphans.length} {orphans.length === 1 ? "favoriet" : "favorieten"} zonder data
+              {!showOrphans && <span className="text-neutral-500 font-normal"> · verborgen uit lijst</span>}
+            </span>
+            <span className="text-neutral-500 truncate">
+              ({orphans.slice(0, 5).map((o) => o.ticker).join(", ")}{orphans.length > 5 ? `, …` : ""})
+            </span>
+            <button
+              onClick={() => setShowOrphans((v) => !v)}
+              className="text-[11px] text-neutral-400 hover:text-neutral-200 underline ml-auto"
+            >
+              {showOrphans ? "verberg" : "toon"}
+            </button>
+            {repairMsg && (
+              <span className={`text-[11px] ${repairMsg.startsWith("Fout") ? "text-fog-loss" : "text-fog-lime"}`}>
+                {repairMsg}
+              </span>
+            )}
             {isAdmin && (
               <Button size="sm" onClick={repairOrphans} disabled={repairing}>
                 {repairing ? "Bezig…" : `🔧 Repareer ${orphans.length}`}
