@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardView } from "./views/Dashboard";
 import { SettingsView } from "./views/Settings";
 import { TickersView } from "./views/Tickers";
@@ -9,14 +9,21 @@ import { TrackRecordView } from "./views/TrackRecord";
 import { SignalLogView } from "./views/SignalLog";
 import { ScansView } from "./views/Scans";
 import { XinixPortfolioView, PhoenixView } from "./views/XinixPortfolio";
+import { PoefiesView } from "./views/Poefies";
 import { HikkertjesView } from "./views/Hikkertjes";
 import { ZwitserlevenView } from "./views/Zwitserleven";
+import { FavorietenView } from "./views/Favorieten";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
-import { fetchDashboard, fetchUiSettings, getToken, setToken, type UiSettings } from "./api";
+import { fetchDashboard, fetchScanResults, fetchZwitserlevenResults, getToken, setToken, type ScanResults, type ZwitserlevenResults } from "./api";
 import type { Dashboard } from "./types";
 import { Button, NavTab, Input, Skeleton, Dot } from "./components/ui";
+import { DeviceSync } from "./components/DeviceSync";
 import { DEFAULT_TABS as TABS, type Tab, type TabDef } from "./tabsConfig";
+import { useMarks } from "./hooks/useMarks";
+import { useUiSettings } from "./hooks/useUiSettings";
+import { TAB_ICONS } from "./tabIcons";
+import { ReviewModeButton } from "./views/ReviewMode";
 
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
 const HELP_PAGE: Record<Tab, string> = {
@@ -30,20 +37,39 @@ const HELP_PAGE: Record<Tab, string> = {
   scans: "scans",
   xinix: "xinix",
   feniks: "feniks",
+  poefies: "poefies",
   hikkertjes: "hikkertjes",
   zwitserleven: "zwitserleven",
+  favorieten: "favorieten",
   status: "status",
   settings: "settings",
 };
+
+// Positie-gebaseerde tabkleur — gradient neon-cyber variant 12:
+// #ff00aa → #cc00ff → #00ccff, gespreid over alle zichtbare tabs.
+function tabColor(i: number, n: number): string {
+  const t = n <= 1 ? 0 : i / (n - 1);
+  if (t <= 0.5) {
+    const s = t * 2;
+    return `rgb(${Math.round(255 + s * (204 - 255))},0,${Math.round(170 + s * (255 - 170))})`;
+  } else {
+    const s = (t - 0.5) * 2;
+    return `rgb(${Math.round(204 - s * 204)},${Math.round(s * 204)},255)`;
+  }
+}
 
 // Tab onthouden tussen sessies — bij refresh blijf je op dezelfde tab.
 const TAB_KEY = "xinix_active_tab_v1";
 function loadInitialTab(): Tab {
   try {
     const saved = sessionStorage.getItem(TAB_KEY);
-    if (saved && TABS.some((t) => t.key === saved)) return saved as Tab;
+    // settings/status staan niet meer in de tabbalk maar zijn nog wel geldige
+    // routes (bereikbaar via de bovenbalk) — dus expliciet toelaten.
+    if (saved && (TABS.some((t) => t.key === saved) || saved === "settings" || saved === "status")) {
+      return saved as Tab;
+    }
   } catch { /* SSR/restricted */ }
-  return "dashboard";
+  return "favorieten";
 }
 
 export function App() {
@@ -58,17 +84,11 @@ export function App() {
   const [tokenInput, setTokenInput] = useState(getToken() ?? "");
   const [showTokenBar, setShowTokenBar] = useState(false);
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
-  const [uiSettings, setUiSettings] = useState<UiSettings | null>(null);
-  const [showHiddenTabs, setShowHiddenTabs] = useState(false);
-
-  // UI-settings 1× laden + opnieuw na save (via custom event).
-  useEffect(() => {
-    const load = () => fetchUiSettings().then(setUiSettings).catch(() => { /* fallback naar defaults */ });
-    load();
-    const onUpdate = () => load();
-    window.addEventListener("xinix-ui-settings-updated", onUpdate);
-    return () => window.removeEventListener("xinix-ui-settings-updated", onUpdate);
-  }, []);
+  const [scans, setScans] = useState<ScanResults | null>(null);
+  const [zwit, setZwit] = useState<ZwitserlevenResults | null>(null);
+  const marks = useMarks();
+  // UI-config via de gedeelde store — één fetch, gedeeld met alle views.
+  const { settings: uiSettings } = useUiSettings();
 
   // Pas UI-overrides toe op TABS: volgorde, hernoemd, verborgen.
   const effectiveTabs = useMemo<TabDef[]>(() => {
@@ -81,19 +101,27 @@ export function App() {
     }
     const labels = uiSettings?.tab_labels ?? {};
     list = list.map((t) => labels[t.key] ? { ...t, label: labels[t.key] } : t);
+    // Verborgen tabs verdwijnen volledig uit de balk — beheren doe je in Instellingen.
     const hidden = new Set(uiSettings?.tab_hidden ?? []);
-    if (!showHiddenTabs && hidden.size > 0) {
+    if (hidden.size > 0) {
       list = list.filter((t) => !hidden.has(t.key));
     }
     return list;
-  }, [uiSettings, showHiddenTabs]);
+  }, [uiSettings]);
 
-  const hiddenCount = (uiSettings?.tab_hidden ?? []).filter((k) => TABS.some((t) => t.key === k)).length;
+  // Accentkleur van het actieve tabblad — als CSS-variabele (--tab-accent)
+  // beschikbaar voor alle views, zodat de tabkleur op de pagina terugkomt.
+  const tabAccent = useMemo(() => {
+    const idx = effectiveTabs.findIndex((t) => t.key === tab);
+    return idx >= 0 ? tabColor(idx, effectiveTabs.length) : "#ff1f8f";
+  }, [effectiveTabs, tab]);
 
-  async function refresh() {
+  // `fresh` = browser-cache omzeilen; gebruikt door de "vernieuw"-knop.
+  // Een gewone pagina-load gebruikt de cache zodat herladen snel is.
+  async function refresh(fresh = false) {
     try {
       setLoading(true);
-      const d = await fetchDashboard();
+      const d = await fetchDashboard(fresh);
       setData(d);
       setError(null);
       setLastFetchAt(Date.now());
@@ -104,32 +132,57 @@ export function App() {
     }
   }
 
+  // Eenmalig laden bij openen — via de cache (snel herladen). Geen auto-
+  // verversing; gebruik de "vernieuw"-knop voor verse data.
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 60_000);
-    return () => clearInterval(id);
   }, []);
+
+  // Scan-resultaten + zwitserleven los laden voor de tab-tellers — pas ná
+  // het dashboard, zodat ze niet met de zware hoofd-fetch om resources
+  // concurreren. Eenmalig, zodra het dashboard binnen is.
+  const badgesFetched = useRef(false);
+  useEffect(() => {
+    if (!data || badgesFetched.current) return;
+    badgesFetched.current = true;
+    fetchScanResults().then(setScans).catch(() => { /* teller blijft leeg */ });
+    fetchZwitserlevenResults().then(setZwit).catch(() => { /* teller blijft leeg */ });
+  }, [data]);
 
   // Counts per tab — kleine cijfers naast tab-label
   const counts = useMemo<Partial<Record<Tab, number>>>(() => {
-    if (!data) return {};
-    return {
-      dashboard: data.cards?.length ?? 0,
-      tickers: data.cards?.length ?? 0,
-      scores: data.recent_signals?.length ?? 0,
-    };
-  }, [data]);
+    const out: Partial<Record<Tab, number>> = {};
+    if (data) {
+      // Hot or Not-teller: alleen Hot-aandelen (rode tegel) die nog niet in
+      // de favorieten staan — een bruikbaar getal in plaats van "999+".
+      out.dashboard = (data.cards ?? []).filter(
+        (c) => c.color === "red" && !marks.favorites.has(c.ticker.toUpperCase()),
+      ).length;
+      out.tickers = data.cards?.length ?? 0;
+      out.scores = data.recent_signals?.length ?? 0;
+    }
+    // Scan-tabbladen: aantal vondsten dat nog niet als 'gezien' is gemarkeerd.
+    const notSeen = (tickers: string[]) => tickers.filter((t) => !marks.isSeen(t)).length;
+    if (scans) {
+      out.feniks = notSeen((scans.phoenix_ranking ?? []).map((r) => r.ticker));
+      out.poefies = notSeen((scans.poefie_ranking ?? []).map((r) => r.ticker));
+      out.hikkertjes = notSeen((scans.hikkertje_ranking ?? []).map((r) => r.ticker));
+    }
+    if (zwit) {
+      out.zwitserleven = notSeen(
+        (zwit.stocks ?? []).filter((s) => s.meets_criteria || s.is_manual).map((s) => s.ticker),
+      );
+    }
+    return out;
+  }, [data, scans, zwit, marks.favorites, marks.favorites.size, marks.seen, marks.seen.size, marks.loaded]);
 
   // Urgentie-indicatoren — rode dot per tab waar iets vraagt om aandacht.
   const urgent = useMemo<Partial<Record<Tab, boolean>>>(() => {
     if (!data) return {};
-    const redCards = data.cards?.filter((c) => c.color === "red").length ?? 0;
-    const redSignals = data.recent_signals?.filter((s) => s.severity === "red").length ?? 0;
     const failedJobs = new Set(
       (data.run_log ?? []).filter((r) => r.ok === false).slice(0, 30).map((r) => r.job)
     );
     return {
-      dashboard: redCards > 0 || redSignals > 0,
       status: failedJobs.size > 0,
     };
   }, [data]);
@@ -149,20 +202,17 @@ export function App() {
       <header className="sticky top-0 z-30 border-b border-ink-5 bg-ink-1/95 backdrop-blur supports-[backdrop-filter]:bg-ink-1/70">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-4">
           <a
-            href="#dashboard"
+            href="#favorieten"
             onClick={(e) => {
               e.preventDefault();
-              setTab("dashboard");
+              setTab("favorieten");
             }}
             className="wordmark text-2xl leading-none select-none cursor-pointer hover:scale-[1.02] transition-transform"
-            title="Naar dashboard"
+            title="Naar favorieten"
           >
             Xinix
           </a>
-          <div className="hidden sm:block text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400">
-            Biotech & Mining Signal Detector
-          </div>
-          <div className="ml-auto flex items-center gap-2">
+<div className="ml-auto flex items-center gap-2">
             {data && (
               <span
                 className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-neutral-500 tabular"
@@ -177,6 +227,24 @@ export function App() {
                 })}
               </span>
             )}
+            <ReviewModeButton data={data} scans={scans} zwit={zwit} />
+            <Button
+              size="sm"
+              variant={tab === "settings" ? "secondary" : "ghost"}
+              onClick={() => setTab("settings")}
+              title="Instellingen"
+            >
+              ⚙<span className="hidden sm:inline">instellingen</span>
+            </Button>
+            <Button
+              size="sm"
+              variant={tab === "status" ? "secondary" : "ghost"}
+              onClick={() => setTab("status")}
+              title="Status van de achtergrondjobs"
+            >
+              <Dot tone={urgent.status ? "loss" : "neutral"} />
+              <span className="hidden sm:inline">status</span>
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -197,7 +265,7 @@ export function App() {
             <Button
               size="sm"
               variant="secondary"
-              onClick={refresh}
+              onClick={() => refresh(true)}
               disabled={loading}
               title="Vernieuw"
             >
@@ -209,62 +277,61 @@ export function App() {
 
         {/* Tab nav — onderlijn-stijl, horizontaal scrollbaar op mobiel */}
         <div className="mx-auto max-w-7xl px-4 flex gap-0.5 overflow-x-auto scrollbar-thin items-center">
-          {effectiveTabs.map((t) => (
+          {effectiveTabs.map((t, idx) => (
             <NavTab
               key={t.key}
               active={tab === t.key}
               count={counts[t.key]}
               urgent={urgent[t.key]}
               onClick={() => setTab(t.key)}
+              color={tabColor(idx, effectiveTabs.length)}
+              icon={TAB_ICONS[t.key]}
             >
               {t.label}
             </NavTab>
           ))}
-          {hiddenCount > 0 && (
-            <button
-              onClick={() => setShowHiddenTabs((v) => !v)}
-              title={showHiddenTabs ? "Verborgen tabs weer verbergen" : `${hiddenCount} verborgen tab${hiddenCount === 1 ? "" : "s"} tonen`}
-              className={`ml-2 px-2 py-1 rounded text-[11px] font-semibold border whitespace-nowrap transition-colors ${
-                showHiddenTabs
-                  ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
-                  : "border-ink-5 text-neutral-500 hover:text-neutral-200 hover:border-ink-5/80"
-              }`}
-            >
-              {showHiddenTabs ? "✕ verberg" : `+ ${hiddenCount} verborgen`}
-            </button>
-          )}
         </div>
 
         {showTokenBar && (
           <div className="border-t border-ink-5 bg-ink-2/60">
-            <div className="mx-auto max-w-7xl px-4 py-2 flex items-center gap-2 animate-fade-up">
-              <Input
-                type="password"
-                placeholder="Admin token"
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                className="w-56"
-              />
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => {
-                  setToken(tokenInput || null);
-                  refresh();
-                  setShowTokenBar(false);
-                }}
-              >
-                Opslaan
-              </Button>
-              <span className="text-[11px] text-neutral-500">
-                Wordt lokaal in de browser bewaard.
-              </span>
+            <div className="mx-auto max-w-7xl px-4 py-2 flex flex-col gap-2 animate-fade-up">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Input
+                  type="password"
+                  placeholder="Admin token"
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  className="w-56"
+                />
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => {
+                    setToken(tokenInput || null);
+                    // Volledige reload — anders laadt useMarks de favorieten
+                    // niet (ensureLoaded draait alleen bij mount en stopt
+                    // vroegtijdig zolang er geen token is).
+                    window.location.reload();
+                  }}
+                >
+                  Opslaan
+                </Button>
+                <span className="text-[11px] text-neutral-500">
+                  Wordt lokaal in de browser bewaard.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap border-t border-ink-5/60 pt-2">
+                <DeviceSync />
+              </div>
             </div>
           </div>
         )}
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6">
+      <main
+        className="mx-auto max-w-7xl px-4 py-6"
+        style={{ "--tab-accent": tabAccent } as React.CSSProperties}
+      >
         {error && (
           <div className="mb-4 rounded-xl border border-fog-loss/40 bg-fog-loss/10 p-3 text-sm text-fog-loss">
             <span className="font-semibold">Fout:</span> {error}
@@ -274,14 +341,14 @@ export function App() {
         {loading && !data && !error && <DashboardSkeleton />}
 
         {tab === "dashboard" && data && (
-          <DashboardView data={data} onRefresh={refresh} onNavigate={setTab} />
+          <DashboardView data={data} onRefresh={() => refresh(true)} onNavigate={setTab} />
         )}
         {tab === "settings" && <SettingsView data={data ?? undefined} />}
         {tab === "tickers" && data && (
-          <TickersView data={data} onRefresh={refresh} />
+          <TickersView data={data} onRefresh={() => refresh(true)} />
         )}
         {tab === "limits" && data && (
-          <LimitsView data={data} onRefresh={refresh} />
+          <LimitsView data={data} onRefresh={() => refresh(true)} />
         )}
         {tab === "backtest" && <BacktestView />}
         {tab === "scores" && <ScoresView exchangeByTicker={data ? new Map(data.cards.map((c) => [c.ticker, c.exchange ?? null])) : undefined} />}
@@ -290,8 +357,10 @@ export function App() {
         {tab === "scans" && <ScansView />}
         {tab === "xinix" && <XinixPortfolioView />}
         {tab === "feniks" && <PhoenixView />}
+        {tab === "poefies" && <PoefiesView />}
         {tab === "hikkertjes" && <HikkertjesView />}
         {tab === "zwitserleven" && <ZwitserlevenView />}
+        {tab === "favorieten" && <FavorietenView />}
         {tab === "status" && <HealthView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>

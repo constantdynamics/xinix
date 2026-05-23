@@ -33,7 +33,16 @@ Deno.serve(async (req) => {
     ]);
     if (!spyResp.ok) throw new Error(`Yahoo Finance SPY HTTP ${spyResp.status}`);
 
-    const [spyJson, vixJson] = await Promise.all([spyResp.json(), vixResp.json()]);
+    const spyJson = await spyResp.json();
+    // VIX is optioneel — een VIX-storing (429, HTML-foutpagina) mag de
+    // SPY-gebaseerde regimebepaling niet om zeep helpen. panicMode hieronder
+    // verdraagt vixClose == null.
+    let vixJson: any = null;
+    try {
+      if (vixResp.ok) vixJson = await vixResp.json();
+    } catch {
+      vixJson = null;
+    }
 
     const spyResult = spyJson?.chart?.result?.[0];
     if (!spyResult) throw new Error("Geen SPY data van Yahoo Finance");

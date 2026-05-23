@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   addZwitserlevenManual,
   fetchZwitserlevenResults,
@@ -8,6 +8,22 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
+import { TickerSparkline } from "../components/TickerSparkline";
+import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
+import { useMarks } from "../hooks/useMarks";
+import {
+  HeartCell,
+  HeartHeader,
+  SeenCell,
+  SeenHeader,
+  ShowSeenToggle,
+  MarkAllSeenButton,
+  HideFavoritesToggle,
+  NotYetReviewedTile,
+  StarCell,
+  StarHeader,
+} from "../components/MarkCells";
+import { ColumnPicker, useColumnLayout } from "../components/ColumnPicker";
 
 function fmtPct(v: number | null, decimals = 1): string {
   if (v == null) return "—";
@@ -82,7 +98,7 @@ type SortKey =
   | "risk_label";
 
 type ColKey =
-  | "idx" | "ticker" | "company" | "exchange" | "sector" | "price"
+  | "idx" | "ticker" | "company" | "exchange" | "sector" | "price" | "sparkline"
   | "yield" | "tax" | "net_yield"
   | "under5y" | "max_gain" | "growth_years"
   | "year1" | "year2" | "year3" | "year4" | "year5"
@@ -97,6 +113,7 @@ const COLUMNS_BASE: ColDef[] = [
   { key: "exchange",     label: "Beurs / Land",   defaultVisible: true,  align: "left" },
   { key: "sector",       label: "Sector",         defaultVisible: true,  align: "left" },
   { key: "price",        label: "Koers",          defaultVisible: true,  align: "right" },
+  { key: "sparkline",    label: "Trend (1m)",     defaultVisible: true,  align: "center" },
   { key: "yield",        label: "Div % bruto",    defaultVisible: true,  align: "left",  sortable: "dividend_yield_pct" },
   { key: "tax",          label: "Bronbel %",      defaultVisible: true,  align: "left",  sortable: "tax_rate" },
   { key: "net_yield",    label: "Div % netto",    defaultVisible: true,  align: "left",  sortable: "net_yield_pct" },
@@ -115,18 +132,6 @@ const COLUMNS_BASE: ColDef[] = [
   { key: "actions",      label: "Acties",         defaultVisible: true,  align: "center" },
 ];
 
-const COLS_KEY = "xinix_zwitserleven_cols_v2";
-function loadVisibleCols(): Set<ColKey> {
-  try {
-    const raw = localStorage.getItem(COLS_KEY);
-    if (raw) return new Set(JSON.parse(raw) as ColKey[]);
-  } catch { /* ignore */ }
-  return new Set(COLUMNS_BASE.filter((c) => c.defaultVisible).map((c) => c.key));
-}
-function saveVisibleCols(s: Set<ColKey>): void {
-  try { localStorage.setItem(COLS_KEY, JSON.stringify([...s])); } catch { /* ignore */ }
-}
-
 type ShowFilter = "all" | "meets" | "near";
 const AUTO_SCAN_TOTAL = 20;
 const AUTO_SCAN_INTERVAL_MS = 6_000; // 6s per scan-cycle (scan loopt async op de backend)
@@ -141,8 +146,7 @@ export function ZwitserlevenView() {
   const [sortAsc, setSortAsc] = useState(false);
   const [showFilter, setShowFilter] = useState<ShowFilter>("meets");
 
-  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(loadVisibleCols);
-  const [showColPicker, setShowColPicker] = useState(false);
+  const { visibleKeys } = useColumnLayout("zwitserleven", COLUMNS_BASE, "ticker");
 
   const [manualInput, setManualInput] = useState("");
   const [manualMsg, setManualMsg] = useState<string | null>(null);
@@ -153,6 +157,9 @@ export function ZwitserlevenView() {
   const [autoRun, setAutoRun] = useState(false);
   const [autoStep, setAutoStep] = useState(0);
   const [autoFoundDelta, setAutoFoundDelta] = useState(0);
+  const [showSeen, setShowSeen] = useState(false);
+  const [hideFavorites, setHideFavorites] = useState(false);
+  const marks = useMarks();
   const stopRef = useRef(false);
 
   function refresh() {
@@ -258,24 +265,11 @@ export function ZwitserlevenView() {
     else { setSortKey(key); setSortAsc(false); }
   }
 
-  function toggleCol(k: ColKey) {
-    setVisibleCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(k)) next.delete(k);
-      else next.add(k);
-      saveVisibleCols(next);
-      return next;
-    });
-  }
-  function resetCols() {
-    const def = new Set(COLUMNS_BASE.filter((c) => c.defaultVisible).map((c) => c.key));
-    setVisibleCols(def);
-    saveVisibleCols(def);
-  }
-
   const filtered = useMemo<ZwitserlevenStock[]>(() => {
     if (!data) return [];
     let list = data.stocks.filter((s) => {
+      if (!showSeen && marks.isSeen(s.ticker)) return false;
+      if (hideFavorites && marks.isFavorite(s.ticker)) return false;
       if (showFilter === "meets") return s.meets_criteria === true || s.is_manual === true;
       if (showFilter === "near") {
         return (s.dividend_yield_pct ?? 0) >= 4 && (s.pct_under_5y_high ?? 0) >= 30;
@@ -309,7 +303,7 @@ export function ZwitserlevenView() {
       return sortAsc ? diff : -diff;
     });
     return list;
-  }, [data, showFilter, sortKey, sortAsc]);
+  }, [data, showFilter, sortKey, sortAsc, showSeen, hideFavorites, marks]);
 
   const currentYear = new Date().getFullYear();
   const yearLabels = [1, 2, 3, 4, 5].map((offset) => String(currentYear - offset));
@@ -331,16 +325,235 @@ export function ZwitserlevenView() {
     )
   );
 
-  const isVis = (k: ColKey) => visibleCols.has(k);
+  // Per kolom-key de header + cel-render; visibleKeys (kolom-kiezer) bepaalt
+  // welke kolommen in welke volgorde getoond worden.
+  const colMap: Record<string, { th: ReactNode; td: (s: ZwitserlevenStock, idx: number) => ReactNode }> = {
+    idx: {
+      th: <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>,
+      td: (s, idx) => <td className="px-3 py-2.5 text-neutral-600 tabular text-xs">{idx + 1}</td>,
+    },
+    ticker: {
+      th: <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Ticker</th>,
+      td: (s) => (
+        <td className="px-3 py-2.5">
+          <div className="flex items-center gap-1.5">
+            <a href={googleFinanceUrl(s.ticker, s.exchange)} target="_blank" rel="noopener noreferrer" className="font-mono font-semibold tab-accent-text hover:underline">
+              {s.ticker}
+            </a>
+            {s.is_manual && (
+              <span title="Handmatig toegevoegd" className="text-[9px] uppercase font-semibold text-amber-400 bg-amber-400/15 px-1 rounded">handm.</span>
+            )}
+          </div>
+        </td>
+      ),
+    },
+    company: {
+      th: <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Naam</th>,
+      td: (s) => (
+        <td className="px-3 py-2.5">
+          <div className="text-xs text-neutral-200 truncate max-w-[220px]" title={s.company ?? undefined}>
+            {s.company ?? <span className="text-neutral-600">—</span>}
+          </div>
+        </td>
+      ),
+    },
+    exchange: {
+      th: <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Beurs / Land</th>,
+      td: (s) => (
+        <td className="px-3 py-2.5">
+          <div className="text-xs text-neutral-300">{s.exchange ?? "—"}</div>
+          <div className="text-[11px] text-neutral-500">{s.country ?? "—"}</div>
+        </td>
+      ),
+    },
+    sector: {
+      th: <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Sector</th>,
+      td: (s) => <td className="px-3 py-2.5">{s.sector ? <Pill>{s.sector}</Pill> : <span className="text-neutral-600 text-xs">—</span>}</td>,
+    },
+    price: {
+      th: <th className="px-3 py-2 text-right text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Koers</th>,
+      td: (s) => <td className="px-3 py-2.5 text-right tabular font-mono text-neutral-200 text-xs">{fmtCurrency(s.last_close, s.currency)}</td>,
+    },
+    sparkline: {
+      th: <th className="px-3 py-2 text-center text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-20">Trend</th>,
+      td: (s) => (
+        <td className="px-3 py-2.5 text-center">
+          <TickerSparkline ticker={s.ticker} width={64} height={18} />
+        </td>
+      ),
+    },
+    yield: {
+      th: <SortHeader col="dividend_yield_pct" label="Div % bruto" />,
+      td: (s) => {
+        const highYield = (s.dividend_yield_pct ?? 0) >= 8;
+        return (
+          <td className="px-3 py-2.5 text-left tabular">
+            <span className={`font-semibold text-xs ${highYield ? "text-emerald-400" : "text-neutral-200"}`}>{fmtPct(s.dividend_yield_pct)}</span>
+          </td>
+        );
+      },
+    },
+    tax: {
+      th: <SortHeader col="tax_rate" label="Bronbel %" />,
+      td: (s) => {
+        const tax = dividendTax(s.country);
+        return (
+          <td className="px-3 py-2.5 text-left tabular text-xs">
+            {tax ? (
+              <span
+                title={tax.note}
+                className={
+                  tax.rate === 0 ? "text-emerald-400"
+                  : tax.rate <= 15 ? "text-neutral-200"
+                  : tax.rate <= 25 ? "text-yellow-400"
+                  : "text-orange-400"
+                }
+              >
+                {tax.rate}%
+              </span>
+            ) : (
+              <span className="text-neutral-600" title="Land onbekend of geen schatting beschikbaar">—</span>
+            )}
+          </td>
+        );
+      },
+    },
+    net_yield: {
+      th: <SortHeader col="net_yield_pct" label="Div % netto" />,
+      td: (s) => {
+        const tax = dividendTax(s.country);
+        const netYield = s.dividend_yield_pct != null && tax != null
+          ? s.dividend_yield_pct * (1 - tax.rate / 100)
+          : s.dividend_yield_pct;
+        return (
+          <td className="px-3 py-2.5 text-left tabular">
+            <span className={`text-xs ${netYield != null && netYield >= 6 ? "text-emerald-400 font-semibold" : "text-neutral-300"}`}>{fmtPct(netYield)}</span>
+          </td>
+        );
+      },
+    },
+    under5y: {
+      th: <SortHeader col="pct_under_5y_high" label="Val v 5j%" />,
+      td: (s) => {
+        const veryFallen = (s.pct_under_5y_high ?? 0) >= 60;
+        return (
+          <td className="px-3 py-2.5 text-left tabular">
+            <span className={`text-xs ${veryFallen ? "text-orange-400" : "text-neutral-300"}`}>{fmtPct(s.pct_under_5y_high)}</span>
+          </td>
+        );
+      },
+    },
+    max_gain: {
+      th: <SortHeader col="max_annual_gain_5y" label="Max jaar +" />,
+      td: (s) => <td className="px-3 py-2.5 text-left tabular text-xs text-neutral-300">{fmtPct(s.max_annual_gain_5y)}</td>,
+    },
+    growth_years: {
+      th: <SortHeader col="years_5pct_growth_5y" label="Groeijr" />,
+      td: (s) => (
+        <td className="px-3 py-2.5 text-left tabular text-xs">
+          <span className={s.years_5pct_growth_5y != null && s.years_5pct_growth_5y >= 2 ? "text-emerald-400" : "text-neutral-400"}>
+            {s.years_5pct_growth_5y ?? "—"}
+          </span>
+        </td>
+      ),
+    },
+    payout: {
+      th: <SortHeader col="payout_ratio" label="Payout" />,
+      td: (s) => (
+        <td className="px-3 py-2.5 text-left tabular text-xs">
+          <span className={
+            s.payout_ratio == null ? "text-neutral-500"
+            : s.payout_ratio > 1.0 ? "text-red-400"
+            : s.payout_ratio > 0.85 ? "text-orange-400"
+            : "text-neutral-300"
+          }>
+            {fmtPayout(s.payout_ratio)}
+          </span>
+        </td>
+      ),
+    },
+    cuts: {
+      th: <SortHeader col="dividend_cuts_5y" label="Cuts" />,
+      td: (s) => (
+        <td className="px-3 py-2.5 text-left tabular text-xs">
+          <span className={
+            (s.dividend_cuts_5y ?? 0) === 0 ? "text-emerald-400"
+            : (s.dividend_cuts_5y ?? 0) <= 1 ? "text-yellow-400"
+            : "text-red-400"
+          }>
+            {s.dividend_cuts_5y ?? "—"}
+          </span>
+        </td>
+      ),
+    },
+    risk: {
+      th: <SortHeader col="risk_label" label="Risico" />,
+      td: (s) => {
+        const riskCls = RISK_COLORS[s.risk_label ?? ""] ?? "text-neutral-400";
+        return (
+          <td className="px-3 py-2.5 text-left">
+            {s.risk_label ? (
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${riskCls}`}>{s.risk_label}</span>
+            ) : (
+              <span className="text-neutral-600 text-xs">—</span>
+            )}
+          </td>
+        );
+      },
+    },
+    meets: {
+      th: <th className="px-3 py-2 text-center text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">✓</th>,
+      td: (s) => (
+        <td className="px-3 py-2.5 text-center">
+          {s.meets_criteria ? <span className="text-emerald-400 text-sm">✓</span> : <span className="text-neutral-700 text-xs">·</span>}
+        </td>
+      ),
+    },
+    actions: {
+      th: <th className="px-3 py-2 text-center text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Acties</th>,
+      td: (s) => (
+        <td className="px-3 py-2.5 text-center">
+          <button
+            onClick={() => deleteRow(s.ticker, s.company)}
+            disabled={deletingTicker === s.ticker}
+            title="Verwijder uit Zwitserleven-tabel"
+            className="text-neutral-500 hover:text-red-400 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-red-400/10"
+          >
+            {deletingTicker === s.ticker ? "…" : "🗑"}
+          </button>
+        </td>
+      ),
+    },
+  };
+  // Jaar-kolommen — labels lopen mee met het huidige jaar.
+  yearColKeys.forEach((key, i) => {
+    colMap[key] = {
+      th: (
+        <th
+          className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide whitespace-nowrap"
+          title={`Dividendrendement berekend over jaar ${yearLabels[i]} (jaaruitkering ÷ slotkoers van dat jaar). '—' = geen dividend uitgekeerd in ${yearLabels[i]}.`}
+        >
+          Div {yearLabels[i]}
+        </th>
+      ),
+      td: (s) => (
+        <td className="px-3 py-2.5 text-left tabular text-xs text-neutral-300">
+          {s[yearKeys[i]] != null
+            ? `${(s[yearKeys[i]] as number).toFixed(1)}%`
+            : <span className="text-neutral-600" title={`Geen dividend uitgekeerd in ${yearLabels[i]}`}>—</span>}
+        </td>
+      ),
+    };
+  });
 
   return (
     <div className="space-y-6">
       {/* Uitleg */}
-      <Card className="p-4 border-emerald-500/30 bg-emerald-500/[0.04]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <span className="text-2xl">🌴</span>
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="zwitserleven" /></span>
           <div className="flex-1">
-            <div className="font-semibold text-emerald-300 mb-1">Zwitserleven</div>
+            <div className="font-semibold tab-accent-text mb-1">Zwitserleven</div>
             <p className="text-sm text-neutral-300 leading-relaxed">
               Fallen angels met dividendzekerheid — aandelen met een <strong>TTM-dividend ≥6,5%</strong>,
               die minstens <strong>50% onder hun 5-jaars-hoog</strong> noteren, én die in de afgelopen
@@ -358,7 +571,7 @@ export function ZwitserlevenView() {
 
       {/* Stats + scan-knoppen */}
       <div className="flex flex-wrap items-center gap-4">
-        <Stat label="Voldoen aan criteria" value={data?.meets_criteria_count ?? 0} />
+        <Stat label="Voldoen aan criteria" value={data?.meets_criteria_count ?? 0} icon={TAB_ICONS.zwitserleven} />
         <Stat label="Handmatig toegevoegd" value={data?.manual_count ?? 0} />
         <Stat
           label="Universum gescand"
@@ -431,33 +644,14 @@ export function ZwitserlevenView() {
             </button>
           );
         })}
-        <div className="relative ml-auto">
-          <Button size="sm" variant="secondary" onClick={() => setShowColPicker((v) => !v)}>
-            Kolommen ({visibleCols.size}/{COLUMNS_BASE.length})
-          </Button>
-          {showColPicker && (
-            <div className="absolute right-0 mt-1 z-20 bg-ink-1 border border-ink-5 rounded-md shadow-xl p-3 w-64 max-h-[400px] overflow-y-auto">
-              <div className="flex items-center justify-between mb-2 border-b border-ink-5 pb-2">
-                <span className="text-xs font-semibold text-neutral-300">Zichtbare kolommen</span>
-                <button onClick={resetCols} className="text-[10px] text-emerald-400 hover:underline">Reset</button>
-              </div>
-              {COLUMNS_BASE.map((c) => (
-                <label key={c.key} className="flex items-center gap-2 py-1 text-xs text-neutral-200 hover:bg-ink-2 px-1 rounded cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={visibleCols.has(c.key)}
-                    onChange={() => toggleCol(c.key)}
-                    className="accent-emerald-500"
-                  />
-                  {c.label}
-                </label>
-              ))}
-              <div className="mt-2 pt-2 border-t border-ink-5 text-right">
-                <button onClick={() => setShowColPicker(false)} className="text-[10px] text-neutral-400 hover:text-neutral-200">Sluiten</button>
-              </div>
-            </div>
-          )}
-        </div>
+        <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+        <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
+        <NotYetReviewedTile
+          tickers={(data?.stocks ?? []).map((s) => s.ticker)}
+          onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
+        />
+        <MarkAllSeenButton tickers={filtered.map((s) => s.ticker)} />
+        <ColumnPicker tabKey="zwitserleven" columns={COLUMNS_BASE} lockedKey="ticker" className="ml-auto" />
         {filtered.length > 0 && (
           <span className="text-xs text-neutral-500 self-center">{filtered.length} aandelen getoond</span>
         )}
@@ -491,228 +685,32 @@ export function ZwitserlevenView() {
             <div className="font-semibold text-sm text-emerald-300">
               🌴 Zwitserleven ranking
             </div>
-            <div className="text-xs text-neutral-500">klik kolomkop om te sorteren · gebruik 'Kolommen' om te verbergen</div>
+            <div className="text-xs text-neutral-500">klik kolomkop om te sorteren · gebruik 'Kolommen' om te verbergen en herordenen</div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[800px]">
               <thead className="border-b border-ink-5 bg-ink-2/40">
                 <tr>
-                  {isVis("idx") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>}
-                  {isVis("ticker") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Ticker</th>}
-                  {isVis("company") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Naam</th>}
-                  {isVis("exchange") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Beurs / Land</th>}
-                  {isVis("sector") && <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Sector</th>}
-                  {isVis("price") && <th className="px-3 py-2 text-right text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Koers</th>}
-                  <SortHeader col="dividend_yield_pct" label="Div % bruto" hidden={!isVis("yield")} />
-                  <SortHeader col="tax_rate" label="Bronbel %" hidden={!isVis("tax")} />
-                  <SortHeader col="net_yield_pct" label="Div % netto" hidden={!isVis("net_yield")} />
-                  <SortHeader col="pct_under_5y_high" label="Val v 5j%" hidden={!isVis("under5y")} />
-                  <SortHeader col="max_annual_gain_5y" label="Max jaar +" hidden={!isVis("max_gain")} />
-                  <SortHeader col="years_5pct_growth_5y" label="Groeijr" hidden={!isVis("growth_years")} />
-                  {yearLabels.map((y, i) => (
-                    isVis(yearColKeys[i]) && (
-                      <th key={y} className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide whitespace-nowrap" title={`Dividendrendement berekend over jaar ${y} (jaaruitkering ÷ slotkoers van dat jaar). '—' = geen dividend uitgekeerd in ${y}.`}>
-                        Div {y}
-                      </th>
-                    )
-                  ))}
-                  <SortHeader col="payout_ratio" label="Payout" hidden={!isVis("payout")} />
-                  <SortHeader col="dividend_cuts_5y" label="Cuts" hidden={!isVis("cuts")} />
-                  <SortHeader col="risk_label" label="Risico" hidden={!isVis("risk")} />
-                  {isVis("meets") && <th className="px-3 py-2 text-center text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">✓</th>}
-                  {isVis("actions") && <th className="px-3 py-2 text-center text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Acties</th>}
+                  <SeenHeader />
+                  <HeartHeader />
+                  <StarHeader />
+                  {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-5">
                 {filtered.map((s, idx) => {
-                  const gfUrl = googleFinanceUrl(s.ticker, s.exchange);
-                  const riskCls = RISK_COLORS[s.risk_label ?? ""] ?? "text-neutral-400";
-                  const highYield = (s.dividend_yield_pct ?? 0) >= 8;
-                  const veryFallen = (s.pct_under_5y_high ?? 0) >= 60;
-                  const tax = dividendTax(s.country);
-                  const netYield = s.dividend_yield_pct != null && tax != null
-                    ? s.dividend_yield_pct * (1 - tax.rate / 100)
-                    : s.dividend_yield_pct;
-
+                  const seen = marks.isSeen(s.ticker);
                   return (
                     <tr
                       key={s.ticker}
                       className={`hover:bg-ink-3/30 transition-colors ${
                         s.is_manual ? "bg-amber-500/[0.05]" : s.meets_criteria ? "bg-emerald-500/[0.03]" : ""
-                      }`}
+                      } ${seen ? "opacity-50" : ""}`}
                     >
-                      {isVis("idx") && <td className="px-3 py-2.5 text-neutral-600 tabular text-xs">{idx + 1}</td>}
-
-                      {isVis("ticker") && (
-                        <td className="px-3 py-2.5">
-                          <div className="flex items-center gap-1.5">
-                            <a
-                              href={gfUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-mono font-semibold text-emerald-400 hover:underline"
-                            >
-                              {s.ticker}
-                            </a>
-                            {s.is_manual && (
-                              <span title="Handmatig toegevoegd" className="text-[9px] uppercase font-semibold text-amber-400 bg-amber-400/15 px-1 rounded">handm.</span>
-                            )}
-                          </div>
-                        </td>
-                      )}
-
-                      {isVis("company") && (
-                        <td className="px-3 py-2.5">
-                          <div className="text-xs text-neutral-200 truncate max-w-[220px]" title={s.company ?? undefined}>
-                            {s.company ?? <span className="text-neutral-600">—</span>}
-                          </div>
-                        </td>
-                      )}
-
-                      {isVis("exchange") && (
-                        <td className="px-3 py-2.5">
-                          <div className="text-xs text-neutral-300">{s.exchange ?? "—"}</div>
-                          <div className="text-[11px] text-neutral-500">{s.country ?? "—"}</div>
-                        </td>
-                      )}
-
-                      {isVis("sector") && (
-                        <td className="px-3 py-2.5">
-                          {s.sector ? <Pill>{s.sector}</Pill> : <span className="text-neutral-600 text-xs">—</span>}
-                        </td>
-                      )}
-
-                      {isVis("price") && (
-                        <td className="px-3 py-2.5 text-right tabular font-mono text-neutral-200 text-xs">
-                          {fmtCurrency(s.last_close, s.currency)}
-                        </td>
-                      )}
-
-                      {isVis("yield") && (
-                        <td className="px-3 py-2.5 text-left tabular">
-                          <span className={`font-semibold text-xs ${highYield ? "text-emerald-400" : "text-neutral-200"}`}>
-                            {fmtPct(s.dividend_yield_pct)}
-                          </span>
-                        </td>
-                      )}
-
-                      {isVis("tax") && (
-                        <td className="px-3 py-2.5 text-left tabular text-xs">
-                          {tax ? (
-                            <span
-                              title={tax.note}
-                              className={
-                                tax.rate === 0 ? "text-emerald-400"
-                                : tax.rate <= 15 ? "text-neutral-200"
-                                : tax.rate <= 25 ? "text-yellow-400"
-                                : "text-orange-400"
-                              }
-                            >
-                              {tax.rate}%
-                            </span>
-                          ) : (
-                            <span className="text-neutral-600" title="Land onbekend of geen schatting beschikbaar">—</span>
-                          )}
-                        </td>
-                      )}
-
-                      {isVis("net_yield") && (
-                        <td className="px-3 py-2.5 text-left tabular">
-                          <span className={`text-xs ${netYield != null && netYield >= 6 ? "text-emerald-400 font-semibold" : "text-neutral-300"}`}>
-                            {fmtPct(netYield)}
-                          </span>
-                        </td>
-                      )}
-
-                      {isVis("under5y") && (
-                        <td className="px-3 py-2.5 text-left tabular">
-                          <span className={`text-xs ${veryFallen ? "text-orange-400" : "text-neutral-300"}`}>
-                            {fmtPct(s.pct_under_5y_high)}
-                          </span>
-                        </td>
-                      )}
-
-                      {isVis("max_gain") && (
-                        <td className="px-3 py-2.5 text-left tabular text-xs text-neutral-300">
-                          {fmtPct(s.max_annual_gain_5y)}
-                        </td>
-                      )}
-
-                      {isVis("growth_years") && (
-                        <td className="px-3 py-2.5 text-left tabular text-xs">
-                          <span className={s.years_5pct_growth_5y != null && s.years_5pct_growth_5y >= 2 ? "text-emerald-400" : "text-neutral-400"}>
-                            {s.years_5pct_growth_5y ?? "—"}
-                          </span>
-                        </td>
-                      )}
-
-                      {yearKeys.map((key, i) => (
-                        isVis(yearColKeys[i]) && (
-                          <td key={key} className="px-3 py-2.5 text-left tabular text-xs text-neutral-300">
-                            {s[key] != null
-                              ? `${(s[key] as number).toFixed(1)}%`
-                              : <span className="text-neutral-600" title={`Geen dividend uitgekeerd in ${yearLabels[i]}`}>—</span>}
-                          </td>
-                        )
-                      ))}
-
-                      {isVis("payout") && (
-                        <td className="px-3 py-2.5 text-left tabular text-xs">
-                          <span className={
-                            s.payout_ratio == null ? "text-neutral-500"
-                            : s.payout_ratio > 1.0 ? "text-red-400"
-                            : s.payout_ratio > 0.85 ? "text-orange-400"
-                            : "text-neutral-300"
-                          }>
-                            {fmtPayout(s.payout_ratio)}
-                          </span>
-                        </td>
-                      )}
-
-                      {isVis("cuts") && (
-                        <td className="px-3 py-2.5 text-left tabular text-xs">
-                          <span className={
-                            (s.dividend_cuts_5y ?? 0) === 0 ? "text-emerald-400"
-                            : (s.dividend_cuts_5y ?? 0) <= 1 ? "text-yellow-400"
-                            : "text-red-400"
-                          }>
-                            {s.dividend_cuts_5y ?? "—"}
-                          </span>
-                        </td>
-                      )}
-
-                      {isVis("risk") && (
-                        <td className="px-3 py-2.5 text-left">
-                          {s.risk_label ? (
-                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${riskCls}`}>
-                              {s.risk_label}
-                            </span>
-                          ) : (
-                            <span className="text-neutral-600 text-xs">—</span>
-                          )}
-                        </td>
-                      )}
-
-                      {isVis("meets") && (
-                        <td className="px-3 py-2.5 text-center">
-                          {s.meets_criteria
-                            ? <span className="text-emerald-400 text-sm">✓</span>
-                            : <span className="text-neutral-700 text-xs">·</span>}
-                        </td>
-                      )}
-
-                      {isVis("actions") && (
-                        <td className="px-3 py-2.5 text-center">
-                          <button
-                            onClick={() => deleteRow(s.ticker, s.company)}
-                            disabled={deletingTicker === s.ticker}
-                            title="Verwijder uit Zwitserleven-tabel"
-                            className="text-neutral-500 hover:text-red-400 disabled:opacity-30 transition-colors px-1.5 py-0.5 rounded hover:bg-red-400/10"
-                          >
-                            {deletingTicker === s.ticker ? "…" : "🗑"}
-                          </button>
-                        </td>
-                      )}
+                      <SeenCell ticker={s.ticker} />
+                      <HeartCell ticker={s.ticker} />
+                      <StarCell ticker={s.ticker} />
+                      {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(s, idx)}</Fragment>)}
                     </tr>
                   );
                 })}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchSettings, fetchUiSettings, saveSettings, saveUiSettings, unbenchAll, getToken } from "../api";
+import { fetchSettings, fetchUiSettings, saveSettings, saveUiSettings, unbenchAll, getToken, runDataExport, downloadDataExport } from "../api";
 import { DEFAULT_TABS, type Tab, type TabDef } from "../tabsConfig";
 import type { Settings, Severity, Dashboard } from "../types";
 import {
@@ -203,7 +203,73 @@ export function SettingsView({ data }: { data?: Dashboard }) {
 
       <TabsCustomizerCard />
 
+      <DataExportCard />
+
       {data?.poll_status && <ScanRulesCard data={data} />}
+    </div>
+  );
+}
+
+// Volledige data-export — kennisbehoud. Wekelijks automatisch; hier handmatig
+// te draaien of te downloaden.
+function DataExportCard() {
+  const [busy, setBusy] = useState<"export" | "download" | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const isAdmin = !!getToken();
+
+  async function runExport() {
+    setBusy("export"); setErr(null); setMsg(null);
+    try {
+      const r = await runDataExport();
+      setMsg(`Klaar — ${r.total_rows.toLocaleString("nl-NL")} rijen geëxporteerd${r.github_committed ? " en naar de Git-repo gecommit" : ""}.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function download() {
+    setBusy("download"); setErr(null); setMsg(null);
+    try {
+      await downloadDataExport();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <SectionHeader
+        eyebrow="Kennisbehoud"
+        title="Volledige data-export"
+        subtitle="Alle opgebouwde data + uitleg, wekelijks automatisch bewaard."
+      />
+      <Card className="p-4 space-y-3 text-sm">
+        <p className="text-neutral-300 leading-relaxed">
+          Elke maandag wordt automatisch een volledige export gemaakt van alle
+          waardevolle data — de watchlist, alle strategieën met posities, de
+          single portfolio, signalen, catalysts, scores en kennis-exports —
+          inclusief een uitleg per tabel. De export wordt naar de Git-repo
+          gecommit (<code className="text-neutral-400">docs/data-export/</code>),
+          die los staat van deze site. Zo blijft alle kennis behouden, ook als
+          de website ooit verdwijnt.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="primary" onClick={download} disabled={busy !== null}>
+            {busy === "download" ? "Bezig…" : "↓ Download laatste export"}
+          </Button>
+          {isAdmin && (
+            <Button size="sm" onClick={runExport} disabled={busy !== null}>
+              {busy === "export" ? "Bezig… (~1 min)" : "Export nu"}
+            </Button>
+          )}
+        </div>
+        {msg && <p className="text-fog-lime text-xs">{msg}</p>}
+        {err && <p className="text-fog-loss text-xs">{err}</p>}
+      </Card>
     </div>
   );
 }

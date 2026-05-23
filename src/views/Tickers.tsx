@@ -10,6 +10,7 @@ import {
   type TickerInput,
 } from "../api";
 import { TickerDetailsModal } from "./TickerDetailsModal";
+import { PriceChartModal } from "./PriceChartModal";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
   Card,
@@ -22,6 +23,19 @@ import {
   SectionHeader,
   InlineConfirm,
 } from "../components/ui";
+import { useMarks } from "../hooks/useMarks";
+import {
+  HeartCell,
+  HeartHeader,
+  SeenCell,
+  SeenHeader,
+  ShowSeenToggle,
+  MarkAllSeenButton,
+  HideFavoritesToggle,
+  NotYetReviewedTile,
+  StarCell,
+  StarHeader,
+} from "../components/MarkCells";
 
 const EXCHANGE_SUFFIXES = [
   { value: "", label: "Geen (US)" },
@@ -241,6 +255,7 @@ export function TickersView({
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMode, setBatchMode] = useState<"quick" | "table">("quick");
   const [editing, setEditing] = useState<CardType | null>(null);
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
   const [singleOpen, setSingleOpen] = useState(false);
 
   const [rows, setRows] = useState<PreviewRow[]>([]);
@@ -251,6 +266,9 @@ export function TickersView({
   const extrasRef = useRef<Map<string, Partial<TickerInput>>>(new Map());
 
   // Watchlist cleanup state
+  const [showSeen, setShowSeen] = useState(false);
+  const [hideFavorites, setHideFavorites] = useState(false);
+  const marks = useMarks();
   const [wlSelected, setWlSelected] = useState<Set<string>>(new Set());
   const [wlUnrecognized, setWlUnrecognized] = useState<Set<string> | null>(null);
   const [wlValidating, setWlValidating] = useState(false);
@@ -276,6 +294,12 @@ export function TickersView({
   const wlFiltered = useMemo(() => {
     const q = wlQuery.trim().toLowerCase();
     let rows = data.cards;
+    if (!showSeen) {
+      rows = rows.filter((c) => !marks.isSeen(c.ticker));
+    }
+    if (hideFavorites) {
+      rows = rows.filter((c) => !marks.isFavorite(c.ticker));
+    }
     if (scanFilter.size > 0) {
       rows = rows.filter((c) =>
         (scanFilter.has("hikkertje")    && c.is_hikkertje    === true) ||
@@ -291,7 +315,7 @@ export function TickersView({
       );
     }
     return rows;
-  }, [data.cards, wlQuery, scanFilter]);
+  }, [data.cards, wlQuery, scanFilter, showSeen, hideFavorites, marks]);
 
   // Reset naar pagina 0 als de filter de huidige pagina overbodig maakt.
   useEffect(() => {
@@ -700,6 +724,14 @@ export function TickersView({
           card={editing}
           onClose={() => setEditing(null)}
           onSaved={onRefresh}
+        />
+      )}
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
         />
       )}
 
@@ -1212,6 +1244,13 @@ export function TickersView({
                 onChange={(e) => setWlQuery(e.target.value)}
                 className="w-48 sm:w-64 h-8 text-xs"
               />
+              <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+              <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
+              <NotYetReviewedTile
+                tickers={data.cards.map((c) => c.ticker)}
+                onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
+              />
+              <MarkAllSeenButton tickers={wlFiltered.map((c) => c.ticker)} />
             </div>
           }
         />
@@ -1336,6 +1375,9 @@ export function TickersView({
             <table className="w-full text-sm">
               <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/40">
                 <tr>
+                  <SeenHeader />
+                  <HeartHeader />
+                  <StarHeader />
                   <th className="p-3 w-8">
                     <input
                       type="checkbox"
@@ -1381,6 +1423,7 @@ export function TickersView({
                   const isSelected = wlSelected.has(c.ticker);
                   const isUnrecognized = wlUnrecognized?.has(c.ticker) ?? false;
                   const isDuplicate = wlDuplicates.has(c.ticker);
+                  const seen = marks.isSeen(c.ticker);
                   const accent = isSelected
                     ? "bg-fog-pink/[0.06]"
                     : isUnrecognized
@@ -1391,8 +1434,11 @@ export function TickersView({
                   return (
                     <tr
                       key={c.ticker}
-                      className={`border-t border-ink-5 hover:bg-ink-3/40 transition ${accent}`}
+                      className={`border-t border-ink-5 hover:bg-ink-3/40 transition ${accent} ${seen ? "opacity-50" : ""}`}
                     >
+                      <SeenCell ticker={c.ticker} />
+                      <HeartCell ticker={c.ticker} />
+                      <StarCell ticker={c.ticker} />
                       <td className="p-3 text-center">
                         <input
                           type="checkbox"
@@ -1410,7 +1456,7 @@ export function TickersView({
                           href={googleFinanceUrl(c.ticker, c.exchange)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-fog-pink hover:underline"
+                          className="tab-accent-text hover:underline"
                         >
                           {c.ticker}
                         </a>
@@ -1429,7 +1475,16 @@ export function TickersView({
                           />
                         )}
                       </td>
-                      <td className="p-3 text-neutral-300">{c.company}</td>
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          onClick={() => setChartFor({ ticker: c.ticker, company: c.company, exchange: c.exchange ?? null })}
+                          className="text-neutral-300 hover:text-neutral-100 hover:underline text-left transition-colors"
+                          title={`${c.company} — klik voor koersgrafiek`}
+                        >
+                          {c.company}
+                        </button>
+                      </td>
                       <td className="p-3 tabular text-neutral-200">
                         {c.goud_score ?? "—"}
                       </td>
@@ -1478,7 +1533,7 @@ export function TickersView({
                 })}
                 {wlPageRows.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="p-8 text-center text-neutral-500 text-sm">
+                    <td colSpan={10} className="p-8 text-center text-neutral-500 text-sm">
                       {wlQuery ? `Geen tickers gevonden voor "${wlQuery}".` : "Watchlist is leeg."}
                     </td>
                   </tr>

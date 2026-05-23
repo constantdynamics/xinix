@@ -67,8 +67,9 @@ const LOOSE_MAX_DAYS  = 730;    // was 365 — verlengd naar 2 jaar
 const LOOSE_MIN_MULT  = 40;     // verlaagd van 50 → 40 op gebruikersverzoek
 const LOOSE_MAX_CANDIDATES = 20;
 
-const BATCH_SIZE = 20;          // verlaagd want 730d venster (2 jaar) verdubbelt inner loop tov 365d
-const RESCAN_DAYS = 90;
+const BATCH_SIZE = 12;
+const COOLDOWN_DAYS = 180;      // niet-feniks: een half jaar niet opnieuw scannen
+const COOLDOWN_HOT_DAYS = 30;   // feniks-aandelen: ~maandelijks, krijgen voorrang
 const BUDGET_MS = 100_000;
 const SLEEP_MS = 400;
 
@@ -356,17 +357,20 @@ Deno.serve(runBackground("compute-phoenix", async () => {
   const sb = getServiceClient();
   const startMs = Date.now();
 
-  const cutoff = new Date(Date.now() - RESCAN_DAYS * 24 * 3600 * 1000).toISOString();
+  // Selecteer tickers waarvan de cooldown is verstreken. Feniks-aandelen
+  // krijgen voorrang in de batch (is_phoenix desc) en een kortere cooldown.
+  const nowIso = new Date().toISOString();
   const { data: tickers, error: fetchError } = await sb
     .from("signal_tickers")
-    .select("ticker")
+    .select("ticker, is_phoenix")
     .eq("active", true)
-    .or(`is_phoenix_at.is.null,is_phoenix_at.lt.${cutoff}`)
-    .order("is_phoenix_at", { ascending: true, nullsFirst: true })
+    .or(`phoenix_next_scan_at.is.null,phoenix_next_scan_at.lte.${nowIso}`)
+    .order("is_phoenix", { ascending: false })
+    .order("phoenix_next_scan_at", { ascending: true, nullsFirst: true })
     .limit(BATCH_SIZE);
 
   if (fetchError) throw new Error(fetchError.message);
-  const batch = (tickers ?? []) as { ticker: string }[];
+  const batch = (tickers ?? []) as { ticker: string; is_phoenix: boolean }[];
 
   let checked = 0, phoenixFound = 0, errors = 0, dilutedSkipped = 0, splitSkipped = 0, deactivated = 0;
   const errMsgs: string[] = [];
@@ -451,9 +455,11 @@ Deno.serve(runBackground("compute-phoenix", async () => {
       if (errMsgs.length < 5) errMsgs.push(`${row.ticker}: ${e instanceof Error ? e.message : String(e)}`);
     }
 
+    const cooldownDays = isPhoenix ? COOLDOWN_HOT_DAYS : COOLDOWN_DAYS;
     const updateFields: Record<string, unknown> = {
       is_phoenix: isPhoenix,
       is_phoenix_at: new Date().toISOString(),
+      phoenix_next_scan_at: new Date(Date.now() + cooldownDays * 24 * 3600 * 1000).toISOString(),
       phoenix_50x_date: last50xDate,
       phoenix_incident_count: isPhoenix ? incidentCount : null,
       phoenix_median_date: medianPeakDate,

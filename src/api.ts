@@ -33,10 +33,29 @@ function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-export async function fetchDashboard(): Promise<Dashboard> {
-  const res = await fetch(apiUrl("/api/dashboard"));
+// `fresh` omzeilt de browser-cache (voor de handmatige "vernieuw"-knop);
+// een gewone pagina-load gebruikt de cache zodat herladen snel is.
+export async function fetchDashboard(fresh = false): Promise<Dashboard> {
+  const res = await fetch(apiUrl("/api/dashboard"), fresh ? { cache: "reload" } : undefined);
   if (!res.ok) throw new Error(`dashboard ${res.status}`);
   return (await res.json()) as Dashboard;
+}
+
+export type PriceRange = "1d" | "5d" | "1mo" | "1y" | "5y" | "max";
+export interface PricePoint { t: number; c: number; }
+export interface PriceHistory {
+  ticker: string;
+  range: PriceRange;
+  currency: string | null;
+  exchange: string | null;
+  previous_close: number | null;
+  market_price: number | null;
+  points: PricePoint[];
+}
+export async function fetchPriceHistory(ticker: string, range: PriceRange): Promise<PriceHistory> {
+  const res = await fetch(apiUrl(`/api/price-history?ticker=${encodeURIComponent(ticker)}&range=${range}`));
+  if (!res.ok) throw new Error(`price-history ${res.status}`);
+  return (await res.json()) as PriceHistory;
 }
 
 export async function fetchSettings(): Promise<Settings> {
@@ -275,6 +294,28 @@ export interface ScanRun {
   metrics: Record<string, unknown> | null;
 }
 
+export interface PoefieRankEntry {
+  ticker: string;
+  company: string | null;
+  sector: string | null;
+  medal_gold: number | null;
+  medal_silver: number | null;
+  medal_bronze: number | null;
+  buy_limit: number | null;
+  last_close: number | null;
+  exchange: string | null;
+  above_limit_pct: number | null;
+  poefie_last_date: string | null;
+  poefie_incident_count: number | null;
+  poefie_median_date: string | null;
+  poefie_max_growth_pct: number | null;
+  poefie_days_to_peak: number | null;
+  poefie_count_6m: number | null;
+  poefie_count_1y: number | null;
+  poefie_count_2y: number | null;
+  poefie_count_5y: number | null;
+}
+
 export interface HikkertjeRankEntry {
   ticker: string;
   company: string | null;
@@ -298,6 +339,9 @@ export interface ScanResults {
   hikkertje_ranking: HikkertjeRankEntry[];
   hikkertje_count: number;
   hikkertje_unscanned: number;
+  poefie_ranking: PoefieRankEntry[];
+  poefie_count: number;
+  poefie_unscanned: number;
 }
 
 export async function fetchScanResults(): Promise<ScanResults> {
@@ -378,11 +422,18 @@ export async function removeZwitserlevenStock(ticker: string): Promise<{ ok: boo
 }
 
 // ── UI settings (tab-aanpassingen) ───────────────────────────────────────────
+// Per-tab kolominstelling: volgorde van kolom-keys + welke verborgen zijn.
+export interface TableColumnPref {
+  order: string[];
+  hidden: string[];
+}
+
 export interface UiSettings {
   id: number;
   tab_order: string[];
   tab_labels: Record<string, string>;
   tab_hidden: string[];
+  table_columns: Record<string, TableColumnPref>;
   updated_at: string;
 }
 
@@ -498,7 +549,7 @@ export async function fetchXinixPortfolio(): Promise<XinixPortfolio> {
   return (await res.json()) as XinixPortfolio;
 }
 
-// ── Xinix 200-strategie simulatie ──
+// ── Xinix strategie-simulatie (Potje) ──
 export interface SimPosDetail {
   ticker: string;
   entry_signal_types: string[];
@@ -669,4 +720,122 @@ export async function triggerEvolve(force = false): Promise<unknown> {
   const res = await fetch(apiUrl("/api/xinix-evolve-background"), { method: "POST", headers, body: "{}" });
   if (!res.ok) throw new Error(`evolve ${res.status}`);
   return res.json();
+}
+
+// Markeringen per ticker: favoriet (hartje) en gezien (verrekijker).
+// Bewaard in de DB (xinix_favorites / xinix_seen) zodat ze cross-device zijn.
+export type MarkKind = "favorite" | "seen";
+
+export interface MarksResponse {
+  favorites: string[];
+  seen: string[];
+  ratings?: Record<string, number>;
+}
+
+export async function fetchMarks(): Promise<MarksResponse> {
+  const res = await fetch(apiUrl("/api/marks"), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`marks ${res.status}`);
+  return (await res.json()) as MarksResponse;
+}
+
+export async function addMark(kind: MarkKind, ticker: string): Promise<void> {
+  const res = await fetch(apiUrl("/api/marks"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kind, ticker }),
+  });
+  if (!res.ok) throw new Error(`add mark ${res.status}: ${await res.text()}`);
+}
+
+export async function removeMark(kind: MarkKind, ticker: string): Promise<void> {
+  const res = await fetch(apiUrl("/api/marks"), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kind, ticker }),
+  });
+  if (!res.ok) throw new Error(`remove mark ${res.status}: ${await res.text()}`);
+}
+
+export async function addMarksBulk(kind: MarkKind, tickers: string[]): Promise<void> {
+  if (tickers.length === 0) return;
+  const res = await fetch(apiUrl("/api/marks"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kind, tickers }),
+  });
+  if (!res.ok) throw new Error(`bulk add mark ${res.status}: ${await res.text()}`);
+}
+
+// ── Apparaat-koppeling ───────────────────────────────────────────────
+// Favorieten/markeringen staan server-side, maar een apparaat ziet ze
+// pas na invoer van het admin-token. Een koppelcode laat de telefoon
+// het token ophalen zonder het over te typen.
+export interface PairingCode { code: string; expires_at: string; ttl_minutes: number }
+
+// Laptop-kant: genereer een kortlevende koppelcode (vereist admin-token).
+export async function createPairingCode(): Promise<PairingCode> {
+  const res = await fetch(apiUrl("/api/pair"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ action: "create" }),
+  });
+  if (!res.ok) throw new Error(`koppelcode aanmaken mislukt (${res.status})`);
+  return (await res.json()) as PairingCode;
+}
+
+// Telefoon-kant: wissel een koppelcode in voor het admin-token.
+export async function redeemPairingCode(code: string): Promise<string> {
+  const res = await fetch(apiUrl("/api/pair"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "redeem", code }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      res.status === 404 || res.status === 400
+        ? "Code ongeldig of verlopen"
+        : `koppelen mislukt (${res.status})`,
+    );
+  }
+  return ((await res.json()) as { token: string }).token;
+}
+
+export async function setFavoriteRating(ticker: string, rating: number | null): Promise<void> {
+  const res = await fetch(apiUrl("/api/marks"), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kind: "favorite", ticker, rating }),
+  });
+  if (!res.ok) throw new Error(`rate favorite ${res.status}: ${await res.text()}`);
+}
+
+// ── Volledige data-export ────────────────────────────────────────────
+// Wekelijkse, zelf-beschrijvende export van alle waardevolle data — voor
+// kennisbehoud als de site ooit verdwijnt.
+export interface DataExportResult { ok: boolean; total_rows: number; github_committed: boolean }
+
+// Maak nu een nieuwe export (vereist admin-token).
+export async function runDataExport(): Promise<DataExportResult> {
+  const res = await fetch(apiUrl("/api/xinix-full-export"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+  });
+  if (!res.ok) throw new Error(`export starten mislukt (${res.status})`);
+  return (await res.json()) as DataExportResult;
+}
+
+// Download de laatste export als JSON-bestand.
+export async function downloadDataExport(): Promise<void> {
+  const res = await fetch(apiUrl("/api/xinix-full-export"), { headers: authHeaders() });
+  if (res.status === 404) throw new Error("Er is nog geen export beschikbaar — klik eerst op 'Export nu'.");
+  if (!res.ok) throw new Error(`export ophalen mislukt (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `xinix-data-export-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

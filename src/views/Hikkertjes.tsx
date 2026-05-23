@@ -7,6 +7,11 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Pill, Stat } from "../components/ui";
+import { TickerSparkline } from "../components/TickerSparkline";
+import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
+import { EditableLimit } from "../components/EditableLimit";
+import { useMarks } from "../hooks/useMarks";
+import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile, StarRating } from "../components/MarkCells";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -36,6 +41,9 @@ export function HikkertjesView() {
   const [fullScanRunning, setFullScanRunning] = useState(false);
   const [fullScanBatch, setFullScanBatch] = useState(0);
   const fullScanStopRef = useRef(false);
+  const [showSeen, setShowSeen] = useState(false);
+  const [hideFavorites, setHideFavorites] = useState(false);
+  const marks = useMarks();
 
   async function refreshData() {
     const r = await fetchScanResults();
@@ -104,11 +112,11 @@ export function HikkertjesView() {
   return (
     <div className="space-y-6">
       {/* Uitleg */}
-      <Card className="p-4 border-yellow-500/30 bg-yellow-500/[0.04]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <span className="text-2xl">⚡</span>
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="hikkertjes" /></span>
           <div className="flex-1">
-            <div className="font-semibold text-yellow-400 mb-1">Hikkertjes</div>
+            <div className="font-semibold tab-accent-text mb-1">Hikkertjes</div>
             <p className="text-sm text-neutral-300 leading-relaxed">
               Aandelen die in het afgelopen jaar minimaal <strong>2×</strong> op één dag <strong>≥55%</strong> gestegen zijn
               en die stijging minimaal <strong>3 handelsdagen</strong> vasthielden. Dit patroon duidt op extreme
@@ -120,7 +128,7 @@ export function HikkertjesView() {
 
       {/* Stats + trigger */}
       <div className="flex flex-wrap items-center gap-4">
-        <Stat label="Hikkertjes gevonden" value={hikkertjeCount} />
+        <Stat label="Hikkertjes gevonden" value={hikkertjeCount} icon={TAB_ICONS.hikkertjes} />
         <Stat
           label="Op/onder limiet"
           value={ranking.filter((r) => r.above_limit_pct != null && r.above_limit_pct <= 0).length}
@@ -171,6 +179,13 @@ export function HikkertjesView() {
             </button>
           );
         })}
+        <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+        <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
+        <NotYetReviewedTile
+          tickers={ranking.map((h) => h.ticker)}
+          onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
+        />
+        <MarkAllSeenButton tickers={ranking.map((h) => h.ticker)} />
         <div className="ml-auto flex items-center gap-1 text-xs">
           <span className="text-neutral-500">Sorteer:</span>
           <button
@@ -197,6 +212,8 @@ export function HikkertjesView() {
         </Card>
       ) : (() => {
           const filtered = ranking.filter((h) => {
+            if (!showSeen && marks.isSeen(h.ticker)) return false;
+            if (hideFavorites && marks.isFavorite(h.ticker)) return false;
             if (limitFilter === "below") return h.above_limit_pct != null && h.above_limit_pct <= 0;
             if (limitFilter === "near") return h.above_limit_pct != null && h.above_limit_pct <= 10;
             return true;
@@ -224,11 +241,15 @@ export function HikkertjesView() {
               const belowLimit = h.above_limit_pct != null && h.above_limit_pct <= 0;
               const nearLimit = h.above_limit_pct != null && h.above_limit_pct > 0 && h.above_limit_pct <= 10;
 
+              const seen = marks.isSeen(h.ticker);
               return (
                 <div
                   key={h.ticker}
-                  className={`px-4 py-3 flex items-center gap-3 text-sm ${belowLimit ? "bg-yellow-500/[0.06]" : ""}`}
+                  className={`px-4 py-3 flex items-center gap-3 text-sm ${belowLimit ? "bg-yellow-500/[0.06]" : ""} ${seen ? "opacity-50" : ""}`}
                 >
+                  <SeenInline ticker={h.ticker} />
+                  <HeartInline ticker={h.ticker} />
+                  <StarRating ticker={h.ticker} />
                   <span className="text-neutral-600 w-6 text-right tabular shrink-0">{idx + 1}</span>
 
                   <div className="w-24 shrink-0">
@@ -236,7 +257,7 @@ export function HikkertjesView() {
                       href={gfUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="font-mono font-semibold text-yellow-400 hover:underline"
+                      className="font-mono font-semibold tab-accent-text hover:underline"
                     >
                       {h.ticker}
                     </a>
@@ -252,6 +273,11 @@ export function HikkertjesView() {
                         <Pill>{h.sector}</Pill>
                       </div>
                     )}
+                  </div>
+
+                  {/* Koerstrend sparkline */}
+                  <div className="shrink-0 hidden sm:block">
+                    <TickerSparkline ticker={h.ticker} width={64} height={20} />
                   </div>
 
                   {/* Spikes */}
@@ -270,19 +296,13 @@ export function HikkertjesView() {
 
                   {/* Limiet + afstand */}
                   <div className="shrink-0 text-right w-20">
-                    {h.buy_limit != null ? (
-                      <>
-                        <div className="tabular font-mono text-neutral-400">${fmtPrice(h.buy_limit)}</div>
-                        {h.above_limit_pct != null && (
-                          <div className={`text-[10px] tabular font-semibold ${
-                            belowLimit ? "text-yellow-400" : nearLimit ? "text-yellow-600" : "text-neutral-500"
-                          }`}>
-                            {h.above_limit_pct >= 0 ? "+" : ""}{h.above_limit_pct.toFixed(1)}%
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="text-neutral-600 text-xs">geen limiet</div>
+                    <EditableLimit ticker={h.ticker} buyLimit={h.buy_limit} />
+                    {h.buy_limit != null && h.above_limit_pct != null && (
+                      <div className={`text-[10px] tabular font-semibold ${
+                        belowLimit ? "text-yellow-400" : nearLimit ? "text-yellow-600" : "text-neutral-500"
+                      }`}>
+                        {h.above_limit_pct >= 0 ? "+" : ""}{h.above_limit_pct.toFixed(1)}%
+                      </div>
                     )}
                   </div>
                 </div>

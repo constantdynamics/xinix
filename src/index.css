@@ -21,28 +21,34 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Defog-style wordmark — italic gradient (regenboog: pink -> red ->
- * orange -> yellow -> lime). text-shadow blijft pink-glow voor brand
- * herkenbaarheid. */
+/* Wordmark — Inter 900 upright, strak negatieve spatiëring. */
 .wordmark {
   font-family: "Inter", sans-serif;
-  font-style: italic;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: -0.06em;
   background: linear-gradient(
     90deg,
-    #ff1f8f 0%,
-    #ff3a6e 18%,
-    #ff5a3a 36%,
-    #ff8c00 54%,
-    #ffd400 72%,
-    #a7ff1f 100%
+    #6633ff 0%,
+    #0099ff 40%,
+    #00ddcc 70%,
+    #00ff88 100%
   );
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  filter: drop-shadow(0 0 24px rgba(255, 31, 143, 0.25));
+  filter: drop-shadow(0 0 24px rgba(102, 51, 255, 0.25));
+}
+
+/* Per-tab accentkleur. App.tsx zet --tab-accent op <main>; views gebruiken
+   deze utilities zodat de kleur van het tabblad terugkomt op de pagina. */
+.tab-accent-text {
+  color: var(--tab-accent, #ff1f8f);
+}
+.tab-accent-panel {
+  border-color: color-mix(in srgb, var(--tab-accent, #ff1f8f) 38%, transparent);
+  background-color: color-mix(in srgb, var(--tab-accent, #ff1f8f) 7%, transparent);
 }
 
 /* Subtle scrollbar voor donkere thema */

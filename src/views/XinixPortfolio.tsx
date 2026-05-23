@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   fetchXinixPortfolio,
   fetchSimResults,
@@ -31,6 +31,23 @@ import {
   Sparkline,
   Stat,
 } from "../components/ui";
+import { useMarks } from "../hooks/useMarks";
+import { EditableLimit } from "../components/EditableLimit";
+import { TickerSparkline } from "../components/TickerSparkline";
+import {
+  HeartCell,
+  HeartHeader,
+  SeenCell,
+  SeenHeader,
+  ShowSeenToggle,
+  MarkAllSeenButton,
+  HideFavoritesToggle,
+  NotYetReviewedTile,
+  StarCell,
+  StarHeader,
+} from "../components/MarkCells";
+import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
+import { GradientTabIcon } from "../tabIcons";
 
 const SIGNAL_LABELS: Record<string, string> = {
   near_90d_low: "Bij 90d-bodem",
@@ -61,8 +78,11 @@ function signalLabel(t: string): string {
 }
 
 function fmtUsd(v: number, decimals = 0): string {
-  const sign = v < 0 ? "-" : "";
-  const abs = Math.abs(v);
+  // Rond eerst af en bepaal pas dán het teken — anders toont bv. -0,3 als "-$0".
+  const factor = 10 ** decimals;
+  const rounded = Math.round(v * factor) / factor;
+  const sign = rounded < 0 ? "-" : "";
+  const abs = Math.abs(rounded);
   return `${sign}$${abs.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 }
 function fmtPct(v: number, decimals = 1): string {
@@ -108,7 +128,7 @@ export function XinixPortfolioView() {
     <div className="space-y-6">
       {/* Tab-switcher: Portfolio vs Simulatie */}
       <div className="flex gap-0 border-b border-ink-5">
-        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 200 Strategieën"], ["families", "🧬 Families"]] as const).map(([key, label]) => (
+        {([["portfolio", "📈 Basisportefeuille"], ["sim", "🔬 Potje"], ["families", "🧬 Families"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMainTab(key)}
@@ -128,11 +148,11 @@ export function XinixPortfolioView() {
       {mainTab === "portfolio" && <div className="space-y-8">
 
       {/* Intro */}
-      <Card className="p-4 border-fog-pink/30 bg-fog-pink/[0.04]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <Dot tone="pink" pulse />
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="xinix" /></span>
           <div className="flex-1">
-            <div className="font-bold text-neutral-100">Xinix — fictieve $10K portefeuille</div>
+            <div className="font-bold text-base tab-accent-text">Xinix — fictieve $10K portefeuille</div>
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Xinix bestuurt zelf een papieren portefeuille van $10.000 op basis van scores + signalen.
               Strategie: max 8 posities van ~$1200, vast tijdvenster van 60 dagen, stop-loss op -15%.
@@ -268,7 +288,7 @@ function OpenPositionsSection({ positions }: { positions: XinixOpenPosition[] })
                         href={googleFinanceUrl(p.ticker, p.exchange)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-fog-pink hover:underline"
+                        className="tab-accent-text hover:underline"
                       >
                         {p.ticker}
                       </a>
@@ -366,7 +386,7 @@ function ClosedPositionsSection({ positions }: { positions: XinixClosedPosition[
                   return (
                     <tr key={p.id} className="border-t border-ink-5 hover:bg-ink-3/40">
                       <td className="p-3 font-bold whitespace-nowrap">
-                        <span className="text-fog-pink">{p.ticker}</span>
+                        <span className="tab-accent-text">{p.ticker}</span>
                         <div className="text-[10px] font-normal text-neutral-500 truncate max-w-[140px]">
                           {p.company ?? ""}
                         </div>
@@ -711,7 +731,7 @@ function stratUniqueBullets(s: SimStrategy, all: SimStrategy[]): [string, string
   candidates.sort((a, b) => b.score - a.score);
   const fallbacks = [
     `Behoort tot groep "${groupLabel(s.grp)}" — geoptimaliseerd voor die specifieke configuratie-dimensie.`,
-    "Gebalanceerde combinatie van parameters, zonder extreme uitschieters t.o.v. het gemiddelde van de 200 strategieën.",
+    "Gebalanceerde combinatie van parameters, zonder extreme uitschieters t.o.v. het gemiddelde van alle strategieën.",
     `${s.protected ? "Beschermde" : "Cullbare"} ${s.generation > 1 ? `Gen-${s.generation}` : "originele"} strategie met solide parameterruimte.`,
   ];
   while (candidates.length < 3) {
@@ -943,7 +963,7 @@ function WhyBought({ pos, cfg }: { pos: SimPosDetail; cfg: SimStrategyConfig }) 
         href={googleFinanceUrl(pos.ticker)}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[11px] text-fog-pink font-medium hover:underline shrink-0"
+        className="text-[11px] tab-accent-text font-medium hover:underline shrink-0"
       >
         {pos.ticker}
       </a>
@@ -1272,15 +1292,19 @@ function CyclePulse({ evo }: { evo: SimEvolution }) {
           className={`h-full rounded-full transition-all ${barFull ? "bg-fog-lime" : "bg-fog-watch/70"}`}
           style={{ width: `${pct}%` }}
         />
-        {/* Tactische markeringen bij 60d en 120d */}
-        {tacticalMarks.map((d) => (
-          <div
-            key={d}
-            className="absolute top-0 bottom-0 w-px bg-ink-5/80"
-            style={{ left: `${Math.round((d / totalDays) * 100)}%` }}
-            title={`${d} dagen`}
-          />
-        ))}
+        {/* Tactische markeringen bij 60d en 120d — alleen bij een geldige
+            cycluslengte, anders deelt d/totalDays door 0 → left: Infinity%. */}
+        {totalDays > 0 && tacticalMarks.map((d) => {
+          const left = Math.min(100, Math.max(0, Math.round((d / totalDays) * 100)));
+          return (
+            <div
+              key={d}
+              className="absolute top-0 bottom-0 w-px bg-ink-5/80"
+              style={{ left: `${left}%` }}
+              title={`${d} dagen`}
+            />
+          );
+        })}
       </div>
 
       <div className="flex justify-between text-[10px] text-neutral-600 mt-1">
@@ -1521,7 +1545,7 @@ function KnowledgeExportSection({ isAdmin }: { isAdmin: boolean }) {
         </div>
 
         <p className="text-xs text-neutral-400 leading-relaxed mb-3">
-          Elke <strong className="text-neutral-200">1e van de maand</strong> wordt automatisch een volledige snapshot opgeslagen: alle 200 strategieën met hun config + performance, de volledige watchlist met buy-limieten en medailles, alle gesloten posities uitgesplitst per signaaltype + sector, en configuratie-inzichten.
+          Elke <strong className="text-neutral-200">1e van de maand</strong> wordt automatisch een volledige snapshot opgeslagen: alle strategieën met hun config + performance, de volledige watchlist met buy-limieten en medailles, alle gesloten posities uitgesplitst per signaaltype + sector, en configuratie-inzichten.
           Op de <strong className="text-neutral-200">25e</strong> ontvang je een herinnering om de stand ook handmatig door te nemen.
         </p>
 
@@ -1649,7 +1673,7 @@ export function SimulationView() {
   return (
     <section className="space-y-4">
       <SectionHeader
-        title="200 Strategieën — simulatie-ranglijst"
+        title="Potje — simulatie-ranglijst"
         subtitle={
           meta.last_run_at
             ? `Laatste run: ${new Date(meta.last_run_at).toLocaleString("nl-NL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
@@ -1775,6 +1799,14 @@ const PHOENIX_COLUMNS: PhoenixColumn[] = [
   { key: "phoenix_50x_date", label: "Laatste 50× datum", short: "Laatste 50×", defaultDir: "desc", hint: "Datum van het meest recente 50×-incident" },
 ];
 
+// Kolommen voor de kolom-kiezer: Ticker (vast) + alle data-kolommen + Koers + Trend.
+const PHOENIX_COL_META: ColumnMeta[] = [
+  { key: "ticker", label: "Ticker" },
+  ...PHOENIX_COLUMNS.map((c) => ({ key: c.key, label: c.short })),
+  { key: "koers", label: "Koers" },
+  { key: "sparkline", label: "Trend" },
+];
+
 function daysAgo(dateStr: string | null): number | null {
   if (!dateStr) return null;
   const t = new Date(dateStr).getTime();
@@ -1884,9 +1916,7 @@ export function PhoenixView() {
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<PhoenixSortKey>("above_limit_pct");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [visibleCols, setVisibleCols] = useState<Set<PhoenixSortKey>>(
-    () => new Set(PHOENIX_COLUMNS.map((c) => c.key)),
-  );
+  const { visibleKeys } = useColumnLayout("feniks", PHOENIX_COL_META, "ticker");
   // Per facet-groep een set van geselecteerde bucket-ids. Lege set = geen
   // filter op die groep. Binnen 1 groep = OR, tussen groepen = AND.
   const [selectedBuckets, setSelectedBuckets] = useState<Record<PhoenixSortKey, Set<string>>>(() => {
@@ -1897,6 +1927,9 @@ export function PhoenixView() {
   const [fullScanRunning, setFullScanRunning] = useState(false);
   const [fullScanBatch, setFullScanBatch] = useState(0);
   const fullScanStopRef = useRef(false);
+  const [showSeen, setShowSeen] = useState(false);
+  const [hideFavorites, setHideFavorites] = useState(false);
+  const marks = useMarks();
   const isAdmin = !!getToken();
 
   async function refreshData() {
@@ -1963,14 +1996,6 @@ export function PhoenixView() {
     }
   }
 
-  function toggleCol(key: PhoenixSortKey) {
-    setVisibleCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
-
   function toggleBucket(groupKey: PhoenixSortKey, bucketId: string) {
     setSelectedBuckets((prev) => {
       const nextSet = new Set(prev[groupKey]);
@@ -1992,6 +2017,8 @@ export function PhoenixView() {
   // er overblijven als je deze bucket erbij aanvinkt).
   const filteredRanking = useMemo(() => {
     const filtered = ranking.filter((p) => {
+      if (!showSeen && marks.isSeen(p.ticker)) return false;
+      if (hideFavorites && marks.isFavorite(p.ticker)) return false;
       for (const g of FACET_GROUPS) {
         const sel = selectedBuckets[g.key];
         if (sel.size === 0) continue;
@@ -2015,7 +2042,7 @@ export function PhoenixView() {
     });
 
     return sorted;
-  }, [ranking, sortKey, sortDir, selectedBuckets]);
+  }, [ranking, sortKey, sortDir, selectedBuckets, showSeen, hideFavorites, marks]);
 
   // Live count per bucket: hoeveel rijen vallen erin als je ALLE andere
   // facet-groepen toepast (de eigen groep wordt genegeerd, zoals bol.com).
@@ -2050,14 +2077,111 @@ export function PhoenixView() {
 
   const sortArrow = (key: PhoenixSortKey) => sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "";
 
+  // Sorteerbare header voor een data-kolom.
+  const dataTh = (key: PhoenixSortKey) => {
+    const c = PHOENIX_COLUMNS.find((x) => x.key === key)!;
+    return (
+      <th
+        className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+        onClick={() => toggleSort(key)}
+        title={c.hint}
+      >
+        <span className="inline-flex items-center gap-1">
+          {c.short}
+          <span className="text-fog-lime text-[9px]">{sortArrow(key)}</span>
+        </span>
+      </th>
+    );
+  };
+  const numTd = (v: number | null | undefined, fmt: (n: number) => ReactNode) => (
+    <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+      {v != null ? fmt(v) : <span className="text-neutral-600">—</span>}
+    </td>
+  );
+
+  // Per kolom-key de header + cel-render; visibleKeys bepaalt volgorde/zichtbaarheid.
+  const colMap: Record<string, { th: ReactNode; td: (p: PhoenixRankEntry) => ReactNode }> = {
+    ticker: {
+      th: <th className="px-3 py-2 text-left">Ticker</th>,
+      td: (p) => (
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <a
+              href={googleFinanceUrl(p.ticker, p.exchange)}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono text-sm font-semibold tab-accent-text hover:underline"
+            >
+              {p.ticker}
+            </a>
+            {p.company && <span className="text-xs text-neutral-400 truncate max-w-[140px]">{p.company}</span>}
+            {p.sector && <Pill>{p.sector}</Pill>}
+          </div>
+          <div className="mt-0.5 text-[10px] text-neutral-500 flex items-center gap-1.5">
+            {(p.medal_gold ?? 0) > 0 && <span>🏆{p.medal_gold}</span>}
+            {(p.medal_silver ?? 0) > 0 && <span>🥈{p.medal_silver}</span>}
+            {(p.medal_bronze ?? 0) > 0 && <span>🥉{p.medal_bronze}</span>}
+          </div>
+        </td>
+      ),
+    },
+    above_limit_pct: {
+      th: dataTh("above_limit_pct"),
+      td: (p) => {
+        const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
+        const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
+        return (
+          <td className="px-3 py-2 text-right font-mono tabular-nums">
+            {p.above_limit_pct != null ? (
+              <span className={atOrBelow ? "text-fog-lime font-semibold" : near ? "text-fog-warn" : "text-neutral-300"}>
+                {atOrBelow ? "✓ onder" : `+${p.above_limit_pct.toFixed(1)}%`}
+              </span>
+            ) : (
+              <span className="text-neutral-600">—</span>
+            )}
+          </td>
+        );
+      },
+    },
+    phoenix_incident_count: { th: dataTh("phoenix_incident_count"), td: (p) => numTd(p.phoenix_incident_count, (n) => n) },
+    phoenix_median_date: { th: dataTh("phoenix_median_date"), td: (p) => numTd(daysAgo(p.phoenix_median_date), (n) => `${n}d`) },
+    phoenix_max_growth_180d_pct: { th: dataTh("phoenix_max_growth_180d_pct"), td: (p) => numTd(p.phoenix_max_growth_180d_pct, (n) => `+${n.toFixed(0)}%`) },
+    phoenix_days_to_50x: { th: dataTh("phoenix_days_to_50x"), td: (p) => numTd(p.phoenix_days_to_50x, (n) => `${n}d`) },
+    phoenix_50x_date: {
+      th: dataTh("phoenix_50x_date"),
+      td: (p) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums text-fog-pink/80">
+          {p.phoenix_50x_date ? fmtDate(p.phoenix_50x_date) : <span className="text-neutral-600">—</span>}
+        </td>
+      ),
+    },
+    koers: {
+      th: <th className="px-3 py-2 text-right">Koers</th>,
+      td: (p) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums">
+          {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
+          <div><EditableLimit ticker={p.ticker} buyLimit={p.buy_limit} compact /></div>
+        </td>
+      ),
+    },
+    sparkline: {
+      th: <th className="px-3 py-2 text-center w-20">Trend</th>,
+      td: (p) => (
+        <td className="px-3 py-2 text-center">
+          <TickerSparkline ticker={p.ticker} width={64} height={18} />
+        </td>
+      ),
+    },
+  };
+
   return (
     <div className="space-y-6">
       {/* Uitlegkaart */}
-      <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.03]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <Dot tone="watch" />
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="feniks" /></span>
           <div className="flex-1">
-            <div className="font-bold text-neutral-100">Feniks-aandelen</div>
+            <div className="font-bold text-base tab-accent-text">Feniks-aandelen</div>
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">50×</strong> zijn gegaan en nu laag staan.
               Klik op een kolomkop om te sorteren. Vink kolommen aan/uit met de checkboxes,
@@ -2120,6 +2244,23 @@ export function PhoenixView() {
               )}
             </div>
 
+            <div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+                <HideFavoritesToggle hideFavorites={hideFavorites} onChange={setHideFavorites} />
+                <MarkAllSeenButton tickers={filteredRanking.map((p) => p.ticker)} />
+              </div>
+              <div className="mt-2">
+                <NotYetReviewedTile
+                  tickers={ranking.map((p) => p.ticker)}
+                  onActivate={() => { setShowSeen(false); setHideFavorites(true); }}
+                />
+              </div>
+              <div className="mt-1 text-[10px] text-neutral-500">
+                {marks.seen.size} gezien · standaard verborgen
+              </div>
+            </div>
+
             {FACET_GROUPS.map((g) => (
               <div key={g.key}>
                 <div className="text-[11px] font-bold text-neutral-200 mb-1.5">{g.label}</div>
@@ -2149,141 +2290,52 @@ export function PhoenixView() {
               </div>
             ))}
 
-            <div className="pt-3 border-t border-ink-5/40">
-              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
-                Kolommen tonen
-              </div>
-              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                {PHOENIX_COLUMNS.map((c) => (
-                  <label key={c.key} className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={visibleCols.has(c.key)}
-                      onChange={() => toggleCol(c.key)}
-                      className="accent-fog-lime"
-                    />
-                    <span>{c.short}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
             <div className="pt-2 border-t border-ink-5/40 text-[11px] text-neutral-500">
               {filteredRanking.length} van {ranking.length} getoond
             </div>
           </Card>
 
           {/* Tabel */}
-          <Card className="p-0 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
-                    <th className="px-3 py-2 text-left w-10">#</th>
-                    <th className="px-3 py-2 text-left">Ticker</th>
-                    {PHOENIX_COLUMNS.map((c) => visibleCols.has(c.key) ? (
-                      <th
-                        key={c.key}
-                        className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
-                        onClick={() => toggleSort(c.key)}
-                        title={c.hint}
-                      >
-                        <span className="inline-flex items-center gap-1">
-                          {c.short}
-                          <span className="text-fog-lime text-[9px]">{sortArrow(c.key)}</span>
-                        </span>
-                      </th>
-                    ) : null)}
-                    <th className="px-3 py-2 text-right">Koers</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-5/40">
-                  {filteredRanking.map((p, i) => {
-                    const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
-                    const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
-                    return (
-                      <tr key={p.ticker} className={atOrBelow ? "bg-fog-lime/[0.05]" : ""}>
-                        <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <a
-                              href={googleFinanceUrl(p.ticker, p.exchange)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="font-mono text-sm font-semibold text-fog-lime hover:underline"
-                            >
-                              {p.ticker}
-                            </a>
-                            {p.company && (
-                              <span className="text-xs text-neutral-400 truncate max-w-[140px]">{p.company}</span>
-                            )}
-                            {p.sector && <Pill>{p.sector}</Pill>}
-                          </div>
-                          <div className="mt-0.5 text-[10px] text-neutral-500 flex items-center gap-1.5">
-                            {(p.medal_gold ?? 0) > 0 && <span>🏆{p.medal_gold}</span>}
-                            {(p.medal_silver ?? 0) > 0 && <span>🥈{p.medal_silver}</span>}
-                            {(p.medal_bronze ?? 0) > 0 && <span>🥉{p.medal_bronze}</span>}
-                          </div>
-                        </td>
-                        {visibleCols.has("above_limit_pct") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums">
-                            {p.above_limit_pct != null ? (
-                              <span className={atOrBelow ? "text-fog-lime font-semibold" : near ? "text-fog-warn" : "text-neutral-300"}>
-                                {atOrBelow ? "✓ onder" : `+${p.above_limit_pct.toFixed(1)}%`}
-                              </span>
-                            ) : (
-                              <span className="text-neutral-600">—</span>
-                            )}
-                          </td>
-                        )}
-                        {visibleCols.has("phoenix_incident_count") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.phoenix_incident_count ?? <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("phoenix_median_date") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {(() => {
-                              const d = daysAgo(p.phoenix_median_date);
-                              return d != null ? `${d}d` : <span className="text-neutral-600">—</span>;
-                            })()}
-                          </td>
-                        )}
-                        {visibleCols.has("phoenix_max_growth_180d_pct") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.phoenix_max_growth_180d_pct != null
-                              ? `+${p.phoenix_max_growth_180d_pct.toFixed(0)}%`
-                              : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("phoenix_days_to_50x") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.phoenix_days_to_50x != null
-                              ? `${p.phoenix_days_to_50x}d`
-                              : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("phoenix_50x_date") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-fog-pink/80">
-                            {p.phoenix_50x_date ? fmtDate(p.phoenix_50x_date) : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        <td className="px-3 py-2 text-right font-mono tabular-nums">
-                          {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
-                          {p.buy_limit != null && <div className="text-[10px] text-neutral-500">lim {fmtPrice(p.buy_limit)}</div>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          <div className="space-y-2">
+            <div className="flex justify-end">
+              <ColumnPicker tabKey="feniks" columns={PHOENIX_COL_META} lockedKey="ticker" />
             </div>
-          </Card>
+            <Card className="p-0 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                      <SeenHeader />
+                      <HeartHeader />
+                      <StarHeader />
+                      <th className="px-3 py-2 text-left w-10">#</th>
+                      {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-5/40">
+                    {filteredRanking.map((p, i) => {
+                      const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
+                      const seen = marks.isSeen(p.ticker);
+                      return (
+                        <tr key={p.ticker} className={(atOrBelow ? "bg-fog-lime/[0.05] " : "") + (seen ? "opacity-50" : "")}>
+                          <SeenCell ticker={p.ticker} />
+                          <HeartCell ticker={p.ticker} />
+                          <StarCell ticker={p.ticker} />
+                          <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
+                          {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(p)}</Fragment>)}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
         </div>
       )}
 
-      {/* Tabel */}
-      {ranking.length === 0 ? (
+      {/* Lege staat — alleen tonen als er nog geen feniks-aandelen zijn */}
+      {ranking.length === 0 && (
         <Card className="p-10 text-center space-y-3">
           <div className="text-4xl">🦅</div>
           <div className="text-sm font-semibold text-neutral-300">Nog geen feniks-aandelen gevonden</div>
@@ -2293,123 +2345,24 @@ export function PhoenixView() {
               : "De dagelijkse scanners (scan-bottoms, scan-losers) voegen automatisch nieuwe feniks-aandelen toe zodra ze worden gevonden."}
           </div>
         </Card>
-      ) : (
-        <Card className="p-0 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
-                  <th className="px-3 py-2 text-left w-10">#</th>
-                  <th className="px-3 py-2 text-left">Ticker</th>
-                  {PHOENIX_COLUMNS.map((c) => visibleCols.has(c.key) ? (
-                    <th
-                      key={c.key}
-                      className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
-                      onClick={() => toggleSort(c.key)}
-                      title={c.hint}
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        {c.short}
-                        <span className="text-fog-lime text-[9px]">{sortArrow(c.key)}</span>
-                      </span>
-                    </th>
-                  ) : null)}
-                  <th className="px-3 py-2 text-right">Koers</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ink-5/40">
-                {filteredRanking.map((p, i) => {
-                  const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
-                  const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
-                  return (
-                    <tr key={p.ticker} className={atOrBelow ? "bg-fog-lime/[0.05]" : ""}>
-                      <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <a
-                            href={googleFinanceUrl(p.ticker, p.exchange)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-mono text-sm font-semibold text-fog-lime hover:underline"
-                          >
-                            {p.ticker}
-                          </a>
-                          {p.company && (
-                            <span className="text-xs text-neutral-400 truncate max-w-[140px]">{p.company}</span>
-                          )}
-                          {p.sector && <Pill>{p.sector}</Pill>}
-                        </div>
-                        <div className="mt-0.5 text-[10px] text-neutral-500">
-                          🥇{p.medal_gold ?? 0} 🥈{p.medal_silver ?? 0} 🥉{p.medal_bronze ?? 0}
-                        </div>
-                      </td>
-                      {visibleCols.has("above_limit_pct") && (
-                        <td className="px-3 py-2 text-right font-mono tabular-nums">
-                          {p.above_limit_pct != null ? (
-                            <span className={atOrBelow ? "text-fog-lime font-semibold" : near ? "text-fog-warn" : "text-neutral-300"}>
-                              {atOrBelow ? "✓ onder" : `+${p.above_limit_pct.toFixed(1)}%`}
-                            </span>
-                          ) : (
-                            <span className="text-neutral-600">—</span>
-                          )}
-                        </td>
-                      )}
-                      {visibleCols.has("phoenix_incident_count") && (
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                          {p.phoenix_incident_count ?? <span className="text-neutral-600">—</span>}
-                        </td>
-                      )}
-                      {visibleCols.has("phoenix_median_date") && (
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                          {(() => {
-                            const d = daysAgo(p.phoenix_median_date);
-                            return d != null ? `${d}d` : <span className="text-neutral-600">—</span>;
-                          })()}
-                        </td>
-                      )}
-                      {visibleCols.has("phoenix_max_growth_180d_pct") && (
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                          {p.phoenix_max_growth_180d_pct != null
-                            ? `+${p.phoenix_max_growth_180d_pct.toFixed(0)}%`
-                            : <span className="text-neutral-600">—</span>}
-                        </td>
-                      )}
-                      {visibleCols.has("phoenix_days_to_50x") && (
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                          {p.phoenix_days_to_50x != null
-                            ? `${p.phoenix_days_to_50x}d`
-                            : <span className="text-neutral-600">—</span>}
-                        </td>
-                      )}
-                      {visibleCols.has("phoenix_50x_date") && (
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-fog-pink/80">
-                          {p.phoenix_50x_date ? fmtDate(p.phoenix_50x_date) : <span className="text-neutral-600">—</span>}
-                        </td>
-                      )}
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">
-                        {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
-                        {p.buy_limit != null && <div className="text-[10px] text-neutral-500">lim {fmtPrice(p.buy_limit)}</div>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
       )}
     </div>
   );
 }
 
 // ── FamiliesView ────────────────────────────────────────────────────────────
-// Per-groep gemiddelde return + tijd-lijngrafiek over alle groepen heen.
+// Per-groep gemiddelde return + tijd-lijngrafiek. Twee views: ploegen (familie-
+// gemiddelden) en individueel (alle strategieën). Grafiek en tabel hebben
+// elk een eigen toggle — vergelijkbaar met het wiel­rennen-klassement.
 function FamiliesView() {
   const [data, setData] = useState<SimResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(new Set());
-  const [sortBy, setSortBy] = useState<"avg" | "n" | "best" | "worst" | "grp">("avg");
+  const [familySortBy, setFamilySortBy] = useState<"avg" | "n" | "best" | "worst" | "grp">("avg");
+  const [indivSortBy, setIndivSortBy] = useState<"return" | "equity" | "winrate" | "closed">("return");
+  const [chartView, setChartView] = useState<"ploegen" | "individueel">("ploegen");
+  const [tableView, setTableView] = useState<"ploegen" | "individueel">("ploegen");
 
   useEffect(() => {
     setLoading(true);
@@ -2423,8 +2376,14 @@ function FamiliesView() {
   if (!data?.families) return <Card className="p-6 text-sm text-neutral-500">Nog geen familie-data beschikbaar. Wacht tot de eerstvolgende sim-run (22:30 UTC).</Card>;
 
   const { groups, dates } = data.families;
-  const sorted = [...groups].sort((a, b) => {
-    switch (sortBy) {
+
+  const groupColorMap = new Map<string, string>(
+    groups.map((g, idx) => [g.grp, `hsl(${Math.round((idx * 360) / Math.max(groups.length, 1))} 70% 55%)`])
+  );
+  const colorFor = (grp: string) => groupColorMap.get(grp) ?? "#9ca3af";
+
+  const familySorted = [...groups].sort((a, b) => {
+    switch (familySortBy) {
       case "n": return b.n - a.n;
       case "best": return (b.best_return_pct ?? -Infinity) - (a.best_return_pct ?? -Infinity);
       case "worst": return (a.worst_return_pct ?? Infinity) - (b.worst_return_pct ?? Infinity);
@@ -2433,13 +2392,22 @@ function FamiliesView() {
     }
   });
 
-  // ── SVG chart ─────────────────────────────────────────────────────────────
+  const allStrategies = data.strategies ?? [];
+  const indivSorted = [...allStrategies].sort((a, b) => {
+    switch (indivSortBy) {
+      case "equity": return (b.total_equity ?? 0) - (a.total_equity ?? 0);
+      case "winrate": return (b.win_rate ?? 0) - (a.win_rate ?? 0);
+      case "closed": return (b.closed_count ?? 0) - (a.closed_count ?? 0);
+      default: return (b.total_return_pct ?? -Infinity) - (a.total_return_pct ?? -Infinity);
+    }
+  });
+
+  // ── Ploegen-grafiek (lijnen per familie) ───────────────────────────────────
   const W = 900, H = 360;
   const PAD = { l: 50, r: 20, t: 16, b: 36 };
   const cw = W - PAD.l - PAD.r;
   const ch = H - PAD.t - PAD.b;
   const visibleGroups = groups.filter((g) => !hiddenGroups.has(g.grp));
-  // Y-range over alle zichtbare groepen + alle dagen
   let yMin = 0, yMax = 0;
   for (const g of visibleGroups) {
     for (const p of g.series) {
@@ -2448,23 +2416,42 @@ function FamiliesView() {
       if (p.avg_return_pct > yMax) yMax = p.avg_return_pct;
     }
   }
-  // Buffer + symmetry around 0
   const pad = Math.max(0.5, (yMax - yMin) * 0.1);
   yMin -= pad; yMax += pad;
   if (yMin > 0) yMin = 0;
   if (yMax < 0) yMax = 0.5;
-
-  const x = (i: number) => PAD.l + (dates.length <= 1 ? cw / 2 : (i * cw) / (dates.length - 1));
-  const y = (v: number) => PAD.t + (1 - (v - yMin) / (yMax - yMin)) * ch;
-  const yZero = y(0);
-
-  // Genereer kleuren in HSL spread
-  const colorFor = (idx: number, total: number) => `hsl(${Math.round((idx * 360) / Math.max(total, 1))} 70% 55%)`;
-
-  const yTicks: number[] = [];
+  const xLine = (i: number) => PAD.l + (dates.length <= 1 ? cw / 2 : (i * cw) / (dates.length - 1));
+  const yScale = (v: number) => PAD.t + (1 - (v - yMin) / (yMax - yMin)) * ch;
+  const yZero = yScale(0);
   const range = yMax - yMin;
   const tickStep = range >= 50 ? 10 : range >= 10 ? 5 : range >= 2 ? 1 : 0.5;
+  const yTicks: number[] = [];
   for (let v = Math.ceil(yMin / tickStep) * tickStep; v <= yMax; v += tickStep) yTicks.push(v);
+
+  // ── Individueel-grafiek (staafdiagram) ─────────────────────────────────────
+  const BAR_W = 900, BAR_H = 360;
+  const BPAD = { l: 50, r: 20, t: 16, b: 36 };
+  const bcw = BAR_W - BPAD.l - BPAD.r;
+  const bch = BAR_H - BPAD.t - BPAD.b;
+  const barStrategies = [...allStrategies].sort((a, b) => (b.total_return_pct ?? -Infinity) - (a.total_return_pct ?? -Infinity));
+  let byMin = 0, byMax = 0;
+  for (const s of barStrategies) {
+    const v = s.total_return_pct ?? 0;
+    if (v < byMin) byMin = v;
+    if (v > byMax) byMax = v;
+  }
+  const bpad = Math.max(0.5, (byMax - byMin) * 0.1);
+  byMin -= bpad; byMax += bpad;
+  if (byMin > 0) byMin = 0;
+  if (byMax < 0) byMax = 0.5;
+  const byScale = (v: number) => BPAD.t + (1 - (v - byMin) / (byMax - byMin)) * bch;
+  const byZero = byScale(0);
+  const bRange = byMax - byMin;
+  const bTickStep = bRange >= 50 ? 10 : bRange >= 10 ? 5 : bRange >= 2 ? 1 : 0.5;
+  const byTicks: number[] = [];
+  for (let v = Math.ceil(byMin / bTickStep) * bTickStep; v <= byMax; v += bTickStep) byTicks.push(v);
+  const barGap = barStrategies.length > 0 ? bcw / barStrategies.length : 5;
+  const barWidth = Math.max(1, barGap * 0.85);
 
   function toggleGroup(grp: string) {
     setHiddenGroups((prev) => {
@@ -2485,8 +2472,8 @@ function FamiliesView() {
               Gemiddeld rendement per familie (strategie-groep). Elke groep test één dimensie:
               A-Score = score-drempel sweep · K-Profiel = agressieve profielen · X-Hikkertjes =
               momentum-plays op explosieve dagstijgers · Y-Zwitserleven = high-yield fallen angels
-              (incl. dividend). De grafiek toont het gemiddelde verloop per familie over tijd.
-              Klik op een groep in de legenda om te tonen/verbergen.
+              (incl. dividend). Gebruik de knoppen om te schakelen tussen ploegengemiddelden en
+              individuele strategieën.
             </p>
           </div>
         </div>
@@ -2494,113 +2481,182 @@ function FamiliesView() {
 
       {/* Chart */}
       <Card className="p-4">
-        <div className="text-xs text-neutral-500 mb-2">
-          Gemiddelde return% per familie over {dates.length} dagen
-          ({dates.length > 0 ? `${dates[0]} → ${dates[dates.length - 1]}` : "—"})
+        <div className="flex items-center gap-2 mb-3">
+          <button
+            onClick={() => setChartView("ploegen")}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+              chartView === "ploegen"
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            🏆 Ploegengemiddelden
+          </button>
+          <button
+            onClick={() => setChartView("individueel")}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+              chartView === "individueel"
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            🚴 Individueel
+          </button>
+          <span className="text-xs text-neutral-500 ml-2">
+            {chartView === "ploegen"
+              ? `Gemiddelde return% per familie over ${dates.length} dagen (${dates.length > 0 ? `${dates[0]} → ${dates[dates.length - 1]}` : "—"})`
+              : `${barStrategies.length} strategieën gesorteerd op return%`}
+          </span>
         </div>
-        <div className="overflow-x-auto">
-          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" style={{ minWidth: 600 }}>
-            {/* Y-grid */}
-            {yTicks.map((v, i) => (
-              <g key={i}>
-                <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="#374151" strokeWidth="0.5" strokeDasharray={v === 0 ? "" : "2,3"} />
-                <text x={PAD.l - 6} y={y(v) + 3} textAnchor="end" fill="#9ca3af" fontSize="10">{v.toFixed(range >= 10 ? 0 : 1)}%</text>
-              </g>
-            ))}
-            {/* Zero baseline (highlight) */}
-            <line x1={PAD.l} x2={W - PAD.r} y1={yZero} y2={yZero} stroke="#6b7280" strokeWidth="1" />
 
-            {/* X-axis labels (first, middle, last) */}
-            {dates.length > 0 && (
-              <>
-                <text x={PAD.l} y={H - PAD.b + 16} textAnchor="start" fill="#9ca3af" fontSize="10">{dates[0]}</text>
-                {dates.length > 2 && (
-                  <text x={W / 2} y={H - PAD.b + 16} textAnchor="middle" fill="#9ca3af" fontSize="10">
-                    {dates[Math.floor(dates.length / 2)]}
-                  </text>
-                )}
-                <text x={W - PAD.r} y={H - PAD.b + 16} textAnchor="end" fill="#9ca3af" fontSize="10">{dates[dates.length - 1]}</text>
-              </>
-            )}
-
-            {/* Lines per group */}
-            {groups.map((g, idx) => {
-              const color = colorFor(idx, groups.length);
-              const hidden = hiddenGroups.has(g.grp);
-              if (hidden) return null;
-              const pts: Array<[number, number]> = [];
-              g.series.forEach((p, i) => {
-                if (p.avg_return_pct != null) pts.push([x(i), y(p.avg_return_pct)]);
-              });
-              if (pts.length === 0) return null;
-              const d = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
-              return (
-                <g key={g.grp}>
-                  <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-                  {pts.length === 1 && <circle cx={pts[0][0]} cy={pts[0][1]} r="2" fill={color} />}
+        {chartView === "ploegen" ? (
+          <>
+            <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
+              {yTicks.map((v, i) => (
+                <g key={i}>
+                  <line x1={PAD.l} x2={W - PAD.r} y1={yScale(v)} y2={yScale(v)} stroke="#374151" strokeWidth="0.5" strokeDasharray={v === 0 ? "" : "2,3"} />
+                  <text x={PAD.l - 6} y={yScale(v) + 3} textAnchor="end" fill="#9ca3af" fontSize="10">{v.toFixed(range >= 10 ? 0 : 1)}%</text>
                 </g>
-              );
-            })}
-          </svg>
-        </div>
-
-        {/* Legend / toggles */}
-        <div className="mt-4 flex flex-wrap gap-1.5">
-          {groups.map((g, idx) => {
-            const color = colorFor(idx, groups.length);
-            const hidden = hiddenGroups.has(g.grp);
-            return (
-              <button
-                key={g.grp}
-                onClick={() => toggleGroup(g.grp)}
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
-                  hidden ? "opacity-30 border-ink-5" : "border-ink-5/60 hover:border-ink-5"
-                }`}
-                title={hidden ? "Toon" : "Verberg"}
-              >
-                <span className="w-3 h-1.5 rounded-sm" style={{ backgroundColor: color }} />
-                <span>{g.grp}</span>
-              </button>
-            );
-          })}
-        </div>
+              ))}
+              <line x1={PAD.l} x2={W - PAD.r} y1={yZero} y2={yZero} stroke="#6b7280" strokeWidth="1" />
+              {dates.length > 0 && (
+                <>
+                  <text x={PAD.l} y={H - PAD.b + 16} textAnchor="start" fill="#9ca3af" fontSize="10">{dates[0]}</text>
+                  {dates.length > 2 && (
+                    <text x={W / 2} y={H - PAD.b + 16} textAnchor="middle" fill="#9ca3af" fontSize="10">
+                      {dates[Math.floor(dates.length / 2)]}
+                    </text>
+                  )}
+                  <text x={W - PAD.r} y={H - PAD.b + 16} textAnchor="end" fill="#9ca3af" fontSize="10">{dates[dates.length - 1]}</text>
+                </>
+              )}
+              {groups.map((g) => {
+                if (hiddenGroups.has(g.grp)) return null;
+                const pts: Array<[number, number]> = [];
+                g.series.forEach((p, i) => {
+                  if (p.avg_return_pct != null) pts.push([xLine(i), yScale(p.avg_return_pct)]);
+                });
+                if (pts.length === 0) return null;
+                const d = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+                return (
+                  <g key={g.grp}>
+                    <path d={d} fill="none" stroke={colorFor(g.grp)} strokeWidth="1.5" strokeLinejoin="round" />
+                    {pts.length === 1 && <circle cx={pts[0][0]} cy={pts[0][1]} r="2" fill={colorFor(g.grp)} />}
+                  </g>
+                );
+              })}
+            </svg>
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {groups.map((g) => {
+                const hidden = hiddenGroups.has(g.grp);
+                return (
+                  <button
+                    key={g.grp}
+                    onClick={() => toggleGroup(g.grp)}
+                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+                      hidden ? "opacity-30 border-ink-5" : "border-ink-5/60 hover:border-ink-5"
+                    }`}
+                    title={hidden ? "Toon" : "Verberg"}
+                  >
+                    <span className="w-3 h-1.5 rounded-sm" style={{ backgroundColor: colorFor(g.grp) }} />
+                    <span>{g.grp}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <svg viewBox={`0 0 ${BAR_W} ${BAR_H}`} className="w-full h-auto">
+              {byTicks.map((v, i) => (
+                <g key={i}>
+                  <line x1={BPAD.l} x2={BAR_W - BPAD.r} y1={byScale(v)} y2={byScale(v)} stroke="#374151" strokeWidth="0.5" strokeDasharray={v === 0 ? "" : "2,3"} />
+                  <text x={BPAD.l - 6} y={byScale(v) + 3} textAnchor="end" fill="#9ca3af" fontSize="10">{v.toFixed(bRange >= 10 ? 0 : 1)}%</text>
+                </g>
+              ))}
+              <line x1={BPAD.l} x2={BAR_W - BPAD.r} y1={byZero} y2={byZero} stroke="#6b7280" strokeWidth="1" />
+              {barStrategies.map((s, i) => {
+                const v = s.total_return_pct ?? 0;
+                const bx = BPAD.l + i * barGap + barGap / 2 - barWidth / 2;
+                const barTop = v >= 0 ? byScale(v) : byZero;
+                const barH = Math.abs(byScale(v) - byZero);
+                return (
+                  <rect key={s.slug} x={bx} y={barTop} width={barWidth} height={Math.max(barH, 0.5)} fill={colorFor(s.grp)} opacity="0.85">
+                    <title>{s.name ?? s.slug}: {v >= 0 ? "+" : ""}{v.toFixed(2)}%</title>
+                  </rect>
+                );
+              })}
+            </svg>
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {groups.map((g) => (
+                <div key={g.grp} className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono border border-ink-5/60">
+                  <span className="w-3 h-1.5 rounded-sm" style={{ backgroundColor: colorFor(g.grp) }} />
+                  <span>{g.grp}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </Card>
 
       {/* Tabel */}
       <Card className="p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-ink-5 flex items-center justify-between text-sm">
-          <div className="font-semibold">Per-familie statistieken</div>
-          <div className="text-xs text-neutral-500">{groups.length} families · klik kolomkop om te sorteren</div>
+        <div className="px-4 py-3 border-b border-ink-5 flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => setTableView("ploegen")}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              tableView === "ploegen"
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            🏆 Ploegenklassement
+          </button>
+          <button
+            onClick={() => setTableView("individueel")}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              tableView === "individueel"
+                ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            🚴 Individueel klassement
+          </button>
+          <span className="text-xs text-neutral-500 ml-auto">
+            {tableView === "ploegen"
+              ? `${groups.length} families · klik kolomkop om te sorteren`
+              : `${indivSorted.length} strategieën · klik kolomkop om te sorteren`}
+          </span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b border-ink-5 bg-ink-2/40">
-              <tr>
-                {([
-                  ["grp",   "Familie"],
-                  ["n",     "Strategieën"],
-                  ["avg",   "Gem. return"],
-                  ["best",  "Beste"],
-                  ["worst", "Slechtste"],
-                ] as const).map(([key, label]) => (
-                  <th
-                    key={key}
-                    onClick={() => setSortBy(key)}
-                    className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide cursor-pointer hover:text-neutral-200 select-none"
-                  >
-                    {label}{sortBy === key ? " ▼" : " ·"}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-5">
-              {sorted.map((g, idx) => {
-                const color = colorFor(groups.findIndex((x) => x.grp === g.grp), groups.length);
-                return (
+
+        {tableView === "ploegen" ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-ink-5 bg-ink-2/40">
+                <tr>
+                  {([
+                    ["grp",   "Familie"],
+                    ["n",     "Strategieën"],
+                    ["avg",   "Gem. return"],
+                    ["best",  "Beste"],
+                    ["worst", "Slechtste"],
+                  ] as const).map(([key, label]) => (
+                    <th
+                      key={key}
+                      onClick={() => setFamilySortBy(key)}
+                      className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide cursor-pointer hover:text-neutral-200 select-none"
+                    >
+                      {label}{familySortBy === key ? " ▼" : " ·"}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-5">
+                {familySorted.map((g, idx) => (
                   <tr key={g.grp} className="hover:bg-ink-3/30">
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
-                        <span className="w-3 h-1.5 rounded-sm shrink-0" style={{ backgroundColor: color }} />
+                        <span className="w-3 h-1.5 rounded-sm shrink-0" style={{ backgroundColor: colorFor(g.grp) }} />
                         <span className="font-mono text-xs text-neutral-200">{g.grp}</span>
                         <span className="text-[10px] text-neutral-600 tabular w-6 text-right">#{idx + 1}</span>
                       </div>
@@ -2632,11 +2688,68 @@ function FamiliesView() {
                       ) : "—"}
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-ink-5 bg-ink-2/40">
+                <tr>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Strategie</th>
+                  <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Familie</th>
+                  {([
+                    ["return",  "Return%"],
+                    ["equity",  "Equity"],
+                    ["winrate", "Hit-rate"],
+                    ["closed",  "Trades"],
+                  ] as const).map(([key, label]) => (
+                    <th
+                      key={key}
+                      onClick={() => setIndivSortBy(key)}
+                      className="px-3 py-2 text-right text-[11px] font-semibold text-neutral-400 uppercase tracking-wide cursor-pointer hover:text-neutral-200 select-none"
+                    >
+                      {label}{indivSortBy === key ? " ▼" : " ·"}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-5">
+                {indivSorted.map((s, idx) => (
+                  <tr key={s.slug} className="hover:bg-ink-3/30">
+                    <td className="px-3 py-2 text-[10px] text-neutral-600 tabular">{idx + 1}</td>
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-xs text-neutral-200">{s.slug}</div>
+                      {s.name && <div className="text-[10px] text-neutral-500">{s.name}</div>}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: colorFor(s.grp) }} />
+                        <span className="text-[10px] font-mono text-neutral-400">{s.grp}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular font-mono text-sm">
+                      <span className={(s.total_return_pct ?? 0) >= 0 ? "text-emerald-400" : "text-fog-loss"}>
+                        {(s.total_return_pct ?? 0) >= 0 ? "+" : ""}{(s.total_return_pct ?? 0).toFixed(2)}%
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular text-xs text-neutral-300">
+                      ${(s.total_equity ?? 0).toFixed(0)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular text-xs text-neutral-300">
+                      {s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular text-xs text-neutral-400">
+                      {s.closed_count ?? 0}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );
