@@ -1569,6 +1569,16 @@ function aggregateFamilies(strategies: SimStrategy[]): SimStrategy[] {
   return out;
 }
 
+// Pickbare extra-kolommen in de Potje-ranking. De vaste kolommen
+// (rang, medaille, strategie/familie, leaderboard-waarde) blijven altijd
+// zichtbaar — die zijn structureel voor de ranglijst.
+const POTJE_COLUMNS: ColumnMeta[] = [
+  { key: "rendement", label: "Rendement" },
+  { key: "hitrate",   label: "Hit-rate" },
+  { key: "drempels",  label: "Winst-drempels" },
+  { key: "trades",    label: "Trades" },
+];
+
 function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   const [grpFilter, setGrpFilter] = useState<string>("all");
   // Standaard sorteren we op rendement (de "rank"-volgorde uit backend).
@@ -1576,6 +1586,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   const [leaderboard, setLeaderboard] = useState<string>("totaal_pct");
   const [scope, setScope] = useState<"individual" | "family">("family");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const { visibleKeys } = useColumnLayout("potje", POTJE_COLUMNS, "rendement");
 
   const activeBoard = LEADERBOARDS.find((b) => b.key === leaderboard) ?? LEADERBOARDS[0];
   const groups = useMemo(() => ["all", ...new Set(strategies.map((s) => s.grp))], [strategies]);
@@ -1662,6 +1673,12 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
       </div>
 
       <div className="overflow-x-auto">
+        {/* Kolom-kiezer: bepaal welke extra-kolommen je toont en in welke
+            volgorde. De vaste kolommen (rang/medaille/naam/leaderboard)
+            blijven altijd staan. */}
+        <div className="flex justify-end mb-1">
+          <ColumnPicker tabKey="potje" columns={POTJE_COLUMNS} lockedKey="rendement" />
+        </div>
         <table className="w-full text-xs min-w-[720px]">
           <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/30">
             <tr>
@@ -1675,31 +1692,24 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
               >
                 {activeBoard.label}
               </th>
-              <th
-                className="text-right p-2 font-semibold"
-                title="Totaalrendement % van de portefeuille sinds start (cash + open posities − initieel)."
-              >
-                Rendement
-              </th>
-              <th
-                className="text-right p-2 font-semibold hidden sm:table-cell"
-                title="Hit-rate: aandeel gesloten posities met return > 0%."
-              >
-                Hit-rate
-              </th>
-              <th
-                className="text-center p-2 font-semibold hidden lg:table-cell"
-                title="Aandeel gesloten posities dat een bepaalde winst-drempel haalde. Per kolom: % trades met ≥5% / ≥10% / ≥25% / ≥50% / ≥100% winst."
-              >
-                Winst-drempels
-                <div className="text-[8px] font-normal text-neutral-600 mt-0.5">5 / 10 / 25 / 50 / 100%</div>
-              </th>
-              <th
-                className="text-right p-2 font-semibold hidden sm:table-cell"
-                title="Aantal gesloten trades sinds start."
-              >
-                Trades
-              </th>
+              {visibleKeys.map((k) => {
+                if (k === "rendement") return (
+                  <th key={k} className="text-right p-2 font-semibold" title="Totaalrendement % van de portefeuille sinds start (cash + open posities − initieel).">Rendement</th>
+                );
+                if (k === "hitrate") return (
+                  <th key={k} className="text-right p-2 font-semibold hidden sm:table-cell" title="Hit-rate: aandeel gesloten posities met return > 0%.">Hit-rate</th>
+                );
+                if (k === "drempels") return (
+                  <th key={k} className="text-center p-2 font-semibold hidden lg:table-cell" title="Per kolom: % gesloten posities met ≥5% / ≥10% / ≥25% / ≥50% / ≥100% winst.">
+                    Winst-drempels
+                    <div className="text-[8px] font-normal text-neutral-600 mt-0.5">5 / 10 / 25 / 50 / 100%</div>
+                  </th>
+                );
+                if (k === "trades") return (
+                  <th key={k} className="text-right p-2 font-semibold hidden sm:table-cell" title="Aantal gesloten trades sinds start.">Trades</th>
+                );
+                return null;
+              })}
             </tr>
           </thead>
           <tbody>
@@ -1707,6 +1717,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
               const isFamily = scope === "family";
               const tone = activeBoard.tone?.(s);
               const valueClass = tone === "lime" ? "text-emerald-300" : tone === "loss" ? "text-rose-300" : "text-neutral-100";
+              const colSpan = 4 + visibleKeys.length;
               return (
               <Fragment key={s.id}>
                 <tr
@@ -1738,32 +1749,35 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                   <td className={`p-2 text-right tabular font-bold ${valueClass}`}>
                     {activeBoard.format(s)}
                   </td>
-                  <td className="p-2 text-right tabular font-bold">
-                    <RetCell v={s.total_return_pct} />
-                  </td>
-                  <td className="p-2 text-right tabular hidden sm:table-cell">
-                    {s.closed_count > 0 ? (
-                      <span className={s.win_rate >= 0.5 ? "text-emerald-300" : "text-rose-300"}>
-                        {(s.win_rate * 100).toFixed(0)}%
-                      </span>
-                    ) : (
-                      <span className="text-neutral-500">—</span>
-                    )}
-                  </td>
-                  <td className="p-2 text-center tabular hidden lg:table-cell">
-                    {s.closed_count > 0 ? (
-                      <ThresholdsCell s={s} />
-                    ) : (
-                      <span className="text-neutral-500">—</span>
-                    )}
-                  </td>
-                  <td className="p-2 text-right tabular hidden sm:table-cell text-neutral-400">
-                    {s.closed_count}
-                  </td>
+                  {visibleKeys.map((k) => {
+                    if (k === "rendement") return (
+                      <td key={k} className="p-2 text-right tabular font-bold"><RetCell v={s.total_return_pct} /></td>
+                    );
+                    if (k === "hitrate") return (
+                      <td key={k} className="p-2 text-right tabular hidden sm:table-cell">
+                        {s.closed_count > 0 ? (
+                          <span className={s.win_rate >= 0.5 ? "text-emerald-300" : "text-rose-300"}>
+                            {(s.win_rate * 100).toFixed(0)}%
+                          </span>
+                        ) : (
+                          <span className="text-neutral-500">—</span>
+                        )}
+                      </td>
+                    );
+                    if (k === "drempels") return (
+                      <td key={k} className="p-2 text-center tabular hidden lg:table-cell">
+                        {s.closed_count > 0 ? <ThresholdsCell s={s} /> : <span className="text-neutral-500">—</span>}
+                      </td>
+                    );
+                    if (k === "trades") return (
+                      <td key={k} className="p-2 text-right tabular hidden sm:table-cell text-neutral-400">{s.closed_count}</td>
+                    );
+                    return null;
+                  })}
                 </tr>
                 {expandedId === s.id && (
                   <tr>
-                    <td colSpan={8} className="p-0">
+                    <td colSpan={colSpan} className="p-0">
                       {isFamily
                         ? <FamilyDetailPanel family={s} members={strategies.filter((x) => x.grp === s.grp)} />
                         : <StrategyDetailPanel s={s} all={strategies} />}
