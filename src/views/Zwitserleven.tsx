@@ -99,7 +99,7 @@ type SortKey =
   | "risk_label";
 
 type ColKey =
-  | "idx" | "ticker" | "company" | "exchange" | "sector" | "price" | "sparkline"
+  | "ticker" | "company" | "exchange" | "sector" | "price" | "sparkline"
   | "yield" | "tax" | "net_yield"
   | "under5y" | "max_gain" | "growth_years"
   | "year1" | "year2" | "year3" | "year4" | "year5"
@@ -108,7 +108,6 @@ type ColKey =
 interface ColDef { key: ColKey; label: string; defaultVisible: boolean; sortable?: SortKey; align?: "left" | "right" | "center"; }
 
 const COLUMNS_BASE: ColDef[] = [
-  { key: "idx",          label: "#",              defaultVisible: true,  align: "left" },
   { key: "ticker",       label: "Ticker",         defaultVisible: true,  align: "left" },
   { key: "company",      label: "Naam",           defaultVisible: true,  align: "left" },
   { key: "exchange",     label: "Beurs / Land",   defaultVisible: true,  align: "left" },
@@ -330,10 +329,6 @@ export function ZwitserlevenView() {
   // Per kolom-key de header + cel-render; visibleKeys (kolom-kiezer) bepaalt
   // welke kolommen in welke volgorde getoond worden.
   const colMap: Record<string, { th: ReactNode; td: (s: ZwitserlevenStock, idx: number) => ReactNode }> = {
-    idx: {
-      th: <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide w-8">#</th>,
-      td: (s, idx) => <td className="px-3 py-2.5 text-neutral-600 tabular text-xs">{idx + 1}</td>,
-    },
     ticker: {
       th: <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Ticker</th>,
       td: (s) => (

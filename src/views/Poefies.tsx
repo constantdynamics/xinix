@@ -566,12 +566,11 @@ export function PoefiesView() {
                     <SeenHeader />
                     <HeartHeader />
                     <StarHeader />
-                    <th className="px-3 py-2 text-left w-10">#</th>
                     {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-5/40">
-                  {filteredRanking.map((p, i) => {
+                  {filteredRanking.map((p) => {
                     const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
                     const seen = marks.isSeen(p.ticker);
                     return (
@@ -579,7 +578,6 @@ export function PoefiesView() {
                         <SeenCell ticker={p.ticker} />
                         <HeartCell ticker={p.ticker} />
                         <StarCell ticker={p.ticker} />
-                        <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
                         {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(p)}</Fragment>)}
                       </tr>
                     );

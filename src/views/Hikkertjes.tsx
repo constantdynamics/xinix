@@ -238,7 +238,7 @@ export function HikkertjesView() {
             </div>
           </div>
           <div className="divide-y divide-ink-5">
-            {sorted.map((h, idx) => {
+            {sorted.map((h) => {
               const gfUrl = googleFinanceUrl(h.ticker, h.exchange);
               const belowLimit = h.above_limit_pct != null && h.above_limit_pct <= 0;
               const nearLimit = h.above_limit_pct != null && h.above_limit_pct > 0 && h.above_limit_pct <= 10;
@@ -252,7 +252,6 @@ export function HikkertjesView() {
                   <SeenInline ticker={h.ticker} />
                   <HeartInline ticker={h.ticker} />
                   <StarRating ticker={h.ticker} />
-                  <span className="text-neutral-600 w-6 text-right tabular shrink-0">{idx + 1}</span>
 
                   <div className="w-24 shrink-0">
                     <a

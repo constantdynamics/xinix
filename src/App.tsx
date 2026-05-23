@@ -360,7 +360,7 @@ export function App() {
         {tab === "poefies" && <PoefiesView />}
         {tab === "hikkertjes" && <HikkertjesView />}
         {tab === "zwitserleven" && <ZwitserlevenView />}
-        {tab === "favorieten" && <FavorietenView />}
+        {tab === "favorieten" && <FavorietenView initialDashboard={data} initialScans={scans} />}
         {tab === "status" && <HealthView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>
