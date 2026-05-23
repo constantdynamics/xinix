@@ -7,6 +7,33 @@
 
 ---
 
+## ⚠️ 0. ALTIJD-EERST-LEZEN: PR-merge reflex (kritiek)
+
+> **CLAUDE: lees dit voor je iets anders doet. Deze regel wordt vergeten als hij niet bovenaan staat.**
+
+**Reflex:** zodra `create_pull_request` succesvol heeft gedraaid, is je VOLGENDE actie ALTIJD
+`merge_pull_request` met `merge_method: "squash"`. Geen tussenstappen, geen "klaar"-bericht
+naar de gebruiker, geen "wacht op feedback". De gebruiker heeft hier op 2026-05-20 doorlopende
+toestemming voor gegeven.
+
+**Uitzonderingen (en alleen deze):**
+- CI faalt op de PR → fix eerst de CI, dan mergen
+- Er staan openstaande review-comments die om aandacht vragen → eerst beantwoorden
+- De PR is draft omdat de gebruiker er expliciet om vroeg
+
+**Concreet patroon dat je MOET volgen:**
+```
+1. create_pull_request → krijg PR-nummer
+2. pull_request_read (get_check_runs) → checks ok?
+3. merge_pull_request(merge_method="squash")
+4. Pas DAARNA antwoord aan gebruiker met PR-link + "gemerged"
+```
+
+Stap 3 overslaan is een fout, ook al voelt de taak "af" na stap 1. Als je in twijfel bent
+of stap 3 al gedaan is: doe stap 3.
+
+---
+
 ## 1. Wat is Xinix?
 
 Xinix is een fictieve belegger die leert beleggen door te experimenteren.
@@ -249,4 +276,8 @@ Deze ideeën zijn nog niet geïmplementeerd maar kunnen snel waarde toevoegen:
   geen openstaande CI-fouten of review-opmerkingen zijn die aandacht vragen,
   squash-merge de PR meteen zelf — vraag niet eerst om toestemming. De
   gebruiker heeft hier doorlopende toestemming voor gegeven (2026-05-20).
+  **Zie ook sectie 0 bovenaan dit bestand — die regel is geen suggestie maar
+  een verplichte reflex die je in elke sessie opnieuw toe moet passen.**
+- Voor je een gebruiker antwoordt na PR-aanmaak: controleer dat de PR is
+  gemerged. Zo niet → eerst mergen. Pas dan antwoorden.
 
