@@ -1318,28 +1318,227 @@ function ThresholdsCell({ s }: { s: SimStrategy }) {
   );
 }
 
+// Alle KPI's waarop je een leaderboard kunt opvragen. Per KPI definieert
+// `value` de sortier-sleutel (altijd: hoger = beter) en `format` hoe de
+// waarde naast de strategie in de tabel verschijnt.
+type LeaderboardCat = "Rendement" | "Drempels" | "Risico" | "Activiteit" | "Capture" | "Medailles";
+interface LeaderboardDef {
+  key: string;
+  label: string;
+  cat: LeaderboardCat;
+  value: (s: SimStrategy) => number;
+  format: (s: SimStrategy) => string;
+  tone?: (s: SimStrategy) => "lime" | "loss" | "neutral";
+  hint?: string;
+}
+
+function fmtSignedPct(v: number, decimals = 1): string {
+  return `${v >= 0 ? "+" : ""}${v.toFixed(decimals)}%`;
+}
+
+const LEADERBOARDS: LeaderboardDef[] = [
+  // Rendement
+  { key: "totaal_pct",   label: "Totaal rendement %",  cat: "Rendement",
+    value: (s) => s.total_return_pct,
+    format: (s) => fmtSignedPct(s.total_return_pct, 2),
+    tone:   (s) => s.total_return_pct >= 0 ? "lime" : "loss" },
+  { key: "avg_trade",    label: "Gem. winst per trade", cat: "Rendement",
+    value: (s) => s.avg_return_pct,
+    format: (s) => s.closed_count > 0 ? fmtSignedPct(s.avg_return_pct, 1) : "—",
+    tone:   (s) => s.avg_return_pct >= 0 ? "lime" : "loss" },
+  { key: "median_trade", label: "Mediaan winst per trade", cat: "Rendement",
+    value: (s) => s.median_return_pct ?? 0,
+    format: (s) => s.closed_count > 0 ? fmtSignedPct(s.median_return_pct ?? 0, 1) : "—",
+    tone:   (s) => (s.median_return_pct ?? 0) >= 0 ? "lime" : "loss" },
+  { key: "best_trade",   label: "Beste trade",         cat: "Rendement",
+    value: (s) => s.best_trade_pct ?? 0,
+    format: (s) => s.closed_count > 0 ? `+${(s.best_trade_pct ?? 0).toFixed(0)}%` : "—",
+    tone:   () => "lime" },
+  { key: "worst_trade",  label: "Slechtste trade (minst slecht boven)", cat: "Rendement",
+    value: (s) => s.worst_trade_pct ?? 0,
+    format: (s) => s.closed_count > 0 ? fmtSignedPct(s.worst_trade_pct ?? 0, 0) : "—",
+    tone:   (s) => (s.worst_trade_pct ?? 0) >= 0 ? "lime" : "loss" },
+  // Drempels
+  { key: "winrate",     label: "Hit-rate (>0%)",   cat: "Drempels",
+    value: (s) => s.win_rate * 100,
+    format: (s) => s.closed_count > 0 ? `${(s.win_rate * 100).toFixed(0)}%` : "—" },
+  { key: "w5",          label: "% trades ≥ 5%",    cat: "Drempels",
+    value: (s) => (s.win_rate_5pct ?? 0) * 100,
+    format: (s) => s.closed_count > 0 ? `${((s.win_rate_5pct ?? 0) * 100).toFixed(0)}%` : "—" },
+  { key: "w10",         label: "% trades ≥ 10%",   cat: "Drempels",
+    value: (s) => (s.win_rate_10pct ?? 0) * 100,
+    format: (s) => s.closed_count > 0 ? `${((s.win_rate_10pct ?? 0) * 100).toFixed(0)}%` : "—" },
+  { key: "w25",         label: "% trades ≥ 25%",   cat: "Drempels",
+    value: (s) => (s.win_rate_25pct ?? 0) * 100,
+    format: (s) => s.closed_count > 0 ? `${((s.win_rate_25pct ?? 0) * 100).toFixed(0)}%` : "—" },
+  { key: "w50",         label: "% trades ≥ 50%",   cat: "Drempels",
+    value: (s) => (s.win_rate_50pct ?? 0) * 100,
+    format: (s) => s.closed_count > 0 ? `${((s.win_rate_50pct ?? 0) * 100).toFixed(0)}%` : "—" },
+  { key: "w100",        label: "% trades ≥ 100%",  cat: "Drempels",
+    value: (s) => (s.win_rate_100pct ?? 0) * 100,
+    format: (s) => s.closed_count > 0 ? `${((s.win_rate_100pct ?? 0) * 100).toFixed(0)}%` : "—" },
+  // Risico / efficiëntie
+  { key: "profit_factor", label: "Profit factor",     cat: "Risico",
+    value: (s) => s.profit_factor ?? 0,
+    format: (s) => {
+      if (s.closed_count === 0) return "—";
+      const pf = s.profit_factor ?? 0;
+      return !Number.isFinite(pf) || pf >= 999 ? "∞" : pf.toFixed(2);
+    },
+    hint: "Som winsten ($) ÷ som verliezen ($). >1 = winstgevend." },
+  { key: "expectancy",  label: "Expectancy per trade", cat: "Risico",
+    value: (s) => s.expectancy_pct ?? 0,
+    format: (s) => s.closed_count > 0 ? fmtSignedPct(s.expectancy_pct ?? 0, 2) : "—",
+    tone:   (s) => (s.expectancy_pct ?? 0) >= 0 ? "lime" : "loss" },
+  { key: "posdays",     label: "% dagen positief",    cat: "Risico",
+    value: (s) => (s.positive_days_pct ?? 0) * 100,
+    format: (s) => (s.total_days ?? 0) > 0 ? `${((s.positive_days_pct ?? 0) * 100).toFixed(0)}%` : "—" },
+  // Activiteit
+  { key: "trades",      label: "Aantal trades",   cat: "Activiteit",
+    value: (s) => s.closed_count,
+    format: (s) => `${s.closed_count}` },
+  { key: "unique",      label: "Unieke tickers",  cat: "Activiteit",
+    value: (s) => s.unique_tickers ?? 0,
+    format: (s) => `${s.unique_tickers ?? 0}` },
+  // Capture
+  { key: "feniks_cap",     label: "Feniksen gevangen",    cat: "Capture",
+    value: (s) => s.phoenix_captured ?? 0,
+    format: (s) => `${s.phoenix_captured ?? 0}` },
+  { key: "hikkertje_cap",  label: "Hikkertjes gevangen",  cat: "Capture",
+    value: (s) => s.hikkertje_captured ?? 0,
+    format: (s) => `${s.hikkertje_captured ?? 0}` },
+  { key: "poefie_cap",     label: "Poefies gevangen",     cat: "Capture",
+    value: (s) => s.poefie_captured ?? 0,
+    format: (s) => `${s.poefie_captured ?? 0}` },
+  // Medailles
+  { key: "gold",   label: "🏆 Goud-trades",    cat: "Medailles",
+    value: (s) => s.gold_trades ?? 0,
+    format: (s) => `${s.gold_trades ?? 0}` },
+  { key: "silver", label: "🥈 Zilver-trades", cat: "Medailles",
+    value: (s) => s.silver_trades ?? 0,
+    format: (s) => `${s.silver_trades ?? 0}` },
+  { key: "bronze", label: "🥉 Brons-trades",  cat: "Medailles",
+    value: (s) => s.bronze_trades ?? 0,
+    format: (s) => `${s.bronze_trades ?? 0}` },
+];
+
+// Aggregeert per familie (groep) een synthetische SimStrategy-rij met
+// gemiddelden over alle strategieën in die groep. We bewaren `open_count`
+// als "aantal strategieën in de familie" voor de label. Alle numerieke
+// KPI-velden uit SimStrategy worden simpelweg gemiddeld; lijst-velden
+// blijven leeg.
+function aggregateFamilies(strategies: SimStrategy[]): SimStrategy[] {
+  const byGrp = new Map<string, SimStrategy[]>();
+  for (const s of strategies) {
+    const arr = byGrp.get(s.grp) ?? [];
+    arr.push(s);
+    byGrp.set(s.grp, arr);
+  }
+  const out: SimStrategy[] = [];
+  let pseudoId = -1;
+  for (const [grp, arr] of byGrp) {
+    if (arr.length === 0) continue;
+    const n = arr.length;
+    const avg = (sel: (s: SimStrategy) => number | undefined) =>
+      arr.reduce((sum, s) => sum + (sel(s) ?? 0), 0) / n;
+    out.push({
+      id: pseudoId--,
+      slug: `family-${grp}`,
+      name: groupLabel(grp),
+      grp,
+      config: { holdDays: 0, stop: null, tp: null, sector: "all", minScore: 0, redReq: false, minGold: 0, maxPos: 0, posSize: 0, limitBuf: 0 } as unknown as SimStrategy["config"],
+      generation: 1,
+      protected: false,
+      parent_id: null,
+      rank: 0,
+      medal: null,
+      total_equity:    avg((s) => s.total_equity),
+      total_return_pct: avg((s) => s.total_return_pct),
+      total_return_usd: avg((s) => s.total_return_usd),
+      realized_usd:    avg((s) => s.realized_usd),
+      open_count:      n,    // we hergebruiken dit veld als familie-grootte
+      closed_count:    Math.round(avg((s) => s.closed_count)),
+      win_rate:        avg((s) => s.win_rate),
+      avg_return_pct:  avg((s) => s.avg_return_pct),
+      win_rate_5pct:   avg((s) => s.win_rate_5pct),
+      win_rate_10pct:  avg((s) => s.win_rate_10pct),
+      win_rate_25pct:  avg((s) => s.win_rate_25pct),
+      win_rate_50pct:  avg((s) => s.win_rate_50pct),
+      win_rate_100pct: avg((s) => s.win_rate_100pct),
+      positive_days_pct: avg((s) => s.positive_days_pct),
+      total_days:        Math.round(avg((s) => s.total_days)),
+      median_return_pct: avg((s) => s.median_return_pct),
+      best_trade_pct:    avg((s) => s.best_trade_pct),
+      worst_trade_pct:   avg((s) => s.worst_trade_pct),
+      profit_factor:     avg((s) => s.profit_factor),
+      expectancy_pct:    avg((s) => s.expectancy_pct),
+      unique_tickers:    avg((s) => s.unique_tickers),
+      phoenix_captured:  avg((s) => s.phoenix_captured),
+      hikkertje_captured: avg((s) => s.hikkertje_captured),
+      poefie_captured:   avg((s) => s.poefie_captured),
+      gold_trades:       avg((s) => s.gold_trades),
+      silver_trades:     avg((s) => s.silver_trades),
+      bronze_trades:     avg((s) => s.bronze_trades),
+      exit_reasons: [],
+      partial_count: 0,
+      partial_avg_qty_pct: 0,
+      partial_total_usd: 0,
+      last_run_at: null,
+      open_pos_detail: [],
+      closed_pos_detail: [],
+    });
+  }
+  return out;
+}
+
 function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   const [grpFilter, setGrpFilter] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<"rank" | "winrate" | "closed" | "w10" | "w25" | "w100" | "posdays">("rank");
+  // Standaard sorteren we op rendement (de "rank"-volgorde uit backend).
+  // Elke andere keuze opent een leaderboard.
+  const [leaderboard, setLeaderboard] = useState<string>("totaal_pct");
+  const [scope, setScope] = useState<"individual" | "family">("individual");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
+  const activeBoard = LEADERBOARDS.find((b) => b.key === leaderboard) ?? LEADERBOARDS[0];
   const groups = useMemo(() => ["all", ...new Set(strategies.map((s) => s.grp))], [strategies]);
+
+  // Voor "per familie": maak synthetische SimStrategy-rijen per groep met
+  // gemiddelden over alle strategieën in die groep. Zo werken alle bestaande
+  // leaderboards (LEADERBOARDS-definities lezen velden van SimStrategy)
+  // automatisch ook voor familie-aggregaten.
+  const familyRows = useMemo<SimStrategy[]>(() => aggregateFamilies(strategies), [strategies]);
+
+  const source = scope === "family" ? familyRows : strategies;
   const filtered = useMemo(() => {
-    let rows = grpFilter === "all" ? strategies : strategies.filter((s) => s.grp === grpFilter);
-    if (sortBy === "winrate") rows = [...rows].sort((a, b) => b.win_rate - a.win_rate);
-    else if (sortBy === "closed") rows = [...rows].sort((a, b) => b.closed_count - a.closed_count);
-    else if (sortBy === "w10") rows = [...rows].sort((a, b) => (b.win_rate_10pct ?? 0) - (a.win_rate_10pct ?? 0));
-    else if (sortBy === "w25") rows = [...rows].sort((a, b) => (b.win_rate_25pct ?? 0) - (a.win_rate_25pct ?? 0));
-    else if (sortBy === "w100") rows = [...rows].sort((a, b) => (b.win_rate_100pct ?? 0) - (a.win_rate_100pct ?? 0));
-    else if (sortBy === "posdays") rows = [...rows].sort((a, b) => (b.positive_days_pct ?? 0) - (a.positive_days_pct ?? 0));
-    return rows;
-  }, [strategies, grpFilter, sortBy]);
+    // In familie-modus is er geen per-groep filter (je kíjkt naar groepen).
+    const rows = scope === "family"
+      ? source
+      : (grpFilter === "all" ? source : source.filter((s) => s.grp === grpFilter));
+    return [...rows].sort((a, b) => activeBoard.value(b) - activeBoard.value(a));
+  }, [source, scope, grpFilter, activeBoard]);
+
+  // Categorieën in vaste volgorde voor de picker.
+  const categories: LeaderboardCat[] = ["Rendement", "Drempels", "Risico", "Activiteit", "Capture", "Medailles"];
 
   return (
     <div>
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-3">
-        {groups.map((g) => (
+      {/* Scope-toggle + groep-filter */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="inline-flex rounded-full border border-ink-5 overflow-hidden text-[11px] font-semibold">
+          <button
+            onClick={() => setScope("individual")}
+            className={`px-3 py-1 transition-colors ${scope === "individual" ? "bg-fog-lime/20 text-fog-lime" : "text-neutral-400 hover:text-neutral-200"}`}
+          >
+            Individueel
+          </button>
+          <button
+            onClick={() => setScope("family")}
+            className={`px-3 py-1 transition-colors border-l border-ink-5 ${scope === "family" ? "bg-fog-lime/20 text-fog-lime" : "text-neutral-400 hover:text-neutral-200"}`}
+          >
+            Per familie
+          </button>
+        </div>
+        {scope === "individual" && groups.map((g) => (
           <button
             key={g}
             onClick={() => setGrpFilter(g)}
@@ -1353,25 +1552,35 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
           </button>
         ))}
       </div>
-      <div className="flex gap-2 mb-3 text-[11px] flex-wrap">
-        <span className="text-neutral-500">Sorteer:</span>
-        {([
-          ["rank", "Rendement"],
-          ["winrate", "Hit-rate"],
-          ["w10", "≥10% winst"],
-          ["w25", "≥25% winst"],
-          ["w100", "≥100% winst"],
-          ["posdays", "Dagen +"],
-          ["closed", "Trades"],
-        ] as const).map(([k, label]) => (
-          <button
-            key={k}
-            onClick={() => setSortBy(k)}
-            className={`underline-offset-2 ${sortBy === k ? "text-fog-lime underline" : "text-neutral-400 hover:text-neutral-200"}`}
-          >
-            {label}
-          </button>
-        ))}
+
+      {/* Leaderboard-picker — chips gegroepeerd per categorie. */}
+      <div className="rounded-lg border border-ink-5/60 bg-ink-3/20 p-3 mb-3 space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-fog-pink font-bold">
+          🏆 Leaderboard — {scope === "family" ? "families gerankt" : "strategieën gerankt"} op
+        </div>
+        {categories.map((cat) => {
+          const boards = LEADERBOARDS.filter((b) => b.cat === cat);
+          if (boards.length === 0) return null;
+          return (
+            <div key={cat} className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-bold text-neutral-400 w-20 shrink-0">{cat}:</span>
+              {boards.map((b) => (
+                <button
+                  key={b.key}
+                  onClick={() => setLeaderboard(b.key)}
+                  title={b.hint}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors ${
+                    leaderboard === b.key
+                      ? "border-fog-pink bg-fog-pink/20 text-fog-pink"
+                      : "border-ink-5 text-neutral-400 hover:text-neutral-200 hover:border-neutral-500"
+                  }`}
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       <div className="overflow-x-auto">
@@ -1380,10 +1589,11 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
             <tr>
               <th className="text-left p-2 font-semibold w-8">#</th>
               <th className="text-left p-2 font-semibold w-6"></th>
-              <th className="text-left p-2 font-semibold">Strategie</th>
-              <th className="text-left p-2 font-semibold hidden md:table-cell">Groep</th>
+              <th className="text-left p-2 font-semibold">{scope === "family" ? "Familie" : "Strategie"}</th>
+              <th className="text-right p-2 font-semibold text-fog-pink whitespace-nowrap">
+                {activeBoard.label}
+              </th>
               <th className="text-right p-2 font-semibold">Rendement</th>
-              <th className="text-right p-2 font-semibold">Equity</th>
               <th className="text-right p-2 font-semibold hidden sm:table-cell">Hit-rate</th>
               <th
                 className="text-center p-2 font-semibold hidden lg:table-cell"
@@ -1392,41 +1602,45 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                 Winst-drempels
                 <div className="text-[8px] font-normal text-neutral-600 mt-0.5">5 / 10 / 25 / 50 / 100%</div>
               </th>
-              <th
-                className="text-right p-2 font-semibold hidden lg:table-cell"
-                title="Aandeel dagen waarop de portefeuille positief stond t.o.v. startkapitaal"
-              >
-                Dagen +
-              </th>
               <th className="text-right p-2 font-semibold hidden sm:table-cell">Trades</th>
-              <th className="text-right p-2 font-semibold hidden lg:table-cell">Open</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((s) => (
+            {filtered.map((s, i) => {
+              const isFamily = scope === "family";
+              const tone = activeBoard.tone?.(s);
+              const valueClass = tone === "lime" ? "text-fog-lime" : tone === "loss" ? "text-fog-loss" : "text-neutral-100";
+              const rowExpandable = !isFamily;
+              return (
               <Fragment key={s.id}>
                 <tr
-                  className={`border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors cursor-pointer select-none ${s.protected ? "bg-fog-watch/[0.03]" : ""} ${expandedId === s.id ? "bg-ink-3/30" : ""}`}
-                  onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
+                  className={`border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors select-none ${rowExpandable ? "cursor-pointer" : ""} ${s.protected ? "bg-fog-watch/[0.03]" : ""} ${expandedId === s.id ? "bg-ink-3/30" : ""}`}
+                  onClick={() => { if (rowExpandable) setExpandedId(expandedId === s.id ? null : s.id); }}
                 >
-                  <td className="p-2 tabular text-neutral-400">{s.rank}</td>
-                  <td className="p-2 text-base leading-none">{s.medal ?? ""}</td>
+                  <td className="p-2 tabular text-neutral-400">{i + 1}</td>
+                  <td className="p-2 text-base leading-none">
+                    {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : ""}
+                  </td>
                   <td className="p-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-medium text-neutral-100">{s.name}</span>
-                      <GenBadge gen={s.generation ?? 1} protected={s.protected ?? false} />
-                      <span className="text-[10px] text-neutral-600 ml-auto">{expandedId === s.id ? "▲" : "▼"}</span>
+                      <span className="font-medium text-neutral-100">
+                        {isFamily ? `${s.name} (${s.open_count} strat.)` : s.name}
+                      </span>
+                      {!isFamily && <GenBadge gen={s.generation ?? 1} protected={s.protected ?? false} />}
+                      {rowExpandable && <span className="text-[10px] text-neutral-600 ml-auto">{expandedId === s.id ? "▲" : "▼"}</span>}
                     </div>
-                    <div className="text-[10px] text-neutral-500 mt-0.5">
-                      {s.config.holdDays}d
-                      {s.config.stop != null && ` · stop-${(Math.abs(s.config.stop) * 100).toFixed(0)}%`}
-                      {s.config.tp != null && ` · tp+${(s.config.tp * 100).toFixed(0)}%`}
-                      {s.config.sector !== "all" && ` · ${s.config.sector}`}
-                      {s.config.minGold > 0 && ` · ≥${s.config.minGold}🏆`}
-                    </div>
+                    {!isFamily && (
+                      <div className="text-[10px] text-neutral-500 mt-0.5">
+                        {s.config.holdDays}d
+                        {s.config.stop != null && ` · stop-${(Math.abs(s.config.stop) * 100).toFixed(0)}%`}
+                        {s.config.tp != null && ` · tp+${(s.config.tp * 100).toFixed(0)}%`}
+                        {s.config.sector !== "all" && ` · ${s.config.sector}`}
+                        {s.config.minGold > 0 && ` · ≥${s.config.minGold}🏆`}
+                      </div>
+                    )}
                   </td>
-                  <td className="p-2 hidden md:table-cell text-neutral-400 text-[11px]">
-                    {groupLabel(s.grp)}
+                  <td className={`p-2 text-right tabular font-bold ${valueClass}`}>
+                    {activeBoard.format(s)}
                   </td>
                   <td className="p-2 text-right tabular font-bold">
                     <RetCell v={s.total_return_pct} />
@@ -1450,31 +1664,20 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                       <span className="text-neutral-500">—</span>
                     )}
                   </td>
-                  <td className="p-2 text-right tabular hidden lg:table-cell">
-                    {(s.total_days ?? 0) > 0 ? (
-                      <span className={(s.positive_days_pct ?? 0) >= 0.5 ? "text-fog-lime" : "text-neutral-300"} title={`${((s.positive_days_pct ?? 0) * 100).toFixed(0)}% van ${s.total_days} dagen`}>
-                        {((s.positive_days_pct ?? 0) * 100).toFixed(0)}%
-                      </span>
-                    ) : (
-                      <span className="text-neutral-500">—</span>
-                    )}
-                  </td>
                   <td className="p-2 text-right tabular hidden sm:table-cell text-neutral-400">
                     {s.closed_count}
                   </td>
-                  <td className="p-2 text-right tabular hidden lg:table-cell text-neutral-400">
-                    {s.open_count}
-                  </td>
                 </tr>
-                {expandedId === s.id && (
+                {!isFamily && expandedId === s.id && (
                   <tr>
-                    <td colSpan={11} className="p-0">
+                    <td colSpan={8} className="p-0">
                       <StrategyDetailPanel s={s} all={strategies} />
                     </td>
                   </tr>
                 )}
               </Fragment>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
