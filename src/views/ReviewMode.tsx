@@ -414,6 +414,7 @@ function ReviewModeModal({
   // Queue wordt eenmalig vastgelegd bij lijstkeuze — wijzigt niet mee als
   // marks tussentijds veranderen, zodat de index stabiel blijft.
   const [queue, setQueue] = useState<ReviewItem[]>([]);
+  const [skipped, setSkipped] = useState<Set<number>>(new Set());
 
   // Sluit bij Escape
   useEffect(() => {
