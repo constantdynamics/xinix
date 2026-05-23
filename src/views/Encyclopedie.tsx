@@ -1,8 +1,7 @@
 // Encyclopedie — een doorzoekbaar register van alle Xinix-termen, KPI's,
 // secties en strategie-concepten. Bij geen match krijgt de gebruiker een
-// invoerveld om een vraag in te dienen — die wordt lokaal opgeslagen
-// (localStorage) zodat hij niet kwijtraakt, en kan in een volgende sessie
-// aan Claude worden voorgelegd.
+// invoerveld om een vraag in te dienen. Vragen + antwoorden worden lokaal
+// gelogd als 'gesprekken', zijn doorzoekbaar en per gesprek kopieerbaar.
 
 import { useMemo, useState } from "react";
 import { Card, Button } from "../components/ui";
@@ -14,9 +13,6 @@ interface Entry {
   related?: string[];  // gerelateerde terms (klikbaar)
   aliases?: string[];  // alternatieve spellings/afkortingen
 }
-
-// ── Inhoud van het register ──────────────────────────────────────────────────
-// Houd dummyproof: één zin = wat het is, dan in detail.
 
 const ENTRIES: Entry[] = [
   // ── Tabbladen ─────────────────────────────────────────────────────────────
@@ -118,20 +114,43 @@ const ENTRIES: Entry[] = [
   { term: "Signal_tickers", category: "Architectuur", body: "Centrale DB-tabel met alle 3700+ tickers en hun metadata: score, sector, medailles, buy_limit, is_phoenix/is_hikkertje/is_poefie flags." },
 ];
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ── Gesprekken-log ───────────────────────────────────────────────────────────
+// Een gesprek = vraag + (optioneel) antwoord. Lokaal opgeslagen in localStorage
+// onder STORAGE_KEY. Vragen en antwoorden zijn doorzoekbaar via het zoekveld
+// bovenaan, en elk gesprek kan via "Kopieer" naar het klembord.
 
-const ASKED_KEY = "xinix_encyclopedie_asked_v1";
+const STORAGE_KEY = "xinix_encyclopedie_log_v2";
+const LEGACY_KEY = "xinix_encyclopedie_asked_v1";
 
-interface AskedQuestion { q: string; at: string }
-
-function loadAsked(): AskedQuestion[] {
-  try {
-    const raw = localStorage.getItem(ASKED_KEY);
-    return raw ? (JSON.parse(raw) as AskedQuestion[]) : [];
-  } catch { return []; }
+interface Conversation {
+  id: string;          // unique id (epoch ms + random)
+  q: string;
+  a: string;           // antwoord (leeg = nog onbeantwoord)
+  asked_at: string;    // ISO datum vraag
+  answered_at: string | null;
 }
-function saveAsked(list: AskedQuestion[]): void {
-  try { localStorage.setItem(ASKED_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+
+function newId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function loadLog(): Conversation[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as Conversation[];
+  } catch { /* ignore */ }
+  // Migratie van oude v1-opslag (alleen vragen).
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      const old = JSON.parse(legacy) as Array<{ q: string; at: string }>;
+      return old.map((x) => ({ id: newId(), q: x.q, a: "", asked_at: x.at, answered_at: null }));
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+function saveLog(list: Conversation[]): void {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch { /* ignore */ }
 }
 
 function entryMatches(e: Entry, q: string): boolean {
@@ -144,52 +163,97 @@ function entryMatches(e: Entry, q: string): boolean {
   return false;
 }
 
+function convMatches(c: Conversation, q: string): boolean {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  return c.q.toLowerCase().includes(needle) || c.a.toLowerCase().includes(needle);
+}
+
+function fmtDate(s: string): string {
+  try {
+    const d = new Date(s);
+    return d.toLocaleString("nl-NL", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch { return s; }
+}
+
 export function EncyclopedieView() {
   const [query, setQuery] = useState("");
-  const [asked, setAsked] = useState<AskedQuestion[]>(() => loadAsked());
+  const [log, setLog] = useState<Conversation[]>(() => loadLog());
   const [askDraft, setAskDraft] = useState("");
+  const [editingAnswer, setEditingAnswer] = useState<string | null>(null); // id van gesprek met open antwoord-editor
+  const [answerDraft, setAnswerDraft] = useState("");
 
-  const filtered = useMemo(() => ENTRIES.filter((e) => entryMatches(e, query)), [query]);
+  const filteredEntries = useMemo(() => ENTRIES.filter((e) => entryMatches(e, query)), [query]);
+  const filteredLog = useMemo(() => log.filter((c) => convMatches(c, query)), [log, query]);
   const byCategory = useMemo(() => {
     const m = new Map<string, Entry[]>();
-    for (const e of filtered) {
+    for (const e of filteredEntries) {
       const arr = m.get(e.category) ?? [];
       arr.push(e);
       m.set(e.category, arr);
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [filtered]);
+  }, [filteredEntries]);
 
   function submitQuestion() {
     const q = askDraft.trim();
     if (!q) return;
-    const next = [{ q, at: new Date().toISOString() }, ...asked].slice(0, 50);
-    setAsked(next);
-    saveAsked(next);
+    const next: Conversation[] = [
+      { id: newId(), q, a: "", asked_at: new Date().toISOString(), answered_at: null },
+      ...log,
+    ].slice(0, 200);
+    setLog(next);
+    saveLog(next);
     setAskDraft("");
   }
-  function removeAsked(at: string) {
-    const next = asked.filter((x) => x.at !== at);
-    setAsked(next);
-    saveAsked(next);
+  function removeConv(id: string) {
+    const next = log.filter((x) => x.id !== id);
+    setLog(next);
+    saveLog(next);
   }
-  function copyAllToClipboard() {
-    if (asked.length === 0) return;
-    const text = asked.map((x) => `- ${x.q}`).join("\n");
-    void navigator.clipboard?.writeText(text);
+  function startAnswer(c: Conversation) {
+    setEditingAnswer(c.id);
+    setAnswerDraft(c.a);
+  }
+  function saveAnswer(id: string) {
+    const next = log.map((x) =>
+      x.id === id
+        ? { ...x, a: answerDraft.trim(), answered_at: answerDraft.trim() ? new Date().toISOString() : null }
+        : x,
+    );
+    setLog(next);
+    saveLog(next);
+    setEditingAnswer(null);
+    setAnswerDraft("");
+  }
+  function copyConv(c: Conversation) {
+    const parts = [`Vraag (${fmtDate(c.asked_at)}):`, c.q];
+    if (c.a) {
+      parts.push("", `Antwoord${c.answered_at ? ` (${fmtDate(c.answered_at)})` : ""}:`, c.a);
+    }
+    void navigator.clipboard?.writeText(parts.join("\n"));
+  }
+  function copyAll() {
+    if (filteredLog.length === 0) return;
+    const blocks = filteredLog.map((c) => {
+      const parts = [`Vraag (${fmtDate(c.asked_at)}):`, c.q];
+      if (c.a) parts.push("", `Antwoord:`, c.a);
+      return parts.join("\n");
+    });
+    void navigator.clipboard?.writeText(blocks.join("\n\n──────────\n\n"));
   }
 
-  const noMatch = query.trim().length > 0 && filtered.length === 0;
+  const noMatch = query.trim().length > 0 && filteredEntries.length === 0;
 
   return (
     <div className="space-y-4">
       <Card className="p-4 space-y-3">
         <div>
-          <div className="font-bold text-base text-neutral-100 mb-1">📖 Xinix-encyclopedie</div>
+          <div className="font-bold text-base text-neutral-100 mb-1">🤔 ik snap iets niet</div>
           <p className="text-sm text-neutral-400 leading-relaxed">
-            Doorzoekbaar register van alle termen, tabbladen, KPI's en strategie-concepten in Xinix.
-            Typ een woord (bv. "a-score", "drempels", "feniks") om de uitleg te vinden. Als de term niet
-            voorkomt, kun je hem onderaan als vraag indienen — ik kijk er bij een volgende sessie naar.
+            Doorzoekbaar register van alle Xinix-termen, KPI's en secties — én een logboek van je vragen
+            + antwoorden. Typ een woord (bv. "a-score", "drempels", "feniks") om bestaande uitleg of een
+            eerder gesprek te vinden. Staat het er niet in? Dien je vraag in; bewaar het antwoord later.
           </p>
         </div>
         <input
@@ -197,11 +261,11 @@ export function EncyclopedieView() {
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Zoek… (bv. a-score, profit factor, kansrotatie)"
+          placeholder="Zoek… (in uitleg én in je opgeslagen gesprekken)"
           className="w-full px-3 py-2 rounded-lg bg-ink-3 border border-ink-5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-fog-lime/60"
         />
         <div className="text-[11px] text-neutral-500">
-          {filtered.length} van {ENTRIES.length} entries{query && ` voor "${query}"`}
+          {filteredEntries.length} van {ENTRIES.length} register-entries · {filteredLog.length} van {log.length} gesprekken{query && ` voor "${query}"`}
         </div>
       </Card>
 
@@ -212,7 +276,8 @@ export function EncyclopedieView() {
             Geen uitleg gevonden voor "{query}"
           </div>
           <div className="text-xs text-neutral-300 leading-relaxed">
-            Dien je vraag in — ik bekijk hem bij de volgende sessie en voeg de uitleg toe aan het register.
+            Dien je vraag in — ik bekijk hem bij de volgende sessie en je kunt het antwoord hier
+            terug-plakken zodat het bewaard blijft.
           </div>
           <textarea
             value={askDraft || `Wat betekent "${query}" in Xinix?`}
@@ -220,7 +285,63 @@ export function EncyclopedieView() {
             rows={3}
             className="w-full px-2 py-1.5 rounded bg-ink-3 border border-ink-5 text-xs text-neutral-100 focus:outline-none focus:border-fog-warn/60"
           />
-          <Button size="sm" onClick={submitQuestion}>+ Vraag indienen</Button>
+          <Button size="sm" onClick={submitQuestion}>+ Vraag opslaan</Button>
+        </Card>
+      )}
+
+      {/* Gesprekken-log */}
+      {filteredLog.length > 0 && (
+        <Card className="p-0 overflow-hidden">
+          <div className="px-4 py-2 flex items-center justify-between border-b border-ink-5 bg-ink-3/30">
+            <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+              💬 Mijn gesprekken {filteredLog.length !== log.length && <span className="text-neutral-600">({filteredLog.length} van {log.length})</span>}
+            </div>
+            <Button size="sm" variant="ghost" onClick={copyAll}>📋 Kopieer alle</Button>
+          </div>
+          <div className="divide-y divide-ink-5/40">
+            {filteredLog.map((c) => (
+              <div key={c.id} className="px-4 py-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <div className="flex-1">
+                    <div className="text-[10px] uppercase tracking-wider text-neutral-500 mb-0.5">Vraag · {fmtDate(c.asked_at)}</div>
+                    <div className="text-sm text-neutral-100">{c.q}</div>
+                  </div>
+                  <button onClick={() => copyConv(c)} className="text-[11px] text-neutral-500 hover:text-neutral-200 px-1.5 py-0.5 rounded hover:bg-ink-3" title="Kopieer dit gesprek">📋</button>
+                  <button onClick={() => removeConv(c.id)} className="text-[11px] text-neutral-600 hover:text-fog-loss px-1.5 py-0.5 rounded hover:bg-ink-3" title="Verwijder">✕</button>
+                </div>
+
+                {/* Antwoord-blok */}
+                {editingAnswer === c.id ? (
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] uppercase tracking-wider text-fog-lime/80">Antwoord (bewerken)</div>
+                    <textarea
+                      value={answerDraft}
+                      onChange={(e) => setAnswerDraft(e.target.value)}
+                      rows={4}
+                      placeholder="Plak hier het antwoord uit je Claude-sessie…"
+                      className="w-full px-2 py-1.5 rounded bg-ink-3 border border-fog-lime/40 text-xs text-neutral-100 focus:outline-none focus:border-fog-lime/80"
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" onClick={() => saveAnswer(c.id)}>Bewaren</Button>
+                      <button onClick={() => setEditingAnswer(null)} className="text-[11px] text-neutral-500 hover:text-neutral-300">Annuleren</button>
+                    </div>
+                  </div>
+                ) : c.a ? (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-fog-lime/70 mb-0.5">
+                      Antwoord{c.answered_at && ` · ${fmtDate(c.answered_at)}`}
+                      <button onClick={() => startAnswer(c)} className="ml-2 text-neutral-500 hover:text-neutral-300 normal-case tracking-normal">✎ bewerken</button>
+                    </div>
+                    <div className="text-xs text-neutral-300 leading-relaxed whitespace-pre-wrap">{c.a}</div>
+                  </div>
+                ) : (
+                  <button onClick={() => startAnswer(c)} className="text-[11px] text-neutral-500 hover:text-fog-lime border border-dashed border-ink-5 rounded px-2 py-1 hover:border-fog-lime/40">
+                    + Antwoord toevoegen
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 
@@ -253,56 +374,24 @@ export function EncyclopedieView() {
         </Card>
       ))}
 
-      {/* Open vragen-lijst */}
-      {asked.length > 0 && (
-        <Card className="p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
-              📥 Mijn openstaande vragen ({asked.length})
-            </div>
-            <Button size="sm" variant="ghost" onClick={copyAllToClipboard}>📋 Kopieer alle</Button>
+      {/* Altijd onderaan: ad-hoc vraag */}
+      <Card className="p-3 border-ink-5/60">
+        <details>
+          <summary className="text-xs text-neutral-400 cursor-pointer hover:text-neutral-200">
+            + Term mist of vraag stellen
+          </summary>
+          <div className="mt-2 space-y-2">
+            <textarea
+              value={askDraft}
+              onChange={(e) => setAskDraft(e.target.value)}
+              rows={3}
+              placeholder="Typ je vraag…"
+              className="w-full px-2 py-1.5 rounded bg-ink-3 border border-ink-5 text-xs text-neutral-100 focus:outline-none focus:border-fog-lime/60"
+            />
+            <Button size="sm" onClick={submitQuestion} disabled={!askDraft.trim()}>+ Vraag opslaan</Button>
           </div>
-          <div className="text-[11px] text-neutral-500 leading-relaxed">
-            Lokaal opgeslagen op dit apparaat. Kopieer ze naar Claude in een volgende sessie en
-            ik voeg de uitleg toe aan het register.
-          </div>
-          <ul className="space-y-1.5">
-            {asked.map((x) => (
-              <li key={x.at} className="flex items-start gap-2 text-xs">
-                <span className="flex-1 text-neutral-200">{x.q}</span>
-                <button
-                  onClick={() => removeAsked(x.at)}
-                  className="text-neutral-600 hover:text-fog-loss"
-                  title="Verwijder"
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
-      {/* Ook bij hit: ruimte om handmatig vraag te stellen */}
-      {!noMatch && (
-        <Card className="p-3 border-ink-5/60">
-          <details>
-            <summary className="text-xs text-neutral-400 cursor-pointer hover:text-neutral-200">
-              + Term mist of vraag stellen
-            </summary>
-            <div className="mt-2 space-y-2">
-              <textarea
-                value={askDraft}
-                onChange={(e) => setAskDraft(e.target.value)}
-                rows={3}
-                placeholder="Typ je vraag…"
-                className="w-full px-2 py-1.5 rounded bg-ink-3 border border-ink-5 text-xs text-neutral-100 focus:outline-none focus:border-fog-lime/60"
-              />
-              <Button size="sm" onClick={submitQuestion} disabled={!askDraft.trim()}>+ Vraag indienen</Button>
-            </div>
-          </details>
-        </Card>
-      )}
+        </details>
+      </Card>
     </div>
   );
 }
