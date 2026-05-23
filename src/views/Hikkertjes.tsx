@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   fetchScanResults,
   triggerJob,
@@ -11,7 +11,8 @@ import { TickerSparkline } from "../components/TickerSparkline";
 import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { EditableLimit } from "../components/EditableLimit";
 import { useMarks } from "../hooks/useMarks";
-import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile, StarRating } from "../components/MarkCells";
+import { HeartCell, HeartHeader, SeenCell, SeenHeader, StarCell, StarHeader, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile } from "../components/MarkCells";
+import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { PriceChartModal } from "./PriceChartModal";
 
 function fmtPrice(v: number): string {
@@ -19,6 +20,15 @@ function fmtPrice(v: number): string {
   if (v < 10) return v.toFixed(3);
   return v.toFixed(2);
 }
+
+const HIKKERTJE_COLUMNS: ColumnMeta[] = [
+  { key: "ticker", label: "Ticker" },
+  { key: "company", label: "Bedrijf + sector" },
+  { key: "sparkline", label: "Trend" },
+  { key: "spikes", label: "Spikes" },
+  { key: "koers", label: "Koers" },
+  { key: "limit", label: "Limiet + afstand" },
+];
 
 function MedalPips({ g, s, b }: { g: number | null; s: number | null; b: number | null }) {
   const parts: string[] = [];
@@ -45,6 +55,7 @@ export function HikkertjesView() {
   const [showSeen, setShowSeen] = useState(false);
   const [hideFavorites, setHideFavorites] = useState(false);
   const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
+  const { visibleKeys } = useColumnLayout("hikkertjes", HIKKERTJE_COLUMNS, "ticker");
   const marks = useMarks();
 
   async function refreshData() {
@@ -227,101 +238,133 @@ export function HikkertjesView() {
                 return av - bv;
               })
             : filtered;
-          return (
-        <Card className="p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-ink-5 flex items-center justify-between">
-            <div className="font-semibold text-sm">
-              {sorted.length} hikkertjes getoond {sorted.length !== ranking.length && <span className="text-neutral-500 font-normal">({ranking.length} totaal)</span>}
-            </div>
-            <div className="text-xs text-neutral-500">
-              {sortBy === "limit" ? "gesorteerd op afstand tot limiet" : "gesorteerd op meeste spikes"}
-            </div>
-          </div>
-          <div className="divide-y divide-ink-5">
-            {sorted.map((h) => {
-              const gfUrl = googleFinanceUrl(h.ticker, h.exchange);
-              const belowLimit = h.above_limit_pct != null && h.above_limit_pct <= 0;
-              const nearLimit = h.above_limit_pct != null && h.above_limit_pct > 0 && h.above_limit_pct <= 10;
 
-              const seen = marks.isSeen(h.ticker);
-              return (
-                <div
-                  key={h.ticker}
-                  className={`px-4 py-3 flex items-center gap-3 text-sm ${belowLimit ? "bg-yellow-500/[0.06]" : ""} ${seen ? "opacity-50" : ""}`}
-                >
-                  <SeenInline ticker={h.ticker} />
-                  <HeartInline ticker={h.ticker} />
-                  <StarRating ticker={h.ticker} />
-
-                  <div className="w-24 shrink-0">
-                    <a
-                      href={gfUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-mono font-semibold tab-accent-text hover:underline"
+          // Per-kolom render. visibleKeys (kolom-kiezer) bepaalt welke en in welke volgorde.
+          const colMap: Record<string, { th: ReactNode; td: (h: HikkertjeRankEntry) => ReactNode }> = {
+            ticker: {
+              th: <th className="px-3 py-2 text-left">Ticker</th>,
+              td: (h) => (
+                <td className="px-3 py-2">
+                  <a
+                    href={googleFinanceUrl(h.ticker, h.exchange)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono font-semibold tab-accent-text hover:underline"
+                  >
+                    {h.ticker}
+                  </a>
+                  <div className="mt-0.5">
+                    <MedalPips g={h.medal_gold} s={h.medal_silver} b={h.medal_bronze} />
+                  </div>
+                </td>
+              ),
+            },
+            company: {
+              th: <th className="px-3 py-2 text-left">Bedrijf</th>,
+              td: (h) => (
+                <td className="px-3 py-2 min-w-0">
+                  {h.company ? (
+                    <button
+                      type="button"
+                      onClick={() => setChartFor({ ticker: h.ticker, company: h.company ?? h.ticker, exchange: h.exchange })}
+                      className="block w-full text-left truncate text-neutral-200 hover:text-fog-pink hover:underline transition-colors"
+                      title={`Bekijk koersgrafiek van ${h.company}`}
                     >
-                      {h.ticker}
-                    </a>
+                      {h.company}
+                    </button>
+                  ) : (
+                    <div className="truncate text-neutral-200">—</div>
+                  )}
+                  {h.sector && (
                     <div className="mt-0.5">
-                      <MedalPips g={h.medal_gold} s={h.medal_silver} b={h.medal_bronze} />
+                      <Pill>{h.sector}</Pill>
                     </div>
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    {h.company ? (
-                      <button
-                        type="button"
-                        onClick={() => setChartFor({ ticker: h.ticker, company: h.company ?? h.ticker, exchange: h.exchange })}
-                        className="block w-full text-left truncate text-neutral-200 hover:text-fog-pink hover:underline transition-colors"
-                        title={`Bekijk koersgrafiek van ${h.company}`}
-                      >
-                        {h.company}
-                      </button>
-                    ) : (
-                      <div className="truncate text-neutral-200">—</div>
-                    )}
-                    {h.sector && (
-                      <div className="mt-0.5">
-                        <Pill>{h.sector}</Pill>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Koerstrend sparkline */}
-                  <div className="shrink-0 hidden sm:block">
-                    <TickerSparkline ticker={h.ticker} width={64} height={20} />
-                  </div>
-
-                  {/* Spikes */}
-                  <div className="shrink-0 text-center w-14">
-                    <div className="font-semibold text-yellow-400 tabular">{h.hikkertje_spikes ?? "—"}×</div>
-                    <div className="text-[10px] text-neutral-500">spikes</div>
-                  </div>
-
-                  {/* Koers */}
-                  <div className="shrink-0 text-right w-16">
-                    <div className="tabular font-mono text-neutral-200">
-                      {h.last_close != null ? `$${fmtPrice(h.last_close)}` : "—"}
-                    </div>
-                    <div className="text-[10px] text-neutral-500">koers</div>
-                  </div>
-
-                  {/* Limiet + afstand */}
-                  <div className="shrink-0 text-right w-20">
+                  )}
+                </td>
+              ),
+            },
+            sparkline: {
+              th: <th className="px-3 py-2 text-center w-20">Trend</th>,
+              td: (h) => (
+                <td className="px-3 py-2 text-center">
+                  <TickerSparkline ticker={h.ticker} width={64} height={20} />
+                </td>
+              ),
+            },
+            spikes: {
+              th: <th className="px-3 py-2 text-center w-16">Spikes</th>,
+              td: (h) => (
+                <td className="px-3 py-2 text-center">
+                  <div className="font-semibold text-yellow-400 tabular">{h.hikkertje_spikes ?? "—"}×</div>
+                </td>
+              ),
+            },
+            koers: {
+              th: <th className="px-3 py-2 text-right w-20">Koers</th>,
+              td: (h) => (
+                <td className="px-3 py-2 text-right tabular font-mono text-neutral-200">
+                  {h.last_close != null ? `$${fmtPrice(h.last_close)}` : <span className="text-neutral-600">—</span>}
+                </td>
+              ),
+            },
+            limit: {
+              th: <th className="px-3 py-2 text-right w-24">Limiet</th>,
+              td: (h) => {
+                const belowLim = h.above_limit_pct != null && h.above_limit_pct <= 0;
+                const nearLim = h.above_limit_pct != null && h.above_limit_pct > 0 && h.above_limit_pct <= 10;
+                return (
+                  <td className="px-3 py-2 text-right">
                     <EditableLimit ticker={h.ticker} buyLimit={h.buy_limit} />
                     {h.buy_limit != null && h.above_limit_pct != null && (
                       <div className={`text-[10px] tabular font-semibold ${
-                        belowLimit ? "text-yellow-400" : nearLimit ? "text-yellow-600" : "text-neutral-500"
+                        belowLim ? "text-yellow-400" : nearLim ? "text-yellow-600" : "text-neutral-500"
                       }`}>
                         {h.above_limit_pct >= 0 ? "+" : ""}{h.above_limit_pct.toFixed(1)}%
                       </div>
                     )}
-                  </div>
-                </div>
-              );
-            })}
+                  </td>
+                );
+              },
+            },
+          };
+
+          return (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="text-xs text-neutral-500">
+              {sorted.length} hikkertjes getoond {sorted.length !== ranking.length && `(${ranking.length} totaal)`} · {sortBy === "limit" ? "gesorteerd op afstand tot limiet" : "gesorteerd op meeste spikes"}
+            </div>
+            <ColumnPicker tabKey="hikkertjes" columns={HIKKERTJE_COLUMNS} lockedKey="ticker" />
           </div>
-        </Card>
+          <Card className="p-0 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                    <SeenHeader />
+                    <HeartHeader />
+                    <StarHeader />
+                    {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-5/40">
+                  {sorted.map((h) => {
+                    const belowLimit = h.above_limit_pct != null && h.above_limit_pct <= 0;
+                    const seen = marks.isSeen(h.ticker);
+                    return (
+                      <tr key={h.ticker} className={(belowLimit ? "bg-yellow-500/[0.06] " : "") + (seen ? "opacity-50" : "")}>
+                        <SeenCell ticker={h.ticker} />
+                        <HeartCell ticker={h.ticker} />
+                        <StarCell ticker={h.ticker} />
+                        {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(h)}</Fragment>)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
           );
         })()}
 
