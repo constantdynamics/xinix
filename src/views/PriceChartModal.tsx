@@ -20,8 +20,8 @@ const RANGES: { key: PriceRange; label: string; full: string }[] = [
 
 // Grafiek-geometrie (SVG viewBox-coördinaten — schaalt mee met de container).
 const W = 760;
-const H = 300;
-const PAD = { l: 54, r: 16, t: 16, b: 26 };
+const H = 320;
+const PAD = { l: 68, r: 16, t: 16, b: 36 };
 const PLOT_W = W - PAD.l - PAD.r;
 const PLOT_H = H - PAD.t - PAD.b;
 
@@ -182,38 +182,38 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
         </div>
 
         {/* Venster-kiezer */}
-        <div className="px-5 pt-4 flex items-center gap-1.5 flex-wrap">
+        <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
           {RANGES.map((r) => (
             <button
               key={r.key}
               onClick={() => setRange(r.key)}
               title={r.full}
               className={
-                "px-3 py-1 rounded-full text-[11px] font-bold border transition-colors " +
+                "px-4 py-1.5 rounded-full text-sm font-bold border transition-colors " +
                 (range === r.key
-                  ? "tab-accent-text"
-                  : "border-ink-5 text-neutral-400 hover:text-neutral-200")
+                  ? "text-white"
+                  : "border-ink-5 text-white hover:text-neutral-200")
               }
               style={range === r.key
-                ? { borderColor: "var(--tab-accent, #ff1f8f)", background: "color-mix(in srgb, var(--tab-accent, #ff1f8f) 14%, transparent)" }
+                ? { borderColor: "var(--tab-accent, #ff1f8f)", background: "color-mix(in srgb, var(--tab-accent, #ff1f8f) 22%, transparent)" }
                 : undefined}
             >
               {r.label}
             </button>
           ))}
-          {loading && <span className="text-[11px] text-neutral-500 ml-1 animate-pulse">laden…</span>}
+          {loading && <span className="text-xs text-neutral-500 ml-1 animate-pulse">laden…</span>}
         </div>
 
         {/* Grafiek */}
         <div className="p-5 pt-3">
           <div className="relative">
             {error ? (
-              <div className="h-[300px] flex items-center justify-center text-sm text-fog-loss text-center px-6">
+              <div className="h-[320px] flex items-center justify-center text-sm text-fog-loss text-center px-6">
                 Koersdata niet beschikbaar.<br />
                 <span className="text-neutral-500 text-xs">{error}</span>
               </div>
             ) : !chart ? (
-              <div className="h-[300px] flex items-center justify-center text-sm text-neutral-500">
+              <div className="h-[320px] flex items-center justify-center text-sm text-neutral-500">
                 {loading ? "Koersgrafiek laden…" : "Te weinig koersdata voor dit venster."}
               </div>
             ) : (
@@ -234,7 +234,7 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
                 {chart.ticks.map((t, k) => (
                   <g key={k}>
                     <line x1={PAD.l} y1={t.y} x2={W - PAD.r} y2={t.y} stroke="#262626" strokeWidth="1" />
-                    <text x={PAD.l - 8} y={t.y + 3} textAnchor="end" fontSize="10" fill="#737373" fontFamily="JetBrains Mono, monospace">
+                    <text x={PAD.l - 8} y={t.y + 5} textAnchor="end" fontSize="14" fontWeight="700" fill="#ffffff" fontFamily="JetBrains Mono, monospace">
                       {fmtPrice(t.c)}
                     </text>
                   </g>
@@ -242,7 +242,7 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
 
                 {/* X-as datumlabels */}
                 {chart.xLabels.map((l, k) => (
-                  <text key={k} x={l.x} y={H - 8} textAnchor={k === 0 ? "start" : k === chart.xLabels.length - 1 ? "end" : "middle"} fontSize="10" fill="#737373">
+                  <text key={k} x={l.x} y={H - 6} textAnchor={k === 0 ? "start" : k === chart.xLabels.length - 1 ? "end" : "middle"} fontSize="14" fontWeight="700" fill="#ffffff">
                     {l.text}
                   </text>
                 ))}
@@ -260,13 +260,13 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
                     <line x1={chart.x(hoverIdx)} y1={PAD.t} x2={chart.x(hoverIdx)} y2={PAD.t + PLOT_H} stroke="var(--tab-accent, #ff1f8f)" strokeWidth="1" strokeDasharray="2 2" />
                     <circle cx={chart.x(hoverIdx)} cy={chart.y(hover.c)} r="3.5" fill={lineColor} stroke="#101010" strokeWidth="1.5" />
                     {(() => {
-                      const lw = 150;
+                      const lw = 170;
                       const lx = Math.max(PAD.l, Math.min(W - PAD.r - lw, chart.x(hoverIdx) - lw / 2));
                       return (
                         <g transform={`translate(${lx.toFixed(1)}, ${PAD.t})`}>
-                          <rect width={lw} height="34" rx="6" fill="#1c1c1c" stroke="#404040" strokeWidth="1" />
-                          <text x="8" y="14" fontSize="9" fill="#737373">{fmtTipDate(hover.t, range)}</text>
-                          <text x="8" y="27" fontSize="12" fontWeight="bold" fill="#fafafa" fontFamily="JetBrains Mono, monospace">
+                          <rect width={lw} height="42" rx="6" fill="#1c1c1c" stroke="#404040" strokeWidth="1" />
+                          <text x="10" y="17" fontSize="12" fontWeight="700" fill="#ffffff">{fmtTipDate(hover.t, range)}</text>
+                          <text x="10" y="34" fontSize="15" fontWeight="bold" fill="#ffffff" fontFamily="JetBrains Mono, monospace">
                             {fmtPrice(hover.c)}
                           </text>
                         </g>

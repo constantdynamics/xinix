@@ -1,7 +1,7 @@
 // ReviewMode — swipe-door-beoordeling van aandelen per lijst.
 // Knop rechtsboven in de header → stap 1: lijstkeuze → stap 2: één voor één beoordelen.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   fetchPriceHistory,
   type ScanResults,
@@ -10,6 +10,7 @@ import {
 import type { Dashboard } from "../types";
 import { googleFinanceUrl } from "../tickerLinks";
 import { useMarks } from "../hooks/useMarks";
+import { GradientTabIcon } from "../tabIcons";
 
 // ── Chart helper ──────────────────────────────────────────────────────────────
 // Eenvoudige 1-jaar koersgrafiek, ingesloten in de review-kaart.
@@ -104,12 +105,12 @@ interface ReviewItem {
 
 // ── List picker (stap 1) ──────────────────────────────────────────────────────
 
-const LIST_OPTIONS: { key: ReviewList; emoji: string; label: string; desc: string }[] = [
-  { key: "favorieten", emoji: "♥", label: "Favorieten", desc: "Favorieten zonder sterren-beoordeling" },
-  { key: "feniks", emoji: "🦅", label: "Feniks", desc: "Feniks-aandelen nog niet bekeken of favoriet" },
-  { key: "hikkertjes", emoji: "⚡", label: "Hikkertjes", desc: "Hikkertjes nog niet bekeken of favoriet" },
-  { key: "zwitserleven", emoji: "🇨🇭", label: "Zwitserleven", desc: "Dividend-aandelen nog niet bekeken of favoriet" },
-  { key: "watchlist", emoji: "📋", label: "Watchlist", desc: "Alle watchlist-aandelen nog niet bekeken of favoriet" },
+const LIST_OPTIONS: { key: ReviewList; icon: ReactNode; label: string; desc: string }[] = [
+  { key: "favorieten", icon: <GradientTabIcon tab="favorieten" />, label: "Favorieten", desc: "Favorieten zonder sterren-beoordeling" },
+  { key: "feniks", icon: <GradientTabIcon tab="feniks" />, label: "Feniks", desc: "Feniks-aandelen nog niet bekeken of favoriet" },
+  { key: "hikkertjes", icon: <GradientTabIcon tab="hikkertjes" />, label: "Hikkertjes", desc: "Hikkertjes nog niet bekeken of favoriet" },
+  { key: "zwitserleven", icon: <GradientTabIcon tab="zwitserleven" />, label: "Zwitserleven", desc: "Dividend-aandelen nog niet bekeken of favoriet" },
+  { key: "watchlist", icon: <span>📋</span>, label: "Watchlist", desc: "Alle watchlist-aandelen nog niet bekeken of favoriet" },
 ];
 
 function buildQueue(
@@ -343,15 +344,16 @@ function ReviewCard({
 
       {/* Actieknoppen onderin — altijd zichtbaar, geen scrollen nodig */}
       <div className="space-y-2 pt-2 border-t border-ink-5">
-        {/* Hart */}
+        {/* Hart — rood zodat het direct als 'favoriet' herkenbaar is */}
         <button
           onClick={() => onAction("heart")}
           className={
             "w-full flex items-center justify-center gap-2 py-3 rounded-xl text-base font-bold border-2 transition-all " +
             (isFav
-              ? "border-[#8855ff] text-[#8855ff] bg-[#8855ff]/10 hover:bg-[#8855ff]/20"
-              : "border-ink-5 text-neutral-400 hover:border-[#8855ff] hover:text-[#8855ff] hover:bg-[#8855ff]/5")
+              ? "border-[#ff1a1a] text-[#ff1a1a] bg-[#ff1a1a]/10 hover:bg-[#ff1a1a]/20"
+              : "border-ink-5 text-neutral-400 hover:border-[#ff1a1a] hover:text-[#ff1a1a] hover:bg-[#ff1a1a]/5")
           }
+          style={isFav ? { textShadow: "0 0 4px rgba(255,26,26,0.5)" } : undefined}
         >
           <HeartSvg filled={isFav} />
           {isFav ? "Favoriet (klik om te verwijderen)" : "Favoriet"}
@@ -459,24 +461,22 @@ function ReviewModeModal({
       <div
         className="w-full max-w-md bg-ink-2 border border-ink-5 rounded-2xl shadow-2xl flex flex-col"
         style={{
-          maxHeight: "min(92vh, 700px)",
+          maxHeight: "min(94vh, 720px)",
           borderColor: "color-mix(in srgb, #cc00ff 30%, #262626)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-ink-5 shrink-0">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-ink-5 shrink-0">
           <div className="font-bold text-neutral-100 flex items-center gap-2">
             <span
               className="text-base font-black"
-              style={{
-                background: "linear-gradient(135deg, #ff00aa 0%, #cc00ff 100%)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
+              style={{ color: "#ff1a1a", textShadow: "0 0 4px rgba(255,26,26,0.7)" }}
             >
-              ♥/👎
+              ♥
             </span>
+            <span className="opacity-60">/</span>
+            <span className="text-base">👎</span>
             <span>Beoordelen</span>
           </div>
           <button
@@ -488,11 +488,11 @@ function ReviewModeModal({
           </button>
         </div>
 
-        <div className="flex-1 overflow-auto p-4 min-h-0">
+        <div className="flex-1 overflow-auto p-3 min-h-0">
           {/* Stap 1: Lijstkeuze */}
           {!selectedList && (
-            <div className="space-y-2">
-              <div className="text-sm text-neutral-400 mb-3">
+            <div className="space-y-1.5">
+              <div className="text-xs text-neutral-400 mb-2">
                 Kies welke aandelen je wilt beoordelen:
               </div>
               {LIST_OPTIONS.map((opt) => {
@@ -508,16 +508,16 @@ function ReviewModeModal({
                     }}
                     disabled={cnt === 0}
                     className={
-                      "w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all " +
+                      "w-full flex items-center gap-3 px-3 py-2 rounded-xl border text-left transition-all " +
                       (cnt > 0
                         ? "border-ink-5 hover:border-[#cc00ff]/50 hover:bg-[#cc00ff]/5 cursor-pointer"
                         : "border-ink-5/40 opacity-40 cursor-not-allowed")
                     }
                   >
-                    <span className="text-2xl leading-none shrink-0">{opt.emoji}</span>
+                    <span className="text-xl leading-none shrink-0 w-6 h-6 flex items-center justify-center">{opt.icon}</span>
                     <div className="flex-1 min-w-0">
-                      <div className="font-bold text-neutral-100">{opt.label}</div>
-                      <div className="text-xs text-neutral-500 mt-0.5">{opt.desc}</div>
+                      <div className="font-bold text-sm text-neutral-100">{opt.label}</div>
+                      <div className="text-[11px] text-neutral-500 mt-0.5 leading-tight">{opt.desc}</div>
                     </div>
                     <span
                       className={
@@ -623,7 +623,12 @@ export function ReviewModeButton({
           boxShadow: "0 0 10px -2px #cc00ff80",
         }}
       >
-        <span className="text-sm leading-none">♥</span>
+        <span
+          className="text-sm leading-none"
+          style={{ color: "#ff1a1a", textShadow: "0 0 4px rgba(255,26,26,0.7)" }}
+        >
+          ♥
+        </span>
         <span className="mx-1 opacity-60">/</span>
         <span className="text-sm leading-none">👎</span>
         <span className="hidden sm:inline ml-1.5">beoordeel</span>

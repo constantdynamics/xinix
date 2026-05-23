@@ -12,6 +12,7 @@ import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { EditableLimit } from "../components/EditableLimit";
 import { useMarks } from "../hooks/useMarks";
 import { HeartInline, SeenInline, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile, StarRating } from "../components/MarkCells";
+import { PriceChartModal } from "./PriceChartModal";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -43,6 +44,7 @@ export function HikkertjesView() {
   const fullScanStopRef = useRef(false);
   const [showSeen, setShowSeen] = useState(false);
   const [hideFavorites, setHideFavorites] = useState(false);
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
   const marks = useMarks();
 
   async function refreshData() {
@@ -267,7 +269,18 @@ export function HikkertjesView() {
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="truncate text-neutral-200">{h.company ?? "—"}</div>
+                    {h.company ? (
+                      <button
+                        type="button"
+                        onClick={() => setChartFor({ ticker: h.ticker, company: h.company ?? h.ticker, exchange: h.exchange })}
+                        className="block w-full text-left truncate text-neutral-200 hover:text-fog-pink hover:underline transition-colors"
+                        title={`Bekijk koersgrafiek van ${h.company}`}
+                      >
+                        {h.company}
+                      </button>
+                    ) : (
+                      <div className="truncate text-neutral-200">—</div>
+                    )}
                     {h.sector && (
                       <div className="mt-0.5">
                         <Pill>{h.sector}</Pill>
@@ -312,6 +325,15 @@ export function HikkertjesView() {
         </Card>
           );
         })()}
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
+      )}
     </div>
   );
 }
