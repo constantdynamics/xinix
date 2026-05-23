@@ -53,6 +53,9 @@ interface FavRow {
   medal_silver: number;
   medal_bronze: number;
   bronnen: Bron[];
+  // True wanneer de ticker als favoriet bestaat maar niet (meer) in de watchlist
+  // staat — alle data is dan onbekend en de rij toont enkel streepjes.
+  orphan: boolean;
 }
 
 type SortKey = "ticker" | "company" | "score" | "above_limit_pct" | "last_close" | "rating" | "medals" | "dividend";
@@ -186,6 +189,10 @@ export function FavorietenView() {
                   ? ((last_close - buy_limit) / buy_limit) * 100
                   : null));
 
+      // Orphan = favoriet zonder enige data-bron. Komt voor wanneer een ticker
+      // wel in xinix_favorites staat maar niet (meer) actief in signal_tickers.
+      const orphan = !card && !p;
+
       out.push({
         ticker: T,
         company: card?.company ?? p?.company ?? "—",
@@ -200,10 +207,50 @@ export function FavorietenView() {
         medal_silver: card?.medal_silver ?? 0,
         medal_bronze: card?.medal_bronze ?? 0,
         bronnen,
+        orphan,
       });
     }
     return out;
   }, [dashboard, scans, marks, limitOverrides]);
+
+  // Wezen — favorieten zonder enige data — apart bij elkaar voor de reparatie-knop.
+  const orphans = useMemo(() => rows.filter((r) => r.orphan), [rows]);
+  const [repairing, setRepairing] = useState(false);
+  const [repairMsg, setRepairMsg] = useState<string | null>(null);
+
+  async function repairOrphans() {
+    if (orphans.length === 0 || repairing) return;
+    setRepairing(true);
+    setRepairMsg(null);
+    try {
+      // Lookup om bedrijfsnaam + exchange op te halen (Yahoo via lookupTickers).
+      const tickers = orphans.map((o) => o.ticker);
+      let lookups: LookupResult[] = [];
+      try {
+        lookups = await lookupTickers(tickers);
+      } catch {
+        // Lookup mag falen — voeg dan toch toe met alleen ticker als naam.
+      }
+      const lookupByTicker = new Map(lookups.map((l) => [l.ticker.toUpperCase(), l]));
+      const toAdd: TickerInput[] = tickers.map((t) => {
+        const l = lookupByTicker.get(t);
+        return {
+          ticker: t,
+          company: l?.recognized ? (l.company ?? t) : t,
+          sector: "other" as const,
+        };
+      });
+      await batchAddTickers(toAdd);
+      setRepairMsg(`${toAdd.length} favorieten teruggezet in watchlist — data wordt bij de volgende poll opgehaald.`);
+      // Herlaad dashboard zodat de nieuwe ticker-rijen verschijnen.
+      const d = await fetchDashboard();
+      setDashboard(d);
+    } catch (err) {
+      setRepairMsg(`Fout bij repareren: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRepairing(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     let list = rows;
@@ -508,6 +555,34 @@ export function FavorietenView() {
         </div>
       </div>
 
+      {/* Reparatie-banner: favorieten zonder data terugzetten in watchlist. */}
+      {orphans.length > 0 && (
+        <Card className="p-3 border-fog-warn/40 bg-fog-warn/[0.06]">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-fog-warn">
+                {orphans.length} {orphans.length === 1 ? "favoriet ontbreekt" : "favorieten ontbreken"} in de watchlist
+              </div>
+              <div className="text-xs text-neutral-400 mt-0.5 leading-snug">
+                Deze tickers ({orphans.slice(0, 5).map((o) => o.ticker).join(", ")}{orphans.length > 5 ? `, …` : ""}) staan als favoriet
+                maar zijn niet (meer) actief in de watchlist — daarom missen koers, sector en medailles. Klik op
+                "Repareren" om ze terug in de watchlist te zetten; de data wordt bij de volgende poll opgehaald.
+              </div>
+              {repairMsg && (
+                <div className={`text-xs mt-1 ${repairMsg.startsWith("Fout") ? "text-fog-loss" : "text-fog-lime"}`}>
+                  {repairMsg}
+                </div>
+              )}
+            </div>
+            {isAdmin && (
+              <Button size="sm" onClick={repairOrphans} disabled={repairing}>
+                {repairing ? "Bezig…" : `🔧 Repareer ${orphans.length}`}
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
+
       {showAdd && isAdmin && (
         <BulkAddFavoritesPanel
           onClose={() => setShowAdd(false)}
@@ -641,8 +716,16 @@ export function FavorietenView() {
                 <tbody className="divide-y divide-ink-5/40">
                   {filtered.map((r) => {
                     const seen = marks.isSeen(r.ticker);
+                    const cls = [
+                      seen ? "opacity-50" : "",
+                      r.orphan ? "bg-fog-warn/[0.06]" : "",
+                    ].filter(Boolean).join(" ");
                     return (
-                      <tr key={r.ticker} className={seen ? "opacity-50" : ""}>
+                      <tr
+                        key={r.ticker}
+                        className={cls}
+                        title={r.orphan ? "Data ontbreekt — gebruik de reparatie-knop bovenaan" : undefined}
+                      >
                         <SeenCell ticker={r.ticker} />
                         <HeartCell ticker={r.ticker} />
                         {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(r)}</Fragment>)}

@@ -91,6 +91,34 @@ Deno.serve(async (req) => {
     }
     const table = tableFor(kind);
 
+    // Zorg dat een favoriet-ticker ook in de watchlist actief staat. Anders
+    // verschijnt hij wel in de favorieten-set maar zonder data — een rij met
+    // alleen streepjes. Insert ontbrekende rijen met minimale info; activeer
+    // bestaande inactieve rijen. Faalt deze stap → favoriet-actie blijft
+    // doorgaan (best-effort).
+    async function ensureInWatchlist(tickers: string[]): Promise<void> {
+      if (tickers.length === 0) return;
+      try {
+        const existing = await supabase
+          .from("signal_tickers")
+          .select("ticker, active")
+          .in("ticker", tickers);
+        const seen = new Map<string, boolean>(
+          (existing.data ?? []).map((r: { ticker: string; active: boolean }) => [r.ticker, r.active]),
+        );
+        const toInsert = tickers.filter((t) => !seen.has(t)).map((t) => ({ ticker: t, active: true }));
+        const toReactivate = tickers.filter((t) => seen.has(t) && seen.get(t) === false);
+        if (toInsert.length > 0) {
+          await supabase.from("signal_tickers").insert(toInsert);
+        }
+        if (toReactivate.length > 0) {
+          await supabase.from("signal_tickers").update({ active: true }).in("ticker", toReactivate);
+        }
+      } catch (err) {
+        console.error("marks: ensureInWatchlist faalde:", err);
+      }
+    }
+
     // Bulk-variant: body.tickers = string[] — voor "alles aanvinken" knop bij gezien-kolom
     if (Array.isArray(body.tickers)) {
       const tickers = body.tickers
@@ -103,6 +131,7 @@ Deno.serve(async (req) => {
         const rows = tickers.map((t) => ({ ticker: t }));
         const { error } = await supabase.from(table).upsert(rows, { onConflict: "ticker" });
         if (error) return textResponse(req, error.message, { status: 500 });
+        if (kind === "favorite") await ensureInWatchlist(tickers);
         return jsonResponse(req, { ok: true, kind, action: "added", count: tickers.length });
       }
       const { error } = await supabase.from(table).delete().in("ticker", tickers);
@@ -119,6 +148,7 @@ Deno.serve(async (req) => {
     if (req.method === "POST") {
       const { error } = await supabase.from(table).upsert({ ticker }, { onConflict: "ticker" });
       if (error) return textResponse(req, error.message, { status: 500 });
+      if (kind === "favorite") await ensureInWatchlist([ticker]);
       return jsonResponse(req, { ok: true, kind, ticker, action: "added" });
     }
 
