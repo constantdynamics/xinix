@@ -11,6 +11,8 @@ function j(req: Request, body: unknown, init: ResponseInit = {}) { return new Re
 // (faillissement, trial failed, big drop) en richtingsloze events
 // (8k material agreement, price spike die al gebeurd is, volume spike,
 // near 90d low) dragen NIETS bij en laten een tegel dus Rust (white).
+// Ook limiet-events (limiet geraakt/dichtbij) zijn géén catalyst en
+// kleuren de tegel niet — die status hoort thuis in de Limieten-tab.
 type Sev = "white" | "yellow" | "orange" | "red";
 const SEV_RANK: Record<Sev, number> = { white: 0, yellow: 1, orange: 2, red: 3 };
 const HEAT_CONTRIBUTION: Record<string, Sev> = {
@@ -24,9 +26,7 @@ const HEAT_CONTRIBUTION: Record<string, Sev> = {
   discovery_announcement: "red",
   permit: "red",
   first_pour: "red",
-  buy_limit_hit: "red",
   // Matig positief -> Warm
-  buy_limit_close: "orange",
   bonanza_ag: "orange",
   bonanza_cu: "orange",
   licensing_deal: "orange",
@@ -51,7 +51,7 @@ const HEAT_CONTRIBUTION: Record<string, Sev> = {
 Deno.serve(async (req) => {
   const p = pf(req); if (p) return p;
   const supabase = getServiceClient();
-  const [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes, scoresRes] = await Promise.all([
+  const runQueries = () => Promise.all([
     supabase.from("signal_tickers").select("*").eq("active", true),
     supabase.from("signal_price_summary").select("*"),
     supabase.from("signal_events").select("*").or("expires_at.is.null,expires_at.gt." + new Date().toISOString()).order("detected_at", { ascending: false }).limit(500),
@@ -60,6 +60,31 @@ Deno.serve(async (req) => {
     supabase.from("zwitserleven_stocks").select("ticker").eq("meets_criteria", true),
     supabase.from("signal_scores_latest").select("ticker, mode, final_score, action, structural, catalyst, timing").eq("mode", "trader"),
   ]);
+  let [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes, scoresRes] = await runQueries();
+  // signal_tickers is de kern van het dashboard. Faalt die query — meestal door
+  // kortdurende DB-druk van overlappende achtergrondjobs — probeer dan tot 2×
+  // opnieuw voordat we opgeven.
+  for (let attempt = 1; attempt <= 2 && tickersRes.error; attempt++) {
+    console.error(`dashboard: signal_tickers faalde (poging ${attempt}), opnieuw...`, tickersRes.error.message);
+    await new Promise((r) => setTimeout(r, 500 * attempt));
+    [tickersRes, summaryRes, signalsRes, catalystsRes, runLogRes, zwitserlevenRes, scoresRes] = await runQueries();
+  }
+  // Query-fouten zichtbaar maken. Voorheen viel elke mislukte query stil naar
+  // [] — een trage/getimede signal_tickers-query leverde dan een dashboard mét
+  // status 200 maar zónder cards op, wat in de UI lijkt op "alle data is weg".
+  for (const [name, res] of ([
+    ["signal_tickers", tickersRes], ["signal_price_summary", summaryRes],
+    ["signal_events", signalsRes], ["signal_catalysts", catalystsRes],
+    ["signal_runs", runLogRes], ["zwitserleven_stocks", zwitserlevenRes],
+    ["signal_scores_latest", scoresRes],
+  ] as const)) {
+    if (res.error) console.error(`dashboard: query ${name} faalde:`, res.error.message);
+  }
+  // signal_tickers is de kern van het dashboard — zonder die rijen zijn er geen
+  // cards. Geef bij een fout een echte 500 terug i.p.v. een leeg dashboard.
+  if (tickersRes.error) {
+    return j(req, { error: `signal_tickers kon niet geladen worden: ${tickersRes.error.message}` }, { status: 500 });
+  }
   const tickers = tickersRes.data ?? [];
   const summaries = summaryRes.data ?? [];
   const signals = signalsRes.data ?? [];
@@ -91,7 +116,16 @@ Deno.serve(async (req) => {
       else if (t.goud_score >= 65) baselineSev = "orange";
       else if (t.goud_score >= 35) baselineSev = "yellow";
     }
-    const finalSev: Sev = SEV_RANK[signalSev] > SEV_RANK[baselineSev] ? signalSev : baselineSev;
+    let finalSev: Sev = SEV_RANK[signalSev] > SEV_RANK[baselineSev] ? signalSev : baselineSev;
+    // Hot/Warm-poort: een Hot/Warm-tegel die puur op curatie (goud_score)
+    // berust vereist medailles (>=1 zilver of >=3 brons). Signaal-gedreven
+    // heat (bonanza, permit, catalyst, approval, ...) is altijd een geldige
+    // inhoudelijke reden en wordt nooit teruggezet.
+    const medalOK = (t.medal_silver ?? 0) >= 1 || (t.medal_bronze ?? 0) >= 3;
+    const signalDriven = SEV_RANK[signalSev] >= SEV_RANK.orange;
+    if ((finalSev === "red" || finalSev === "orange") && !signalDriven && !medalOK) {
+      finalSev = "yellow";
+    }
     const nextCatalyst = tCatalysts[0];
     const daysToNext = nextCatalyst?.expected_date
       ? Math.ceil((new Date(nextCatalyst.expected_date).getTime() - Date.now()) / 86400000)
@@ -182,5 +216,5 @@ Deno.serve(async (req) => {
     last_run: lastPriceRun ? { started_at: lastPriceRun.started_at, ok: lastPriceRun.ok, message: lastPriceRun.message, metrics: lastPriceRun.metrics } : null,
     bench_after_fails: 3, batch_size: 80, interval_minutes: 10,
   };
-  return j(req, { cards, recent_signals: signals.slice(0, 50), upcoming_catalysts: catalysts.slice(0, 50), run_log: runLog, poll_status: pollStatus, generated_at: new Date().toISOString() }, { headers: { "cache-control": "public, max-age=30" } });
+  return j(req, { cards, recent_signals: signals.slice(0, 50), upcoming_catalysts: catalysts.slice(0, 50), run_log: runLog, poll_status: pollStatus, generated_at: new Date().toISOString() }, { headers: { "cache-control": "public, max-age=120" } });
 });

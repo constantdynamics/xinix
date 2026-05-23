@@ -250,7 +250,7 @@ function DataExportCard() {
       <Card className="p-4 space-y-3 text-sm">
         <p className="text-neutral-300 leading-relaxed">
           Elke maandag wordt automatisch een volledige export gemaakt van alle
-          waardevolle data — de watchlist, de 200 strategieën met posities, de
+          waardevolle data — de watchlist, alle strategieën met posities, de
           single portfolio, signalen, catalysts, scores en kennis-exports —
           inclusief een uitleg per tabel. De export wordt naar de Git-repo
           gecommit (<code className="text-neutral-400">docs/data-export/</code>),

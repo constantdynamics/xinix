@@ -342,7 +342,7 @@ function ScoreCard({
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="font-bold text-base text-fog-pink hover:underline"
+          className="font-bold text-base tab-accent-text hover:underline"
           title={`Open ${row.ticker} op Google Finance`}
         >
           {row.ticker}

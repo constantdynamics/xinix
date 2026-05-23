@@ -33,10 +33,29 @@ function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-export async function fetchDashboard(): Promise<Dashboard> {
-  const res = await fetch(apiUrl("/api/dashboard"));
+// `fresh` omzeilt de browser-cache (voor de handmatige "vernieuw"-knop);
+// een gewone pagina-load gebruikt de cache zodat herladen snel is.
+export async function fetchDashboard(fresh = false): Promise<Dashboard> {
+  const res = await fetch(apiUrl("/api/dashboard"), fresh ? { cache: "reload" } : undefined);
   if (!res.ok) throw new Error(`dashboard ${res.status}`);
   return (await res.json()) as Dashboard;
+}
+
+export type PriceRange = "1d" | "5d" | "1mo" | "1y" | "5y" | "max";
+export interface PricePoint { t: number; c: number; }
+export interface PriceHistory {
+  ticker: string;
+  range: PriceRange;
+  currency: string | null;
+  exchange: string | null;
+  previous_close: number | null;
+  market_price: number | null;
+  points: PricePoint[];
+}
+export async function fetchPriceHistory(ticker: string, range: PriceRange): Promise<PriceHistory> {
+  const res = await fetch(apiUrl(`/api/price-history?ticker=${encodeURIComponent(ticker)}&range=${range}`));
+  if (!res.ok) throw new Error(`price-history ${res.status}`);
+  return (await res.json()) as PriceHistory;
 }
 
 export async function fetchSettings(): Promise<Settings> {
@@ -403,11 +422,18 @@ export async function removeZwitserlevenStock(ticker: string): Promise<{ ok: boo
 }
 
 // ── UI settings (tab-aanpassingen) ───────────────────────────────────────────
+// Per-tab kolominstelling: volgorde van kolom-keys + welke verborgen zijn.
+export interface TableColumnPref {
+  order: string[];
+  hidden: string[];
+}
+
 export interface UiSettings {
   id: number;
   tab_order: string[];
   tab_labels: Record<string, string>;
   tab_hidden: string[];
+  table_columns: Record<string, TableColumnPref>;
   updated_at: string;
 }
 
@@ -523,7 +549,7 @@ export async function fetchXinixPortfolio(): Promise<XinixPortfolio> {
   return (await res.json()) as XinixPortfolio;
 }
 
-// ── Xinix 200-strategie simulatie ──
+// ── Xinix strategie-simulatie (Potje) ──
 export interface SimPosDetail {
   ticker: string;
   entry_signal_types: string[];

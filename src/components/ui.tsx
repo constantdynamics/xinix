@@ -165,10 +165,13 @@ export function NavTab({
   color?: string;
   icon?: ReactNode;
 }) {
+  // Actief tabblad: knop gevuld met de steunkleur, tekst + icoon wit.
+  // Inactief: volle steunkleur + zachte gloed zodat het op zwart fel en
+  // goed leesbaar oogt — de kleur (hue) zelf blijft ongewijzigd.
   const btnStyle = color
     ? active
-      ? { color, borderBottomColor: color }
-      : { color, opacity: 0.45 }
+      ? { backgroundColor: color, color: "#ffffff" }
+      : { color, textShadow: `0 0 9px ${color}` }
     : undefined;
   return (
     <button
@@ -177,21 +180,20 @@ export function NavTab({
       title={title}
       style={btnStyle}
       className={cx(
-        "relative inline-flex items-center gap-1.5 px-3 sm:px-3.5 h-10 text-sm font-semibold whitespace-nowrap select-none transition-colors",
-        // Bottom-border alleen op active, anders transparent zodat de
-        // hoogte gelijk blijft (geen layout-jitter bij toggle).
+        "relative inline-flex items-center gap-1.5 px-3 sm:px-4 h-11 text-base font-bold whitespace-nowrap select-none transition-colors",
+        // border-b-2 altijd aanwezig (transparant) zodat de hoogte gelijk blijft.
         active
-          ? color ? "border-b-2" : "text-neutral-50 border-b-2 border-fog-pink"
+          ? color ? "rounded-t-md border-b-2 border-transparent" : "text-neutral-50 border-b-2 border-fog-pink"
           : color ? "border-b-2 border-transparent" : "text-neutral-400 hover:text-neutral-100 border-b-2 border-transparent"
       )}
     >
-      {icon && <span className="shrink-0 leading-none">{icon}</span>}
+      {icon && <span className="shrink-0 leading-none text-[1.15em]">{icon}</span>}
       <span>{children}</span>
       {count != null && count > 0 && (
         <span
           className={cx(
-            "tabular text-[10px] px-1.5 py-0.5 rounded-md",
-            active ? "bg-fog-pink/15 text-fog-pink" : "bg-ink-3 text-neutral-500"
+            "tabular text-[11px] font-bold px-1.5 py-0.5 rounded-md",
+            active ? "bg-white/25 text-white" : "bg-ink-3 text-neutral-400"
           )}
         >
           {count > 999 ? "999+" : count}
@@ -872,12 +874,14 @@ export function Stat({
   delta,
   hint,
   tone,
+  icon,
 }: {
   label: string;
   value: ReactNode;
   delta?: { value: number; suffix?: string };
   hint?: ReactNode;
   tone?: "pink" | "lime";
+  icon?: ReactNode;
 }) {
   const deltaColor =
     delta && delta.value > 0
@@ -887,7 +891,8 @@ export function Stat({
       : "text-neutral-500";
   return (
     <Card className="p-4" glow={tone}>
-      <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+        {icon && <span className="text-sm text-fog-pink">{icon}</span>}
         {label}
       </div>
       <div className="mt-1 flex items-baseline gap-2">
@@ -911,26 +916,31 @@ export function SectionHeader({
   title,
   subtitle,
   aside,
+  icon,
 }: {
   eyebrow?: string;
   title: ReactNode;
   subtitle?: ReactNode;
   aside?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
     <div className="mb-4 flex items-end justify-between gap-4">
-      <div>
-        {eyebrow && (
-          <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fog-pink mb-1">
-            {eyebrow}
-          </div>
-        )}
-        <h2 className="text-xl font-bold tracking-tight text-neutral-50">
-          {title}
-        </h2>
-        {subtitle && (
-          <div className="mt-0.5 text-xs text-neutral-500">{subtitle}</div>
-        )}
+      <div className="flex items-center gap-3">
+        {icon && <span className="text-2xl text-fog-pink shrink-0 leading-none">{icon}</span>}
+        <div>
+          {eyebrow && (
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fog-pink mb-1">
+              {eyebrow}
+            </div>
+          )}
+          <h2 className="text-xl font-bold tracking-tight text-neutral-50">
+            {title}
+          </h2>
+          {subtitle && (
+            <div className="mt-0.5 text-xs text-neutral-500">{subtitle}</div>
+          )}
+        </div>
       </div>
       {aside && <div className="flex items-center gap-2">{aside}</div>}
     </div>

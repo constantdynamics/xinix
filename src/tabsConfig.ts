@@ -34,9 +34,9 @@ export const DEFAULT_TABS: TabDef[] = [
   { key: "signal-log", label: "Signaallog" },
   { key: "scans", label: "Scans" },
   { key: "xinix", label: "Xinix" },
-  { key: "feniks", label: "🦅 Feniks" },
+  { key: "feniks", label: "Feniks" },
   { key: "poefies", label: "Poefies" },
   { key: "hikkertjes", label: "Hikkertjes" },
-  { key: "zwitserleven", label: "🌴 Zwitserleven" },
+  { key: "zwitserleven", label: "Zwitserleven" },
   { key: "favorieten", label: "♥ Favorieten" },
 ];

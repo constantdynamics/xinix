@@ -10,6 +10,7 @@ import {
   type TickerInput,
 } from "../api";
 import { TickerDetailsModal } from "./TickerDetailsModal";
+import { PriceChartModal } from "./PriceChartModal";
 import { googleFinanceUrl } from "../tickerLinks";
 import {
   Card,
@@ -254,6 +255,7 @@ export function TickersView({
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMode, setBatchMode] = useState<"quick" | "table">("quick");
   const [editing, setEditing] = useState<CardType | null>(null);
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
   const [singleOpen, setSingleOpen] = useState(false);
 
   const [rows, setRows] = useState<PreviewRow[]>([]);
@@ -722,6 +724,14 @@ export function TickersView({
           card={editing}
           onClose={() => setEditing(null)}
           onSaved={onRefresh}
+        />
+      )}
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
         />
       )}
 
@@ -1446,7 +1456,7 @@ export function TickersView({
                           href={googleFinanceUrl(c.ticker, c.exchange)}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-fog-pink hover:underline"
+                          className="tab-accent-text hover:underline"
                         >
                           {c.ticker}
                         </a>
@@ -1465,7 +1475,16 @@ export function TickersView({
                           />
                         )}
                       </td>
-                      <td className="p-3 text-neutral-300">{c.company}</td>
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          onClick={() => setChartFor({ ticker: c.ticker, company: c.company, exchange: c.exchange ?? null })}
+                          className="text-neutral-300 hover:text-neutral-100 hover:underline text-left transition-colors"
+                          title={`${c.company} — klik voor koersgrafiek`}
+                        >
+                          {c.company}
+                        </button>
+                      </td>
                       <td className="p-3 tabular text-neutral-200">
                         {c.goud_score ?? "—"}
                       </td>

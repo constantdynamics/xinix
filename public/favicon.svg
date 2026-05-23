@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Regenboog in het kleurverloop van het Xinix-logo (paars -> blauw -> teal -> groen). -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M2.5 26 A13.5 13.5 0 0 1 29.5 26" stroke="#6633ff" stroke-width="2.5"/>
+    <path d="M5 26 A11 11 0 0 1 27 26" stroke="#2672ff" stroke-width="2.5"/>
+    <path d="M7.5 26 A8.5 8.5 0 0 1 24.5 26" stroke="#00afee" stroke-width="2.5"/>
+    <path d="M10 26 A6 6 0 0 1 22 26" stroke="#00e3c1" stroke-width="2.5"/>
+    <path d="M12.5 26 A3.5 3.5 0 0 1 19.5 26" stroke="#00ff88" stroke-width="2.5"/>
+  </g>
+</svg>

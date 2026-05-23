@@ -4,6 +4,8 @@ import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import { triggerJob } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { loadTilePrefs, type TilePrefs } from "../tilePrefs";
+import { TAB_ICONS } from "../tabIcons";
+import { PriceChartModal } from "./PriceChartModal";
 import {
   Card,
   Badge,
@@ -95,7 +97,7 @@ function signalMeta(type: string): { label: string; desc: string } {
   return SIGNAL_FRIENDLY[type] ?? { label: type, desc: "" };
 }
 
-type ColorFilter = "all" | "red" | "orange" | "yellow" | "white";
+type CardColor = "red" | "orange" | "yellow" | "white";
 
 type NavTarget =
   | "dashboard"
@@ -108,8 +110,26 @@ type NavTarget =
   | "status"
   | "settings";
 
+type ChartTarget = { ticker: string; company: string; exchange: string | null };
+
 export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh: () => void; onNavigate?: (t: NavTarget) => void }) {
-  const [filter, setFilter] = useState<ColorFilter>("all");
+  const [chartFor, setChartFor] = useState<ChartTarget | null>(null);
+  // Filters: 'Catalyst' is een schakelaar die altijd AND-combineert met de
+  // los aanvinkbare kleur-filters (OR onderling). Standaard alleen catalyst.
+  const [catalystOnly, setCatalystOnly] = useState(true);
+  const [colorSel, setColorSel] = useState<Set<CardColor>>(new Set());
+  function toggleColor(c: CardColor) {
+    setColorSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  }
+  function showAll() {
+    setCatalystOnly(false);
+    setColorSel(new Set());
+  }
   const [tilePrefs, setTilePrefs] = useState<TilePrefs>(loadTilePrefs);
   // Sorteer-modus: "heat" = signaal-heat (standaard) · "score" = inhoudelijke
   // score-engine (signal_scores.final_score). Keuze bewaard in localStorage.
@@ -137,23 +157,30 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
     };
   }, []);
 
-  const counts = useMemo(
-    () =>
-      data.cards.reduce(
-        (acc, c) => {
-          acc[c.color]++;
-          return acc;
-        },
-        { white: 0, yellow: 0, orange: 0, red: 0 }
-      ),
-    [data.cards]
-  );
+  // Tellers: 'all' = over de hele watchlist, 'cat' = alleen catalyst-aandelen.
+  // De kleur-pillen tonen de teller die past bij de Catalyst-schakelaar, zodat
+  // de getallen op elkaar aansluiten.
+  const counts = useMemo(() => {
+    const all = { red: 0, orange: 0, yellow: 0, white: 0 };
+    const cat = { red: 0, orange: 0, yellow: 0, white: 0 };
+    let catalystTotal = 0;
+    for (const c of data.cards) {
+      all[c.color]++;
+      if (c.next_catalyst != null) {
+        catalystTotal++;
+        cat[c.color]++;
+      }
+    }
+    return { all, cat, catalystTotal };
+  }, [data.cards]);
 
   const visibleCards = useMemo(
     () => {
-      const filtered = filter === "all"
-        ? data.cards
-        : data.cards.filter((c) => c.color === filter);
+      const filtered = data.cards.filter(
+        (c) =>
+          (!catalystOnly || c.next_catalyst != null) &&
+          (colorSel.size === 0 || colorSel.has(c.color)),
+      );
       if (sortMode === "score") {
         // Inhoudelijke sortering: hoogste final_score eerst, ongescoorde onderaan.
         return [...filtered].sort((a, b) => (b.final_score ?? -1) - (a.final_score ?? -1));
@@ -161,7 +188,7 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
       // "heat": de cards komen al heat-gesorteerd uit de edge function.
       return filtered;
     },
-    [data.cards, filter, sortMode]
+    [data.cards, catalystOnly, colorSel, sortMode]
   );
 
   // KPIs
@@ -215,7 +242,8 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
           label="Watchlist"
           value={data.cards.length}
           tone="pink"
-          hint={`${counts.red + counts.orange} actief`}
+          hint={`${counts.all.red + counts.all.orange} actief`}
+          icon={TAB_ICONS.dashboard}
         />
         <Stat
           label="Actieve signalen"
@@ -241,52 +269,61 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
         />
       </div>
 
-      {/* Filter pills + jobs */}
+      {/* Filter pills + jobs — Catalyst combineert met de kleur-filters */}
       <div className="flex flex-wrap items-center gap-2">
         <Pill
-          tone="neutral"
-          active={filter === "all"}
-          count={data.cards.length}
-          onClick={() => setFilter("all")}
-          title="Toon alle tickers"
+          tone="cyan"
+          active={catalystOnly}
+          count={counts.catalystTotal}
+          onClick={() => setCatalystOnly((v) => !v)}
+          title="Alleen aandelen met een geplande catalyst — combineert met de kleur-filters"
         >
-          Alles
+          Catalyst
         </Pill>
         <Pill
           tone="loss"
-          active={filter === "red"}
-          count={counts.red}
-          onClick={() => setFilter("red")}
+          active={colorSel.has("red")}
+          count={catalystOnly ? counts.cat.red : counts.all.red}
+          onClick={() => toggleColor("red")}
           title={COLOR_TIP.red}
         >
           Hot
         </Pill>
         <Pill
           tone="orange"
-          active={filter === "orange"}
-          count={counts.orange}
-          onClick={() => setFilter("orange")}
+          active={colorSel.has("orange")}
+          count={catalystOnly ? counts.cat.orange : counts.all.orange}
+          onClick={() => toggleColor("orange")}
           title={COLOR_TIP.orange}
         >
           Warm
         </Pill>
         <Pill
           tone="watch"
-          active={filter === "yellow"}
-          count={counts.yellow}
-          onClick={() => setFilter("yellow")}
+          active={colorSel.has("yellow")}
+          count={catalystOnly ? counts.cat.yellow : counts.all.yellow}
+          onClick={() => toggleColor("yellow")}
           title={COLOR_TIP.yellow}
         >
           Watchlist
         </Pill>
         <Pill
           tone="lime"
-          active={filter === "white"}
-          count={counts.white}
-          onClick={() => setFilter("white")}
+          active={colorSel.has("white")}
+          count={catalystOnly ? counts.cat.white : counts.all.white}
+          onClick={() => toggleColor("white")}
           title={COLOR_TIP.white}
         >
           Rust
+        </Pill>
+        <Pill
+          tone="neutral"
+          active={!catalystOnly && colorSel.size === 0}
+          count={data.cards.length}
+          onClick={showAll}
+          title="Toon alle tickers"
+        >
+          Alles
         </Pill>
         <div className="ml-auto flex items-center gap-2">
           <div className="flex items-center gap-1">
@@ -323,7 +360,7 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
       </div>
 
       {/* Cards grid */}
-      <CardGrid cards={visibleCards} prefs={tilePrefs} />
+      <CardGrid cards={visibleCards} prefs={tilePrefs} onOpenChart={setChartFor} />
 
       {/* Catalysts */}
       <Catalysts data={data} />
@@ -333,6 +370,15 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
 
       {/* Run log */}
       <RunLog data={data} onNavigate={onNavigate} />
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -390,7 +436,7 @@ function JobControls() {
   );
 }
 
-function CardGrid({ cards, prefs }: { cards: CardData[]; prefs: TilePrefs }) {
+function CardGrid({ cards, prefs, onOpenChart }: { cards: CardData[]; prefs: TilePrefs; onOpenChart?: (t: ChartTarget) => void }) {
   if (cards.length === 0) {
     return (
       <Card className="p-10 text-center text-neutral-400 text-sm">
@@ -401,13 +447,13 @@ function CardGrid({ cards, prefs }: { cards: CardData[]; prefs: TilePrefs }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 items-start">
       {cards.map((c) => (
-        <CardTile key={c.ticker} card={c} prefs={prefs} />
+        <CardTile key={c.ticker} card={c} prefs={prefs} onOpenChart={onOpenChart} />
       ))}
     </div>
   );
 }
 
-function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
+function CardTile({ card: c, prefs, onOpenChart }: { card: CardData; prefs: TilePrefs; onOpenChart?: (t: ChartTarget) => void }) {
   const px = c.summary;
   const tone = COLOR_TONE[c.color];
   const detailMeta =
@@ -438,7 +484,7 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
               href={googleFinanceUrl(c.ticker, c.exchange)}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-bold text-base tracking-tight text-neutral-50 group-hover:text-fog-pink transition"
+              className="font-bold text-base tracking-tight tab-accent-text transition"
               title={`Open ${c.ticker} op Google Finance`}
             >
               {c.ticker}
@@ -468,9 +514,14 @@ function CardTile({ card: c, prefs }: { card: CardData; prefs: TilePrefs }) {
               </span>
             )}
           </div>
-          <div className="text-xs text-neutral-400 truncate mt-0.5" title={c.company}>
+          <button
+            type="button"
+            onClick={() => onOpenChart?.({ ticker: c.ticker, company: c.company, exchange: c.exchange ?? null })}
+            className="text-xs text-neutral-400 truncate mt-0.5 text-left hover:text-neutral-200 hover:underline transition-colors w-full"
+            title={`${c.company} — klik voor koersgrafiek`}
+          >
             {c.company}
-          </div>
+          </button>
           {prefs.showMedals && (
             <div className="mt-1.5">
               <MedalPills
@@ -789,7 +840,7 @@ function Catalysts({ data }: { data: Dashboard }) {
                       href={googleFinanceUrl(c.ticker, exchangeByTicker.get(c.ticker))}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-fog-pink hover:underline"
+                      className="tab-accent-text hover:underline"
                     >
                       {c.ticker}
                     </a>

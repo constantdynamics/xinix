@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   addMark,
   batchAddTickers,
@@ -17,6 +17,9 @@ import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Badge, Stat } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
+import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
+import { GradientTabIcon } from "../tabIcons";
+import { PriceChartModal } from "./PriceChartModal";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
 
@@ -70,9 +73,11 @@ function fmtYield(v: number | null): string {
   return `${(v * 100).toFixed(1)}%`;
 }
 
-// Verbergbare tabelkolommen — Ticker blijft altijd zichtbaar (rij-identiteit).
-type ColKey = "company" | "sector" | "bron" | "score" | "medals" | "dividend" | "last_close" | "above_limit_pct" | "limiet" | "rating";
-const COLUMNS: { key: ColKey; label: string }[] = [
+// Tabelkolommen voor de kolom-kiezer. Ticker is de vaste anker-kolom
+// (altijd zichtbaar, altijd vooraan).
+const FAV_COLUMNS: ColumnMeta[] = [
+  { key: "ticker", label: "Ticker" },
+  { key: "rating", label: "Sterren" },
   { key: "company", label: "Bedrijf" },
   { key: "sector", label: "Sector" },
   { key: "bron", label: "Bron" },
@@ -82,16 +87,7 @@ const COLUMNS: { key: ColKey; label: string }[] = [
   { key: "last_close", label: "Koers" },
   { key: "above_limit_pct", label: "vs limiet" },
   { key: "limiet", label: "Limiet" },
-  { key: "rating", label: "Sterren" },
 ];
-const HIDDEN_COLS_KEY = "xinix_fav_hidden_cols";
-function loadHiddenCols(): Set<ColKey> {
-  try {
-    const raw = localStorage.getItem(HIDDEN_COLS_KEY);
-    if (raw) return new Set((JSON.parse(raw) as ColKey[]).filter((k) => COLUMNS.some((c) => c.key === k)));
-  } catch { /* genegeerd */ }
-  return new Set();
-}
 
 export function FavorietenView() {
   const marks = useMarks();
@@ -125,9 +121,11 @@ export function FavorietenView() {
   const [limitOverrides, setLimitOverrides] = useState<Record<string, number | null>>({});
   // Bulk-add panel
   const [showAdd, setShowAdd] = useState(false);
+  // Koersgrafiek-popup — geopend door op een bedrijfsnaam te klikken.
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
 
   const isAdmin = !!getToken();
-  const [hiddenCols, setHiddenCols] = useState<Set<ColKey>>(loadHiddenCols);
+  const { visibleKeys } = useColumnLayout("favorieten", FAV_COLUMNS, "ticker");
 
   useEffect(() => {
     setLoading(true);
@@ -286,16 +284,6 @@ export function FavorietenView() {
   function toggleSector(s: Sector) {
     setSectorFilter((prev) => { const n = new Set(prev); if (n.has(s)) n.delete(s); else n.add(s); return n; });
   }
-  function toggleCol(key: ColKey) {
-    setHiddenCols((prev) => {
-      const n = new Set(prev);
-      if (n.has(key)) n.delete(key); else n.add(key);
-      try { localStorage.setItem(HIDDEN_COLS_KEY, JSON.stringify([...n])); } catch { /* genegeerd */ }
-      return n;
-    });
-  }
-  const colVisible = (key: ColKey) => !hiddenCols.has(key);
-
   const sortArrow = (key: SortKey) => sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "";
 
   // (BulkAddFavoritesPanel staat onderaan dit bestand)
@@ -309,13 +297,195 @@ export function FavorietenView() {
   const bronCounts: Record<Bron, number> = { feniks: 0, poefie: 0, hikkertje: 0, zwitserleven: 0, watchlist: 0 };
   for (const r of rows) for (const b of r.bronnen) bronCounts[b]++;
 
+  // Per kolom-key de header- en cel-render. De kolom-kiezer bepaalt welke
+  // hiervan in welke volgorde getoond worden (zie visibleKeys).
+  const colMap: Record<string, { th: ReactNode; td: (r: FavRow) => ReactNode }> = {
+    ticker: {
+      th: (
+        <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("ticker")}>
+          Ticker <span className="text-fog-lime text-[9px]">{sortArrow("ticker")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2">
+          <a href={googleFinanceUrl(r.ticker, r.exchange)} target="_blank" rel="noreferrer" className="font-mono font-semibold tab-accent-text hover:underline">
+            {r.ticker}
+          </a>
+        </td>
+      ),
+    },
+    rating: {
+      th: (
+        <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("rating")}>
+          Sterren <span className="text-fog-lime text-[9px]">{sortArrow("rating")}</span>
+        </th>
+      ),
+      td: (r) => <td className="px-3 py-2 text-center"><StarRating ticker={r.ticker} /></td>,
+    },
+    company: {
+      th: (
+        <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("company")}>
+          Bedrijf <span className="text-fog-lime text-[9px]">{sortArrow("company")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setChartFor({ ticker: r.ticker, company: r.company, exchange: r.exchange })}
+            className="text-left text-neutral-200 hover:text-fog-pink hover:underline transition-colors"
+            title={`Bekijk koersgrafiek van ${r.company}`}
+          >
+            {r.company}
+          </button>
+        </td>
+      ),
+    },
+    sector: {
+      th: <th className="px-3 py-2 text-left">Sector</th>,
+      td: (r) => (
+        <td className="px-3 py-2">
+          {r.sector ? <Badge tone={SECTOR_TONE[r.sector]}>{SECTOR_LABEL[r.sector]}</Badge> : <span className="text-neutral-600">—</span>}
+        </td>
+      ),
+    },
+    bron: {
+      th: <th className="px-3 py-2 text-left">Bron</th>,
+      td: (r) => (
+        <td className="px-3 py-2">
+          <div className="flex flex-wrap gap-1">
+            {r.bronnen.map((b) => (
+              <span key={b} className={`px-1.5 py-0.5 rounded text-[10px] border font-semibold whitespace-nowrap ${BRON_COLOR[b]}`}>
+                {BRON_LABEL[b]}
+              </span>
+            ))}
+          </div>
+        </td>
+      ),
+    },
+    score: {
+      th: (
+        <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("score")}>
+          Score <span className="text-fog-lime text-[9px]">{sortArrow("score")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+          {r.score != null ? r.score.toFixed(0) : <span className="text-neutral-600">—</span>}
+        </td>
+      ),
+    },
+    medals: {
+      th: (
+        <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("medals")}>
+          Medailles <span className="text-fog-lime text-[9px]">{sortArrow("medals")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
+          {r.medal_gold + r.medal_silver + r.medal_bronze > 0 ? (
+            <span>
+              {r.medal_gold > 0 && `🏆${r.medal_gold} `}
+              {r.medal_silver > 0 && `🥈${r.medal_silver} `}
+              {r.medal_bronze > 0 && `🥉${r.medal_bronze}`}
+            </span>
+          ) : (
+            <span className="text-neutral-600">—</span>
+          )}
+        </td>
+      ),
+    },
+    dividend: {
+      th: (
+        <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("dividend")}>
+          Dividend <span className="text-fog-lime text-[9px]">{sortArrow("dividend")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums">
+          {r.dividend_yield != null && r.dividend_yield > 0 ? (
+            <span className="text-emerald-300">{fmtYield(r.dividend_yield)}</span>
+          ) : (
+            <span className="text-neutral-600">—</span>
+          )}
+        </td>
+      ),
+    },
+    last_close: {
+      th: (
+        <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("last_close")}>
+          Koers <span className="text-fog-lime text-[9px]">{sortArrow("last_close")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+          {r.last_close != null ? fmtPrice(r.last_close) : <span className="text-neutral-600">—</span>}
+        </td>
+      ),
+    },
+    above_limit_pct: {
+      th: (
+        <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("above_limit_pct")}>
+          vs limiet <span className="text-fog-lime text-[9px]">{sortArrow("above_limit_pct")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums">
+          {r.above_limit_pct != null ? (
+            <span className={r.above_limit_pct <= 0 ? "text-fog-lime font-semibold" : r.above_limit_pct <= 10 ? "text-fog-warn" : "text-neutral-300"}>
+              {r.above_limit_pct <= 0 ? "✓ onder" : `+${r.above_limit_pct.toFixed(1)}%`}
+            </span>
+          ) : (
+            <span className="text-neutral-600">—</span>
+          )}
+        </td>
+      ),
+    },
+    limiet: {
+      th: <th className="px-3 py-2 text-right" title="Aankooplimiet — klik om in te vullen">Limiet</th>,
+      td: (r) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums">
+          {editingLimit === r.ticker ? (
+            <input
+              autoFocus
+              type="text"
+              inputMode="decimal"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={() => commitEditLimit(r.ticker)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitEditLimit(r.ticker);
+                else if (e.key === "Escape") cancelEditLimit();
+              }}
+              className="w-20 px-1.5 py-0.5 rounded bg-ink-3 border border-fog-lime text-right font-mono text-xs text-neutral-100 focus:outline-none"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => startEditLimit(r)}
+              disabled={!isAdmin}
+              className={
+                "px-1.5 py-0.5 rounded text-xs font-mono tabular-nums transition-colors " +
+                (isAdmin ? "hover:bg-ink-3 cursor-pointer" : "cursor-default") +
+                " " + (r.buy_limit != null ? "text-neutral-200" : "text-neutral-600")
+              }
+              title={isAdmin ? "Klik om de aankooplimiet aan te passen" : "Login vereist"}
+            >
+              {savingLimit === r.ticker ? "…" : (r.buy_limit != null ? fmtPrice(r.buy_limit) : "+")}
+            </button>
+          )}
+        </td>
+      ),
+    },
+  };
+
   return (
     <div className="space-y-4">
-      <Card className="p-4 border-red-500/30 bg-red-500/[0.04]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <span className="text-2xl">♥</span>
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="favorieten" /></span>
           <div className="flex-1">
-            <div className="font-semibold text-red-400 mb-1">Favorieten</div>
+            <div className="font-semibold tab-accent-text mb-1">Favorieten</div>
             <p className="text-sm text-neutral-300 leading-relaxed">
               Aandelen die je hebt aangemerkt met het hartje op een ander tabblad.
               De badges tonen op welke lijst ze voorkomen (Feniks, Poefie, Hikkertje, Zwitserleven of alleen watchlist).
@@ -448,29 +618,15 @@ export function FavorietenView() {
           </div>
 
           {viewMode === "tiles" ? (
-            <FavorietenTiles rows={filtered} />
+            <FavorietenTiles
+              rows={filtered}
+              onCompanyClick={(r) => setChartFor({ ticker: r.ticker, company: r.company, exchange: r.exchange })}
+            />
           ) : (
           <>
-          {/* Kolom-zichtbaarheid — alleen in lijstweergave, keuze lokaal bewaard */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold mr-1">Kolommen:</span>
-            {COLUMNS.map((c) => {
-              const shown = colVisible(c.key);
-              return (
-                <button
-                  key={c.key}
-                  onClick={() => toggleCol(c.key)}
-                  title={shown ? `Verberg kolom "${c.label}"` : `Toon kolom "${c.label}"`}
-                  className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
-                    shown
-                      ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10"
-                      : "border-ink-5 text-neutral-500 line-through hover:text-neutral-300"
-                  }`}
-                >
-                  {c.label}
-                </button>
-              );
-            })}
+          {/* Kolom-kiezer — alleen in lijstweergave; keuze synct over devices */}
+          <div className="flex items-center justify-end">
+            <ColumnPicker tabKey="favorieten" columns={FAV_COLUMNS} lockedKey="ticker" />
           </div>
           <Card className="p-0 overflow-hidden">
             <div className="overflow-x-auto">
@@ -479,47 +635,7 @@ export function FavorietenView() {
                   <tr>
                     <SeenHeader />
                     <HeartHeader />
-                    <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("ticker")}>
-                      Ticker <span className="text-fog-lime text-[9px]">{sortArrow("ticker")}</span>
-                    </th>
-                    {colVisible("company") && (
-                      <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("company")}>
-                        Bedrijf <span className="text-fog-lime text-[9px]">{sortArrow("company")}</span>
-                      </th>
-                    )}
-                    {colVisible("sector") && <th className="px-3 py-2 text-left">Sector</th>}
-                    {colVisible("bron") && <th className="px-3 py-2 text-left">Bron</th>}
-                    {colVisible("score") && (
-                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("score")}>
-                        Score <span className="text-fog-lime text-[9px]">{sortArrow("score")}</span>
-                      </th>
-                    )}
-                    {colVisible("medals") && (
-                      <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("medals")}>
-                        Medailles <span className="text-fog-lime text-[9px]">{sortArrow("medals")}</span>
-                      </th>
-                    )}
-                    {colVisible("dividend") && (
-                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("dividend")}>
-                        Dividend <span className="text-fog-lime text-[9px]">{sortArrow("dividend")}</span>
-                      </th>
-                    )}
-                    {colVisible("last_close") && (
-                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("last_close")}>
-                        Koers <span className="text-fog-lime text-[9px]">{sortArrow("last_close")}</span>
-                      </th>
-                    )}
-                    {colVisible("above_limit_pct") && (
-                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("above_limit_pct")}>
-                        vs limiet <span className="text-fog-lime text-[9px]">{sortArrow("above_limit_pct")}</span>
-                      </th>
-                    )}
-                    {colVisible("limiet") && <th className="px-3 py-2 text-right" title="Aankooplimiet — klik om in te vullen">Limiet</th>}
-                    {colVisible("rating") && (
-                      <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("rating")}>
-                        Sterren <span className="text-fog-lime text-[9px]">{sortArrow("rating")}</span>
-                      </th>
-                    )}
+                    {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-5/40">
@@ -529,114 +645,7 @@ export function FavorietenView() {
                       <tr key={r.ticker} className={seen ? "opacity-50" : ""}>
                         <SeenCell ticker={r.ticker} />
                         <HeartCell ticker={r.ticker} />
-                        <td className="px-3 py-2">
-                          <a
-                            href={googleFinanceUrl(r.ticker, r.exchange)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-mono font-semibold text-red-300 hover:underline"
-                          >
-                            {r.ticker}
-                          </a>
-                        </td>
-                        {colVisible("company") && <td className="px-3 py-2 text-neutral-200">{r.company}</td>}
-                        {colVisible("sector") && (
-                          <td className="px-3 py-2">
-                            {r.sector ? <Badge tone={SECTOR_TONE[r.sector]}>{SECTOR_LABEL[r.sector]}</Badge> : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {colVisible("bron") && (
-                          <td className="px-3 py-2">
-                            <div className="flex flex-wrap gap-1">
-                              {r.bronnen.map((b) => (
-                                <span key={b} className={`px-1.5 py-0.5 rounded text-[10px] border font-semibold whitespace-nowrap ${BRON_COLOR[b]}`}>
-                                  {BRON_LABEL[b]}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                        )}
-                        {colVisible("score") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {r.score != null ? r.score.toFixed(0) : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {colVisible("medals") && (
-                          <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
-                            {r.medal_gold + r.medal_silver + r.medal_bronze > 0 ? (
-                              <span>
-                                {r.medal_gold > 0 && `🏆${r.medal_gold} `}
-                                {r.medal_silver > 0 && `🥈${r.medal_silver} `}
-                                {r.medal_bronze > 0 && `🥉${r.medal_bronze}`}
-                              </span>
-                            ) : (
-                              <span className="text-neutral-600">—</span>
-                            )}
-                          </td>
-                        )}
-                        {colVisible("dividend") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums">
-                            {r.dividend_yield != null && r.dividend_yield > 0 ? (
-                              <span className="text-emerald-300">{fmtYield(r.dividend_yield)}</span>
-                            ) : (
-                              <span className="text-neutral-600">—</span>
-                            )}
-                          </td>
-                        )}
-                        {colVisible("last_close") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {r.last_close != null ? fmtPrice(r.last_close) : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {colVisible("above_limit_pct") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums">
-                            {r.above_limit_pct != null ? (
-                              <span className={r.above_limit_pct <= 0 ? "text-fog-lime font-semibold" : r.above_limit_pct <= 10 ? "text-fog-warn" : "text-neutral-300"}>
-                                {r.above_limit_pct <= 0 ? "✓ onder" : `+${r.above_limit_pct.toFixed(1)}%`}
-                              </span>
-                            ) : (
-                              <span className="text-neutral-600">—</span>
-                            )}
-                          </td>
-                        )}
-                        {colVisible("limiet") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums">
-                            {editingLimit === r.ticker ? (
-                              <input
-                                autoFocus
-                                type="text"
-                                inputMode="decimal"
-                                value={editValue}
-                                onChange={(e) => setEditValue(e.target.value)}
-                                onBlur={() => commitEditLimit(r.ticker)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") commitEditLimit(r.ticker);
-                                  else if (e.key === "Escape") cancelEditLimit();
-                                }}
-                                className="w-20 px-1.5 py-0.5 rounded bg-ink-3 border border-fog-lime text-right font-mono text-xs text-neutral-100 focus:outline-none"
-                              />
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => startEditLimit(r)}
-                                disabled={!isAdmin}
-                                className={
-                                  "px-1.5 py-0.5 rounded text-xs font-mono tabular-nums transition-colors " +
-                                  (isAdmin ? "hover:bg-ink-3 cursor-pointer" : "cursor-default") +
-                                  " " + (r.buy_limit != null ? "text-neutral-200" : "text-neutral-600")
-                                }
-                                title={isAdmin ? "Klik om de aankooplimiet aan te passen" : "Login vereist"}
-                              >
-                                {savingLimit === r.ticker ? "…" : (r.buy_limit != null ? fmtPrice(r.buy_limit) : "+")}
-                              </button>
-                            )}
-                          </td>
-                        )}
-                        {colVisible("rating") && (
-                          <td className="px-3 py-2 text-center">
-                            <StarRating ticker={r.ticker} />
-                          </td>
-                        )}
+                        {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(r)}</Fragment>)}
                       </tr>
                     );
                   })}
@@ -648,14 +657,23 @@ export function FavorietenView() {
           )}
         </>
       )}
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
+      )}
     </div>
   );
 }
 
 // Tegelweergave — compacte grid-kaarten, één per favoriet. Toont sterren,
-// afstand tot limiet, medailles en bron-badges. Klik op de kaart opent
-// Google Finance; klik op een ster zet de rating (stopPropagation in StarRating).
-function FavorietenTiles({ rows }: { rows: FavRow[] }) {
+// afstand tot limiet, medailles en bron-badges. Klik op de ticker opent
+// Google Finance; klik op de bedrijfsnaam opent de koersgrafiek.
+function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyClick: (r: FavRow) => void }) {
   const marks = useMarks();
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
@@ -674,13 +692,20 @@ function FavorietenTiles({ rows }: { rows: FavRow[] }) {
                 href={googleFinanceUrl(r.ticker, r.exchange)}
                 target="_blank"
                 rel="noreferrer"
-                className="font-mono font-bold text-sm text-red-300 hover:underline truncate"
+                className="font-mono font-bold text-sm tab-accent-text hover:underline truncate"
               >
                 {r.ticker}
               </a>
               {r.sector && <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">{SECTOR_LABEL[r.sector]}</span>}
             </div>
-            <div className="text-[10px] text-neutral-400 truncate mb-1" title={r.company}>{r.company}</div>
+            <button
+              type="button"
+              onClick={() => onCompanyClick(r)}
+              className="block w-full text-left text-[10px] text-neutral-400 truncate mb-1 hover:text-fog-pink transition-colors"
+              title={`Bekijk koersgrafiek van ${r.company}`}
+            >
+              {r.company}
+            </button>
             <div className="font-mono tabular-nums text-base font-bold leading-none">
               {r.above_limit_pct != null ? (
                 <span className={atOrUnder ? "text-fog-lime" : near ? "text-fog-warn" : "text-neutral-300"}>

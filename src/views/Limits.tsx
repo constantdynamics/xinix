@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Dashboard, Card as CardData, Sector } from "../types";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import {
@@ -20,6 +20,23 @@ import {
   BlockBar,
 } from "../components/ui";
 import { SeenHeader, HeartHeader, StarHeader, SeenCell, HeartCell, StarCell, HeartInline, StarRating } from "../components/MarkCells";
+import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
+import { GradientTabIcon } from "../tabIcons";
+import { PriceChartModal } from "./PriceChartModal";
+
+// Tabelkolommen voor de kolom-kiezer. Ticker is de vaste anker-kolom.
+const LIMIT_COLUMNS: ColumnMeta[] = [
+  { key: "ticker", label: "Ticker" },
+  { key: "company", label: "Bedrijf" },
+  { key: "medals", label: "Medailles" },
+  { key: "price", label: "Koers" },
+  { key: "limit", label: "Limit" },
+  { key: "distance", label: "Afstand" },
+  { key: "day", label: "Dag" },
+  { key: "div", label: "Div" },
+  { key: "range", label: "1y range" },
+  { key: "actions", label: "Acties" },
+];
 
 const VIEW_KEY = "xinix_limit_view";
 const FILTER_KEY = "xinix_limit_filter_v1";
@@ -162,6 +179,7 @@ export function LimitsView({
   data: Dashboard;
   onRefresh: () => void;
 }) {
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
   const [view, setView] = useState<"list" | "tiles">(() => {
     const saved = localStorage.getItem(VIEW_KEY);
     return saved === "tiles" ? "tiles" : "list";
@@ -305,6 +323,7 @@ export function LimitsView({
   return (
     <div className="space-y-6">
       <SectionHeader
+        icon={<GradientTabIcon tab="limits" />}
         eyebrow="Aankoop"
         title="Limiet-watcher"
         subtitle={`${allRows.length} met limit · ${buyNowCount} op/onder · ${closeCount} dicht · ${withMedals} met medaille · ${totalGold}× goud totaal`}
@@ -402,9 +421,12 @@ export function LimitsView({
             </option>
           ))}
         </Select>
-        <span className="ml-auto text-neutral-400 tabular">
-          {rows.length} getoond
-        </span>
+        <div className="ml-auto flex items-center gap-3">
+          {view === "list" && (
+            <ColumnPicker tabKey="limits" columns={LIMIT_COLUMNS} lockedKey="ticker" />
+          )}
+          <span className="text-neutral-400 tabular">{rows.length} getoond</span>
+        </div>
       </Card>
 
       {allRows.length === 0 ? (
@@ -417,18 +439,133 @@ export function LimitsView({
           Geen tickers in deze filter.
         </Card>
       ) : view === "list" ? (
-        <LimitTable rows={rows} sortBy={sortBy} />
+        <LimitTable rows={rows} sortBy={sortBy} onOpenChart={setChartFor} />
       ) : (
-        <LimitTiles rows={rows} sortBy={sortBy} />
+        <LimitTiles rows={rows} sortBy={sortBy} onOpenChart={setChartFor} />
       )}
 
       <BulkPaste data={data} onRefresh={onRefresh} />
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
+      )}
     </div>
   );
 }
 
-function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
+type OpenChart = (t: { ticker: string; company: string; exchange: string | null }) => void;
+
+function LimitTable({ rows, sortBy, onOpenChart }: { rows: LimitRow[]; sortBy: SortBy; onOpenChart?: OpenChart }) {
   const showRank = sortBy === "medals" || sortBy === "medals_price" || sortBy === "gold";
+  const { visibleKeys } = useColumnLayout("limits", LIMIT_COLUMNS, "ticker");
+
+  // Per kolom-key de header + cel-render; visibleKeys bepaalt volgorde/zichtbaarheid.
+  const colMap: Record<string, { th: ReactNode; td: (r: LimitRow) => ReactNode }> = {
+    ticker: {
+      th: <th className="text-left p-3 font-semibold">Ticker</th>,
+      td: (r) => (
+        <td className="p-3 font-bold whitespace-nowrap">
+          <Badge tone={SECTOR_TONE[r.sector]} className="mr-2">{SECTOR_LABEL[r.sector]}</Badge>
+          <a
+            href={googleFinanceUrl(r.ticker, r.exchange)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="tab-accent-text hover:underline"
+          >
+            {r.ticker}
+          </a>
+        </td>
+      ),
+    },
+    company: {
+      th: <th className="text-left p-3 font-semibold">Bedrijf</th>,
+      td: (r) => (
+        <td className="p-3 truncate max-w-xs">
+          <button
+            type="button"
+            onClick={() => onOpenChart?.({ ticker: r.ticker, company: r.company, exchange: r.exchange })}
+            className="text-neutral-300 hover:text-neutral-100 hover:underline text-left transition-colors"
+            title={`${r.company} — klik voor koersgrafiek`}
+          >
+            {r.company}
+          </button>
+        </td>
+      ),
+    },
+    medals: {
+      th: <th className="text-left p-3 font-semibold">Medailles</th>,
+      td: (r) => <td className="p-3"><MedalStrip gold={r.gold} silver={r.silver} bronze={r.bronze} /></td>,
+    },
+    price: {
+      th: <th className="text-right p-3 font-semibold">Koers</th>,
+      td: (r) => <td className="p-3 text-right tabular text-neutral-100">{r.current != null ? `$${fmt(r.current)}` : "—"}</td>,
+    },
+    limit: {
+      th: <th className="text-right p-3 font-semibold">Limit</th>,
+      td: (r) => <td className="p-3 text-right tabular text-neutral-300">${fmt(r.limit)}</td>,
+    },
+    distance: {
+      th: <th className="text-left p-3 font-semibold w-56">Afstand</th>,
+      td: (r) => {
+        const tone = distanceTone(r.distance);
+        const pct = Math.round(r.distance * 100);
+        return (
+          <td className="p-3">
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-3.5">
+                <BlockBar fill={r.distance} orientation="horizontal" />
+              </div>
+              <span className={`text-[11px] tabular font-bold w-12 text-right ${tone.text}`}>
+                {r.distance >= 1 ? "BUY!" : `${pct}%`}
+              </span>
+            </div>
+          </td>
+        );
+      },
+    },
+    day: {
+      th: <th className="text-right p-3 font-semibold">Dag</th>,
+      td: (r) => (
+        <td className="p-3 text-right tabular">
+          <span className={(r.pct1d ?? 0) >= 0 ? "text-fog-lime" : "text-fog-loss"}>
+            {r.pct1d == null ? "—" : `${r.pct1d >= 0 ? "+" : ""}${r.pct1d.toFixed(1)}%`}
+          </span>
+        </td>
+      ),
+    },
+    div: {
+      th: <th className="text-right p-3 font-semibold">Div</th>,
+      td: (r) => (
+        <td className="p-3 text-right tabular text-[11px]">
+          <span className={r.dividend_yield != null && r.dividend_yield > 0 ? "text-fog-lime" : "text-neutral-500"}>
+            {fmtYield(r.dividend_yield)}
+          </span>
+        </td>
+      ),
+    },
+    range: {
+      th: <th className="text-left p-3 font-semibold w-64">1y range</th>,
+      td: (r) => (
+        <td className="p-3">
+          {r.low_1y != null && r.high_1y != null && r.current != null ? (
+            <RangeBar low={r.low_1y} high={r.high_1y} current={r.current} />
+          ) : (
+            <span className="text-[11px] text-neutral-400 italic">nog ophalen</span>
+          )}
+        </td>
+      ),
+    },
+    actions: {
+      th: <th className="p-3"></th>,
+      td: (r) => <td className="p-3 text-right"><RemoveLimitButton ticker={r.ticker} /></td>,
+    },
+  };
+
   return (
     <Card className="overflow-hidden">
       <div className="overflow-auto">
@@ -439,93 +576,24 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
               <HeartHeader />
               <StarHeader />
               {showRank && <th className="text-right p-3 font-semibold w-10">#</th>}
-              <th className="text-left p-3 font-semibold">Ticker</th>
-              <th className="text-left p-3 font-semibold">Bedrijf</th>
-              <th className="text-left p-3 font-semibold">Medailles</th>
-              <th className="text-right p-3 font-semibold">Koers</th>
-              <th className="text-right p-3 font-semibold">Limit</th>
-              <th className="text-left p-3 font-semibold w-56">Afstand</th>
-              <th className="text-right p-3 font-semibold">Dag</th>
-              <th className="text-right p-3 font-semibold">Div</th>
-              <th className="text-left p-3 font-semibold w-64">1y range</th>
-              <th className="p-3"></th>
+              {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => {
-              const tone = distanceTone(r.distance);
-              const pct = Math.round(r.distance * 100);
-              return (
-                <tr
-                  key={r.ticker}
-                  className="border-t border-ink-5 hover:bg-ink-3/40 transition"
-                >
-                  <SeenCell ticker={r.ticker} />
-                  <HeartCell ticker={r.ticker} />
-                  <StarCell ticker={r.ticker} />
-                  {showRank && (
-                    <td className="p-3 text-right tabular text-neutral-400">
-                      {i + 1}
-                    </td>
-                  )}
-                  <td className="p-3 font-bold whitespace-nowrap">
-                    <Badge tone={SECTOR_TONE[r.sector]} className="mr-2">
-                      {SECTOR_LABEL[r.sector]}
-                    </Badge>
-                    <a
-                      href={googleFinanceUrl(r.ticker, r.exchange)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-fog-pink hover:underline"
-                    >
-                      {r.ticker}
-                    </a>
-                  </td>
-                  <td className="p-3 text-neutral-300 truncate max-w-xs">
-                    {r.company}
-                  </td>
-                  <td className="p-3">
-                    <MedalStrip gold={r.gold} silver={r.silver} bronze={r.bronze} />
-                  </td>
-                  <td className="p-3 text-right tabular text-neutral-100">
-                    {r.current != null ? `$${fmt(r.current)}` : "—"}
-                  </td>
-                  <td className="p-3 text-right tabular text-neutral-300">
-                    ${fmt(r.limit)}
-                  </td>
-                  <td className="p-3">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-3.5">
-                        <BlockBar fill={r.distance} orientation="horizontal" />
-                      </div>
-                      <span className={`text-[11px] tabular font-bold w-12 text-right ${tone.text}`}>
-                        {r.distance >= 1 ? "BUY!" : `${pct}%`}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="p-3 text-right tabular">
-                    <span className={(r.pct1d ?? 0) >= 0 ? "text-fog-lime" : "text-fog-loss"}>
-                      {r.pct1d == null ? "—" : `${r.pct1d >= 0 ? "+" : ""}${r.pct1d.toFixed(1)}%`}
-                    </span>
-                  </td>
-                  <td className="p-3 text-right tabular text-[11px]">
-                    <span className={r.dividend_yield != null && r.dividend_yield > 0 ? "text-fog-lime" : "text-neutral-500"}>
-                      {fmtYield(r.dividend_yield)}
-                    </span>
-                  </td>
-                  <td className="p-3">
-                    {r.low_1y != null && r.high_1y != null && r.current != null ? (
-                      <RangeBar low={r.low_1y} high={r.high_1y} current={r.current} />
-                    ) : (
-                      <span className="text-[11px] text-neutral-400 italic">nog ophalen</span>
-                    )}
-                  </td>
-                  <td className="p-3 text-right">
-                    <RemoveLimitButton ticker={r.ticker} />
-                  </td>
-                </tr>
-              );
-            })}
+            {rows.map((r, i) => (
+              <tr
+                key={r.ticker}
+                className="border-t border-ink-5 hover:bg-ink-3/40 transition"
+              >
+                <SeenCell ticker={r.ticker} />
+                <HeartCell ticker={r.ticker} />
+                <StarCell ticker={r.ticker} />
+                {showRank && (
+                  <td className="p-3 text-right tabular text-neutral-400">{i + 1}</td>
+                )}
+                {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(r)}</Fragment>)}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -533,7 +601,7 @@ function LimitTable({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
   );
 }
 
-function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
+function LimitTiles({ rows, sortBy, onOpenChart }: { rows: LimitRow[]; sortBy: SortBy; onOpenChart?: OpenChart }) {
   const showRank = sortBy === "medals" || sortBy === "medals_price" || sortBy === "gold";
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
@@ -550,18 +618,17 @@ function LimitTiles({ rows, sortBy }: { rows: LimitRow[]; sortBy: SortBy }) {
             className={`rounded-xl border border-ink-5 ${tone.bg} ring-1 ${tone.ring} p-2.5`}
           >
             <div className="flex items-center justify-between gap-1 mb-1">
-              <a
-                href={googleFinanceUrl(r.ticker, r.exchange)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold text-sm text-ink-0 truncate hover:underline"
-                title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🏆${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}`}
+              <button
+                type="button"
+                onClick={() => onOpenChart?.({ ticker: r.ticker, company: r.company, exchange: r.exchange })}
+                className="font-bold text-sm text-ink-0 truncate hover:underline text-left"
+                title={`${r.company}\nKoers $${r.current ?? "—"}\nLimit $${r.limit}\n${tone.label}\n🏆${r.gold} 🥈${r.silver} 🥉${r.bronze}\nDividend ${fmtYield(r.dividend_yield)}\nKlik voor koersgrafiek`}
               >
                 {showRank && (
                   <span className="text-ink-0/60 mr-1">#{i + 1}</span>
                 )}
                 {r.ticker}
-              </a>
+              </button>
               <span className="text-[9px] uppercase tracking-wider text-ink-0/70 font-bold">
                 {SECTOR_LABEL[r.sector]}
               </span>

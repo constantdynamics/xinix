@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   fetchScanResults,
   triggerJob,
@@ -6,7 +6,9 @@ import {
   type PoefieRankEntry,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Button, Pill, Stat, Dot } from "../components/ui";
+import { Card, Button, Pill, Stat } from "../components/ui";
+import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
+import { EditableLimit } from "../components/EditableLimit";
 import { useMarks } from "../hooks/useMarks";
 import {
   HeartCell,
@@ -20,6 +22,7 @@ import {
   StarCell,
   StarHeader,
 } from "../components/MarkCells";
+import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -69,6 +72,13 @@ const POEFIE_COLUMNS: PoefieColumn[] = [
   { key: "poefie_days_to_peak",   label: "Mediaan dagen tot piek",    short: "Dagen → piek", defaultDir: "asc", hint: "Mediaan aantal dagen tussen baseline en piek (max 7)" },
   { key: "poefie_median_date",    label: "Mediaan datum (dagen geleden)", short: "Mediaan dagen", defaultDir: "asc", hint: "Hoeveel dagen geleden de mediaan-poefie plaatsvond" },
   { key: "poefie_last_date",      label: "Laatste poefie datum",      short: "Laatste",   defaultDir: "desc", hint: "Datum van het meest recente poefie-incident" },
+];
+
+// Kolommen voor de kolom-kiezer: Ticker (vast) + alle data-kolommen + Koers.
+const POEFIE_COL_META: ColumnMeta[] = [
+  { key: "ticker", label: "Ticker" },
+  ...POEFIE_COLUMNS.map((c) => ({ key: c.key, label: c.short })),
+  { key: "koers", label: "Koers" },
 ];
 
 function getSortValue(p: PoefieRankEntry, key: PoefieSortKey): number | null {
@@ -204,9 +214,7 @@ export function PoefiesView() {
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<PoefieSortKey>("above_limit_pct");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [visibleCols, setVisibleCols] = useState<Set<PoefieSortKey>>(
-    () => new Set(POEFIE_COLUMNS.map((c) => c.key)),
-  );
+  const { visibleKeys } = useColumnLayout("poefies", POEFIE_COL_META, "ticker");
   const [selectedBuckets, setSelectedBuckets] = useState<Record<PoefieSortKey, Set<string>>>(() => {
     const init = {} as Record<PoefieSortKey, Set<string>>;
     for (const g of FACET_GROUPS) init[g.key] = new Set();
@@ -284,14 +292,6 @@ export function PoefiesView() {
     }
   }
 
-  function toggleCol(key: PoefieSortKey) {
-    setVisibleCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
-
   function toggleBucket(groupKey: PoefieSortKey, bucketId: string) {
     setSelectedBuckets((prev) => {
       const nextSet = new Set(prev[groupKey]);
@@ -366,14 +366,108 @@ export function PoefiesView() {
 
   const sortArrow = (key: PoefieSortKey) => sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "";
 
+  // Sorteerbare header voor een data-kolom.
+  const dataTh = (key: PoefieSortKey) => {
+    const c = POEFIE_COLUMNS.find((x) => x.key === key)!;
+    return (
+      <th
+        className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+        onClick={() => toggleSort(key)}
+        title={c.hint}
+      >
+        <span className="inline-flex items-center gap-1">
+          {c.short}
+          <span className="text-fog-lime text-[9px]">{sortArrow(key)}</span>
+        </span>
+      </th>
+    );
+  };
+  // Numerieke data-cel met een eenvoudige formatter.
+  const numTd = (v: number | null | undefined, fmt: (n: number) => ReactNode) => (
+    <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+      {v != null ? fmt(v) : <span className="text-neutral-600">—</span>}
+    </td>
+  );
+
+  // Per kolom-key de header + cel-render; visibleKeys bepaalt volgorde/zichtbaarheid.
+  const colMap: Record<string, { th: ReactNode; td: (p: PoefieRankEntry) => ReactNode }> = {
+    ticker: {
+      th: <th className="px-3 py-2 text-left">Ticker</th>,
+      td: (p) => (
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <a
+              href={googleFinanceUrl(p.ticker, p.exchange)}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono text-sm font-semibold tab-accent-text hover:underline"
+            >
+              {p.ticker}
+            </a>
+            {p.company && <span className="text-xs text-neutral-400 truncate max-w-[140px]">{p.company}</span>}
+            {p.sector && <Pill>{p.sector}</Pill>}
+          </div>
+          <div className="mt-0.5 text-[10px] text-neutral-500 flex items-center gap-1.5">
+            {(p.medal_gold ?? 0) > 0 && <span>🏆{p.medal_gold}</span>}
+            {(p.medal_silver ?? 0) > 0 && <span>🥈{p.medal_silver}</span>}
+            {(p.medal_bronze ?? 0) > 0 && <span>🥉{p.medal_bronze}</span>}
+          </div>
+        </td>
+      ),
+    },
+    above_limit_pct: {
+      th: dataTh("above_limit_pct"),
+      td: (p) => {
+        const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
+        const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
+        return (
+          <td className="px-3 py-2 text-right font-mono tabular-nums">
+            {p.above_limit_pct != null ? (
+              <span className={atOrBelow ? "text-fog-lime font-semibold" : near ? "text-fog-warn" : "text-neutral-300"}>
+                {atOrBelow ? "✓ onder" : `+${p.above_limit_pct.toFixed(1)}%`}
+              </span>
+            ) : (
+              <span className="text-neutral-600">—</span>
+            )}
+          </td>
+        );
+      },
+    },
+    poefie_incident_count: { th: dataTh("poefie_incident_count"), td: (p) => numTd(p.poefie_incident_count, (n) => n) },
+    poefie_count_6m: { th: dataTh("poefie_count_6m"), td: (p) => numTd(p.poefie_count_6m, (n) => n) },
+    poefie_count_1y: { th: dataTh("poefie_count_1y"), td: (p) => numTd(p.poefie_count_1y, (n) => n) },
+    poefie_count_2y: { th: dataTh("poefie_count_2y"), td: (p) => numTd(p.poefie_count_2y, (n) => n) },
+    poefie_count_5y: { th: dataTh("poefie_count_5y"), td: (p) => numTd(p.poefie_count_5y, (n) => n) },
+    poefie_max_growth_pct: { th: dataTh("poefie_max_growth_pct"), td: (p) => numTd(p.poefie_max_growth_pct, (n) => `+${n.toFixed(0)}%`) },
+    poefie_days_to_peak: { th: dataTh("poefie_days_to_peak"), td: (p) => numTd(p.poefie_days_to_peak, (n) => `${n}d`) },
+    poefie_median_date: { th: dataTh("poefie_median_date"), td: (p) => numTd(daysAgo(p.poefie_median_date), (n) => `${n}d`) },
+    poefie_last_date: {
+      th: dataTh("poefie_last_date"),
+      td: (p) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums text-fog-pink/80">
+          {p.poefie_last_date ? fmtDate(p.poefie_last_date) : <span className="text-neutral-600">—</span>}
+        </td>
+      ),
+    },
+    koers: {
+      th: <th className="px-3 py-2 text-right">Koers</th>,
+      td: (p) => (
+        <td className="px-3 py-2 text-right font-mono tabular-nums">
+          {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
+          <div><EditableLimit ticker={p.ticker} buyLimit={p.buy_limit} compact /></div>
+        </td>
+      ),
+    },
+  };
+
   return (
     <div className="space-y-6">
       {/* Uitlegkaart */}
-      <Card className="p-4 border-fog-watch/20 bg-fog-watch/[0.03]">
+      <Card className="p-4 tab-accent-panel">
         <div className="flex items-start gap-3">
-          <Dot tone="watch" />
+          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="poefies" /></span>
           <div className="flex-1">
-            <div className="font-bold text-neutral-100">🎆 Poefies</div>
+            <div className="font-bold text-base tab-accent-text">Poefies</div>
             <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
               Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">125% (2,25×)</strong> zijn gegroeid binnen maximaal <strong className="text-neutral-200">7 dagen</strong>.
               Een poefie is een explosieve, kortstondige sprong. De kolommen <em>6m / 1j / 2j / 5j</em> tonen hoe vaak het de afgelopen 6 maanden, 1, 2 en 5 jaar gebeurde.
@@ -389,6 +483,7 @@ export function PoefiesView() {
           label="Poefie-aandelen"
           value={poefieCount}
           hint="is_poefie = true in watchlist"
+          icon={TAB_ICONS.poefies}
         />
         <Stat
           label="Nog te scannen"
@@ -491,163 +586,47 @@ export function PoefiesView() {
               </div>
             ))}
 
-            <div className="pt-3 border-t border-ink-5/40">
-              <div className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold mb-2">
-                Kolommen tonen
-              </div>
-              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                {POEFIE_COLUMNS.map((c) => (
-                  <label key={c.key} className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={visibleCols.has(c.key)}
-                      onChange={() => toggleCol(c.key)}
-                      className="accent-fog-lime"
-                    />
-                    <span>{c.short}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
             <div className="pt-2 border-t border-ink-5/40 text-[11px] text-neutral-500">
               {filteredRanking.length} van {ranking.length} getoond
             </div>
           </Card>
 
           {/* Tabel */}
-          <Card className="p-0 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
-                    <SeenHeader />
-                    <HeartHeader />
-                    <StarHeader />
-                    <th className="px-3 py-2 text-left w-10">#</th>
-                    <th className="px-3 py-2 text-left">Ticker</th>
-                    {POEFIE_COLUMNS.map((c) => visibleCols.has(c.key) ? (
-                      <th
-                        key={c.key}
-                        className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
-                        onClick={() => toggleSort(c.key)}
-                        title={c.hint}
-                      >
-                        <span className="inline-flex items-center gap-1">
-                          {c.short}
-                          <span className="text-fog-lime text-[9px]">{sortArrow(c.key)}</span>
-                        </span>
-                      </th>
-                    ) : null)}
-                    <th className="px-3 py-2 text-right">Koers</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-5/40">
-                  {filteredRanking.map((p, i) => {
-                    const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
-                    const near = p.above_limit_pct != null && p.above_limit_pct <= 10 && !atOrBelow;
-                    const seen = marks.isSeen(p.ticker);
-                    return (
-                      <tr key={p.ticker} className={(atOrBelow ? "bg-fog-lime/[0.05] " : "") + (seen ? "opacity-50" : "")}>
-                        <SeenCell ticker={p.ticker} />
-                        <HeartCell ticker={p.ticker} />
-                        <StarCell ticker={p.ticker} />
-                        <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <a
-                              href={googleFinanceUrl(p.ticker, p.exchange)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="font-mono text-sm font-semibold text-fog-lime hover:underline"
-                            >
-                              {p.ticker}
-                            </a>
-                            {p.company && (
-                              <span className="text-xs text-neutral-400 truncate max-w-[140px]">{p.company}</span>
-                            )}
-                            {p.sector && <Pill>{p.sector}</Pill>}
-                          </div>
-                          <div className="mt-0.5 text-[10px] text-neutral-500 flex items-center gap-1.5">
-                            {(p.medal_gold ?? 0) > 0 && <span>🏆{p.medal_gold}</span>}
-                            {(p.medal_silver ?? 0) > 0 && <span>🥈{p.medal_silver}</span>}
-                            {(p.medal_bronze ?? 0) > 0 && <span>🥉{p.medal_bronze}</span>}
-                          </div>
-                        </td>
-                        {visibleCols.has("above_limit_pct") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums">
-                            {p.above_limit_pct != null ? (
-                              <span className={atOrBelow ? "text-fog-lime font-semibold" : near ? "text-fog-warn" : "text-neutral-300"}>
-                                {atOrBelow ? "✓ onder" : `+${p.above_limit_pct.toFixed(1)}%`}
-                              </span>
-                            ) : (
-                              <span className="text-neutral-600">—</span>
-                            )}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_incident_count") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.poefie_incident_count ?? <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_count_6m") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.poefie_count_6m ?? <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_count_1y") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.poefie_count_1y ?? <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_count_2y") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.poefie_count_2y ?? <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_count_5y") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.poefie_count_5y ?? <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_max_growth_pct") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.poefie_max_growth_pct != null
-                              ? `+${p.poefie_max_growth_pct.toFixed(0)}%`
-                              : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_days_to_peak") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {p.poefie_days_to_peak != null
-                              ? `${p.poefie_days_to_peak}d`
-                              : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_median_date") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-                            {(() => {
-                              const d = daysAgo(p.poefie_median_date);
-                              return d != null ? `${d}d` : <span className="text-neutral-600">—</span>;
-                            })()}
-                          </td>
-                        )}
-                        {visibleCols.has("poefie_last_date") && (
-                          <td className="px-3 py-2 text-right font-mono tabular-nums text-fog-pink/80">
-                            {p.poefie_last_date ? fmtDate(p.poefie_last_date) : <span className="text-neutral-600">—</span>}
-                          </td>
-                        )}
-                        <td className="px-3 py-2 text-right font-mono tabular-nums">
-                          {p.last_close != null && <div className="text-neutral-200">{fmtPrice(p.last_close)}</div>}
-                          {p.buy_limit != null && <div className="text-[10px] text-neutral-500">lim {fmtPrice(p.buy_limit)}</div>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          <div className="space-y-2">
+            <div className="flex justify-end">
+              <ColumnPicker tabKey="poefies" columns={POEFIE_COL_META} lockedKey="ticker" />
             </div>
-          </Card>
+            <Card className="p-0 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                      <SeenHeader />
+                      <HeartHeader />
+                      <StarHeader />
+                      <th className="px-3 py-2 text-left w-10">#</th>
+                      {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-5/40">
+                    {filteredRanking.map((p, i) => {
+                      const atOrBelow = p.buy_limit != null && p.last_close != null && p.last_close <= p.buy_limit;
+                      const seen = marks.isSeen(p.ticker);
+                      return (
+                        <tr key={p.ticker} className={(atOrBelow ? "bg-fog-lime/[0.05] " : "") + (seen ? "opacity-50" : "")}>
+                          <SeenCell ticker={p.ticker} />
+                          <HeartCell ticker={p.ticker} />
+                          <StarCell ticker={p.ticker} />
+                          <td className="px-3 py-2 text-[11px] text-neutral-500 font-mono tabular-nums">{i + 1}</td>
+                          {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(p)}</Fragment>)}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
         </div>
       )}
     </div>
