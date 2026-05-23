@@ -46,16 +46,16 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
 }
 
 // Strikte criteria
-const RUN_50X_MULT          = 50;
-const RUN_100X_MULT         = 100;
+const RUN_50X_MULT          = 40;   // was 50 — gebruiker wenst 40× als drempel
+const RUN_100X_MULT         = 80;   // was 100 — proportioneel verlaagd
 const RUN_MIN_DAYS          = 10;
-const RUN_50X_MAX_DAYS      = 60;
-const RUN_100X_MAX_DAYS     = 120;
-const RAW_CLOSE_MIN_MULT    = 25;
+const RUN_50X_MAX_DAYS      = 730;  // was 365 — verlengd naar 2 jaar voor langere parabolic runs
+const RUN_100X_MAX_DAYS     = 730;
+const RAW_CLOSE_MIN_MULT    = 20;   // proportioneel verlaagd (40 / 2)
 const MAX_CURRENT_VS_BASELINE = 3;
 const MAX_DEACTIVATE_PEAK   = 100_000;
 const MAX_HISTORICAL_PEAK   = 10_000;
-const MIN_BASELINE_PRICE    = 0.05;
+const MIN_BASELINE_PRICE    = 0.01;  // was 0.05 — verlaagd voor nano-cap runs
 const MIN_PEAK_PRICE        = 1.0;
 const MAX_SINGLE_BAR_JUMP   = 5;
 const MAX_TRUSTED_SPLIT_RATIO = 3;
@@ -63,8 +63,8 @@ const MAX_INCIDENTS         = 3;
 
 // Loose-data: brede zoekvenster voor exploratie
 const LOOSE_MIN_DAYS  = 5;
-const LOOSE_MAX_DAYS  = 180;
-const LOOSE_MIN_MULT  = 50;     // start bij echte 50× (geen kleinere runs)
+const LOOSE_MAX_DAYS  = 730;    // was 365 — verlengd naar 2 jaar
+const LOOSE_MIN_MULT  = 40;     // verlaagd van 50 → 40 op gebruikersverzoek
 const LOOSE_MAX_CANDIDATES = 20;
 
 const BATCH_SIZE = 12;
@@ -126,6 +126,22 @@ function hasUntrustworthySplit(splits: SplitEvent[]): boolean {
     if (r >= MAX_TRUSTED_SPLIT_RATIO || (r > 0 && r <= 1 / MAX_TRUSTED_SPLIT_RATIO)) return true;
   }
   return false;
+}
+
+// Datum van de meest recente grote split (≥3:1 of ≤1:3). Alleen bars
+// NA deze datum mogen meedoen in feniks-detectie — adjclose data van
+// vóór een grote split is op veel exchanges onbetrouwbaar. Geeft 0
+// terug als er geen grote split is.
+function latestUntrustworthySplitMs(splits: SplitEvent[]): number {
+  let latestMs = 0;
+  for (const s of splits) {
+    const r = s.ratio;
+    if (r >= MAX_TRUSTED_SPLIT_RATIO || (r > 0 && r <= 1 / MAX_TRUSTED_SPLIT_RATIO)) {
+      const ms = new Date(s.date).getTime();
+      if (ms > latestMs) latestMs = ms;
+    }
+  }
+  return latestMs;
 }
 
 function maxSplitRatio(splits: SplitEvent[]): number {
@@ -280,6 +296,49 @@ function findLooseCandidates(bars: Bar[]): LooseCandidate[] {
   return candidates;
 }
 
+// Diagnostiek: vindt de ABSOLUUT beste run binnen het 365d-venster,
+// ongeacht of die de drempel haalt. Hiermee kunnen we exact zien
+// waarom een ticker geen kandidaat is (bv MPU: beste run = 12× over
+// 300 dagen — kwalificeert niet).
+interface BestRun {
+  baseline_date: string;
+  baseline_adj: number;
+  peak_date: string;
+  peak_adj: number;
+  days: number;
+  mult: number;
+}
+function findBestRun(bars: Bar[]): BestRun | null {
+  const clean = cleanBars(bars);
+  if (clean.length < 20) return null;
+  let bestMult = 0;
+  let best: BestRun | null = null;
+  for (let i = 0; i < clean.length; i++) {
+    const baseAdj = clean[i].adjClose;
+    if (baseAdj < MIN_BASELINE_PRICE) continue;
+    const baselineMs = clean[i].ms;
+    for (let j = i + 1; j < clean.length; j++) {
+      const days = Math.round((clean[j].ms - baselineMs) / 86400000);
+      if (days > LOOSE_MAX_DAYS) break;
+      if (days < LOOSE_MIN_DAYS) continue;
+      if (clean[j].adjClose < MIN_PEAK_PRICE) continue;
+      const mult = clean[j].adjClose / baseAdj;
+      if (mult > bestMult) {
+        bestMult = mult;
+        best = {
+          baseline_date: clean[i].date,
+          baseline_adj: Math.round(baseAdj * 10000) / 10000,
+          peak_date: clean[j].date,
+          peak_adj: Math.round(clean[j].adjClose * 100) / 100,
+          days,
+          mult: Math.round(mult * 10) / 10,
+        };
+      }
+    }
+  }
+  return best;
+}
+
 function median(nums: number[]): number | null {
   if (nums.length === 0) return null;
   const sorted = [...nums].sort((a, b) => a - b);
@@ -340,35 +399,54 @@ Deno.serve(runBackground("compute-phoenix", async () => {
         }
         const histPeak = Math.max(histPeakAdj, histPeakRaw);
         const splitRatio = maxSplitRatio(splits);
+        const splitCutoffMs = latestUntrustworthySplitMs(splits);
+        // Post-split-only: bij grote splits alleen bars NA de meest recente
+        // grote split gebruiken. Yahoo's adjclose vóór zo'n split is op veel
+        // exchanges onbetrouwbaar; door post-split data te isoleren krijgen
+        // tickers zoals BNKK alsnog een eerlijke check op recente runs.
+        const usedBars = splitCutoffMs > 0 ? bars.filter((b) => b.ms > splitCutoffMs) : bars;
         const currentClose = bars[bars.length - 1].adjClose;
-        const looseCandidates = findLooseCandidates(bars);
+        const looseCandidates = usedBars.length >= 20 ? findLooseCandidates(usedBars) : [];
+        const bestRun = usedBars.length >= 20 ? findBestRun(usedBars) : null;
 
         looseData = {
           current_close: Math.round(currentClose * 10000) / 10000,
           hist_peak_adj: Math.round(histPeakAdj * 100) / 100,
           hist_peak_raw: Math.round(histPeakRaw * 100) / 100,
           max_split_ratio: Math.round(splitRatio * 100) / 100,
+          post_split_bars: usedBars.length,
+          post_split_only: splitCutoffMs > 0,
+          best_run: bestRun,
           candidates: looseCandidates,
         };
 
         if (histPeak > MAX_DEACTIVATE_PEAK) {
           deactivate = true;
           deactivated++;
-        } else if (hasUntrustworthySplit(splits)) {
+        } else if (usedBars.length < 20) {
+          // Te weinig post-split data om iets zinnigs te zeggen
           splitSkipped++;
-        } else if (histPeak > MAX_HISTORICAL_PEAK) {
-          dilutedSkipped++;
         } else {
-          incidents = findPhoenixIncidents(bars);
-          if (incidents.length > 0) {
-            isPhoenix = true;
-            phoenixFound++;
-            last50xDate = incidents[incidents.length - 1].peak_date;
-            incidentCount = incidents.length;
-            medianPeakDate = medianDate(incidents.map((i) => i.peak_date));
-            maxGrowth180d = Math.max(...incidents.map((i) => i.growth_180d_pct));
-            const md = median(incidents.map((i) => i.days_to_50x));
-            medianDaysTo50x = md != null ? Math.round(md) : null;
+          // Bereken hist peak van usedBars voor de dilution-check
+          let usedHistPeak = 0;
+          for (const b of usedBars) {
+            if (b.adjClose > usedHistPeak) usedHistPeak = b.adjClose;
+            if (b.rawClose > usedHistPeak) usedHistPeak = b.rawClose;
+          }
+          if (usedHistPeak > MAX_HISTORICAL_PEAK) {
+            dilutedSkipped++;
+          } else {
+            incidents = findPhoenixIncidents(usedBars);
+            if (incidents.length > 0) {
+              isPhoenix = true;
+              phoenixFound++;
+              last50xDate = incidents[incidents.length - 1].peak_date;
+              incidentCount = incidents.length;
+              medianPeakDate = medianDate(incidents.map((i) => i.peak_date));
+              maxGrowth180d = Math.max(...incidents.map((i) => i.growth_180d_pct));
+              const md = median(incidents.map((i) => i.days_to_50x));
+              medianDaysTo50x = md != null ? Math.round(md) : null;
+            }
           }
         }
       }
