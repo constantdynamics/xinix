@@ -634,7 +634,7 @@ function fmtUsd2(v: number) {
 }
 
 function RetCell({ v }: { v: number }) {
-  const cls = v > 0 ? "text-fog-lime" : v < 0 ? "text-fog-loss" : "text-neutral-400";
+  const cls = v > 0 ? "text-emerald-300" : v < 0 ? "text-rose-300" : "text-neutral-400";
   return <span className={cls}>{fmtPct2(v)}</span>;
 }
 
@@ -1304,10 +1304,15 @@ function ThresholdsCell({ s }: { s: SimStrategy }) {
     ["100", s.win_rate_100pct],
   ];
   return (
-    <div className="inline-flex items-center gap-1 font-mono text-[10px] tabular-nums" title="Aandeel gesloten posities met ≥5% / ≥10% / ≥25% / ≥50% / ≥100% winst">
+    <div
+      className="inline-flex items-center gap-1 font-mono text-[10px] tabular-nums"
+      title="Per kolom: % gesloten posities dat ≥5% / ≥10% / ≥25% / ≥50% / ≥100% winst haalde. Donker = lager %, lichter = hoger %."
+    >
       {items.map(([label, v]) => {
         const pct = (v ?? 0) * 100;
-        const tone = pct >= 50 ? "text-fog-lime" : pct >= 25 ? "text-yellow-300" : pct > 0 ? "text-neutral-300" : "text-neutral-600";
+        // Eén gedempte kleur (neutraal grijs), helderheid wordt sterker
+        // naarmate het percentage hoger ligt — geen felle kleur-clash meer.
+        const tone = pct >= 50 ? "text-neutral-100" : pct >= 25 ? "text-neutral-300" : pct > 0 ? "text-neutral-500" : "text-neutral-700";
         return (
           <span key={label} className={`${tone} w-7 text-right`}>
             {pct.toFixed(0)}
@@ -1429,6 +1434,77 @@ const LEADERBOARDS: LeaderboardDef[] = [
 // als "aantal strategieën in de familie" voor de label. Alle numerieke
 // KPI-velden uit SimStrategy worden simpelweg gemiddeld; lijst-velden
 // blijven leeg.
+// Detail-paneel voor een familie (groep). Toont de gemiddelden voor de
+// familie, een mini-leaderboard van de individuele strategieën in die
+// familie, en een "Food for Thought"-advies op familie-niveau.
+function FamilyDetailPanel({ family, members }: { family: SimStrategy; members: SimStrategy[] }) {
+  if (members.length === 0) return <div className="p-4 text-xs text-neutral-500">Geen strategieën in deze familie.</div>;
+  const sorted = [...members].sort((a, b) => b.total_return_pct - a.total_return_pct);
+  const top = sorted.slice(0, 3);
+  const bot = sorted.slice(-3).reverse();
+  const closed = family.closed_count;
+  const tips: string[] = [];
+  if ((family.win_rate ?? 0) >= 0.65 && (family.worst_trade_pct ?? 0) < -20) {
+    tips.push(`Familie heeft hoge hit-rate (${((family.win_rate ?? 0) * 100).toFixed(0)}%) maar zware verliezers (gem. slechtste ${(family.worst_trade_pct ?? 0).toFixed(0)}%) — krappere stop-loss zou veel rendement redden.`);
+  }
+  if ((family.profit_factor ?? 0) > 0 && (family.profit_factor ?? 0) < 1.0) {
+    tips.push(`Profit factor < 1 — gemiddelde strategie in deze familie verliest meer dan ze wint. Heroverweeg parameters of laat deze familie verdampen.`);
+  }
+  if ((family.trades_100pct_count ?? 0) >= 1 && (family.best_trade_pct ?? 0) > 200) {
+    tips.push(`Eén of meer 100%+ winners gemiddeld per strategie — trailing-stop in plaats van vast TP kan deze winnaars langer vasthouden.`);
+  }
+  return (
+    <div className="px-4 py-4 bg-ink-3/25 border-b border-ink-5/40 space-y-4">
+      <div className="flex flex-wrap items-baseline gap-3">
+        <div className="text-sm font-bold text-neutral-100">{family.name}</div>
+        <span className="text-xs text-neutral-500">{members.length} strategieën · gem. {family.total_return_pct.toFixed(2)}% rendement · {closed} trades gem.</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-emerald-300/80 font-bold mb-1.5">Top-3 binnen familie</div>
+          <ul className="space-y-1">
+            {top.map((m) => (
+              <li key={m.id} className="text-[11px] flex items-center gap-2 text-neutral-300">
+                <span className="font-medium text-neutral-100 flex-1 truncate">{m.name}</span>
+                <RetCell v={m.total_return_pct} />
+                <span className="text-neutral-500 tabular-nums">{m.closed_count} tr.</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-rose-300/80 font-bold mb-1.5">Onderste-3 binnen familie</div>
+          <ul className="space-y-1">
+            {bot.map((m) => (
+              <li key={m.id} className="text-[11px] flex items-center gap-2 text-neutral-300">
+                <span className="font-medium text-neutral-100 flex-1 truncate">{m.name}</span>
+                <RetCell v={m.total_return_pct} />
+                <span className="text-neutral-500 tabular-nums">{m.closed_count} tr.</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <KpiBlock s={family} />
+
+      {tips.length > 0 && (
+        <div className="border-l-2 border-fog-warn/60 pl-3">
+          <div className="text-[10px] uppercase tracking-wider text-fog-warn font-bold mb-1.5">
+            💡 Food for thought — familie-niveau
+          </div>
+          <ul className="space-y-1.5">
+            {tips.map((t, i) => (
+              <li key={i} className="text-[11px] text-neutral-300 leading-relaxed">{t}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function aggregateFamilies(strategies: SimStrategy[]): SimStrategy[] {
   const byGrp = new Map<string, SimStrategy[]>();
   for (const s of strategies) {
@@ -1474,13 +1550,13 @@ function aggregateFamilies(strategies: SimStrategy[]): SimStrategy[] {
       worst_trade_pct:   avg((s) => s.worst_trade_pct),
       profit_factor:     avg((s) => s.profit_factor),
       expectancy_pct:    avg((s) => s.expectancy_pct),
-      unique_tickers:    avg((s) => s.unique_tickers),
-      phoenix_captured:  avg((s) => s.phoenix_captured),
-      poefie_captured:   avg((s) => s.poefie_captured),
-      trades_50pct_count:  avg((s) => s.trades_50pct_count),
-      trades_100pct_count: avg((s) => s.trades_100pct_count),
-      trades_200pct_count: avg((s) => s.trades_200pct_count),
-      trades_500pct_count: avg((s) => s.trades_500pct_count),
+      unique_tickers:    Math.round(avg((s) => s.unique_tickers)),
+      phoenix_captured:  Math.round(avg((s) => s.phoenix_captured) * 10) / 10,
+      poefie_captured:   Math.round(avg((s) => s.poefie_captured) * 10) / 10,
+      trades_50pct_count:  Math.round(avg((s) => s.trades_50pct_count)),
+      trades_100pct_count: Math.round(avg((s) => s.trades_100pct_count)),
+      trades_200pct_count: Math.round(avg((s) => s.trades_200pct_count)),
+      trades_500pct_count: Math.round(avg((s) => s.trades_500pct_count)),
       exit_reasons: [],
       partial_count: 0,
       partial_avg_qty_pct: 0,
@@ -1557,7 +1633,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
 
       {/* Leaderboard-picker — chips gegroepeerd per categorie. */}
       <div className="rounded-lg border border-ink-5/60 bg-ink-3/20 p-3 mb-3 space-y-2">
-        <div className="text-[10px] uppercase tracking-wider text-fog-pink font-bold">
+        <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
           🏆 Leaderboard — {scope === "family" ? "families gerankt" : "strategieën gerankt"} op
         </div>
         {categories.map((cat) => {
@@ -1565,7 +1641,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
           if (boards.length === 0) return null;
           return (
             <div key={cat} className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] font-bold text-neutral-400 w-20 shrink-0">{cat}:</span>
+              <span className="text-[10px] font-bold text-neutral-500 w-20 shrink-0">{cat}:</span>
               {boards.map((b) => (
                 <button
                   key={b.key}
@@ -1573,7 +1649,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                   title={b.hint}
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors ${
                     leaderboard === b.key
-                      ? "border-fog-pink bg-fog-pink/20 text-fog-pink"
+                      ? "border-fog-pink/60 bg-fog-pink/10 text-fog-pink/90"
                       : "border-ink-5 text-neutral-400 hover:text-neutral-200 hover:border-neutral-500"
                   }`}
                 >
@@ -1589,35 +1665,53 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
         <table className="w-full text-xs min-w-[720px]">
           <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/30">
             <tr>
-              <th className="text-left p-2 font-semibold w-8">#</th>
+              <th className="text-left p-2 font-semibold w-8">Rang</th>
               <th className="text-left p-2 font-semibold w-6"></th>
               <th className="text-left p-2 font-semibold">{scope === "family" ? "Familie" : "Strategie"}</th>
-              <th className="text-right p-2 font-semibold text-fog-pink whitespace-nowrap">
+              <th
+                className="text-right p-2 font-semibold whitespace-nowrap"
+                style={{ color: "rgba(255, 31, 143, 0.85)" }}
+                title={`Waarde van de gekozen KPI: ${activeBoard.label}. ${activeBoard.hint ?? ""}`}
+              >
                 {activeBoard.label}
               </th>
-              <th className="text-right p-2 font-semibold">Rendement</th>
-              <th className="text-right p-2 font-semibold hidden sm:table-cell">Hit-rate</th>
+              <th
+                className="text-right p-2 font-semibold"
+                title="Totaalrendement % van de portefeuille sinds start (cash + open posities − initieel)."
+              >
+                Rendement
+              </th>
+              <th
+                className="text-right p-2 font-semibold hidden sm:table-cell"
+                title="Hit-rate: aandeel gesloten posities met return > 0%."
+              >
+                Hit-rate
+              </th>
               <th
                 className="text-center p-2 font-semibold hidden lg:table-cell"
-                title="Aandeel gesloten posities met ≥5% / ≥10% / ≥25% / ≥50% / ≥100% winst"
+                title="Aandeel gesloten posities dat een bepaalde winst-drempel haalde. Per kolom: % trades met ≥5% / ≥10% / ≥25% / ≥50% / ≥100% winst."
               >
                 Winst-drempels
                 <div className="text-[8px] font-normal text-neutral-600 mt-0.5">5 / 10 / 25 / 50 / 100%</div>
               </th>
-              <th className="text-right p-2 font-semibold hidden sm:table-cell">Trades</th>
+              <th
+                className="text-right p-2 font-semibold hidden sm:table-cell"
+                title="Aantal gesloten trades sinds start."
+              >
+                Trades
+              </th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((s, i) => {
               const isFamily = scope === "family";
               const tone = activeBoard.tone?.(s);
-              const valueClass = tone === "lime" ? "text-fog-lime" : tone === "loss" ? "text-fog-loss" : "text-neutral-100";
-              const rowExpandable = !isFamily;
+              const valueClass = tone === "lime" ? "text-emerald-300" : tone === "loss" ? "text-rose-300" : "text-neutral-100";
               return (
               <Fragment key={s.id}>
                 <tr
-                  className={`border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors select-none ${rowExpandable ? "cursor-pointer" : ""} ${s.protected ? "bg-fog-watch/[0.03]" : ""} ${expandedId === s.id ? "bg-ink-3/30" : ""}`}
-                  onClick={() => { if (rowExpandable) setExpandedId(expandedId === s.id ? null : s.id); }}
+                  className={`border-t border-ink-5/40 hover:bg-ink-3/20 transition-colors select-none cursor-pointer ${s.protected ? "bg-fog-watch/[0.03]" : ""} ${expandedId === s.id ? "bg-ink-3/30" : ""}`}
+                  onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
                 >
                   <td className="p-2 tabular text-neutral-400">{i + 1}</td>
                   <td className="p-2 text-base leading-none">
@@ -1629,7 +1723,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                         {isFamily ? `${s.name} (${s.open_count} strat.)` : s.name}
                       </span>
                       {!isFamily && <GenBadge gen={s.generation ?? 1} protected={s.protected ?? false} />}
-                      {rowExpandable && <span className="text-[10px] text-neutral-600 ml-auto">{expandedId === s.id ? "▲" : "▼"}</span>}
+                      <span className="text-[10px] text-neutral-600 ml-auto">{expandedId === s.id ? "▲" : "▼"}</span>
                     </div>
                     {!isFamily && (
                       <div className="text-[10px] text-neutral-500 mt-0.5">
@@ -1647,12 +1741,9 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                   <td className="p-2 text-right tabular font-bold">
                     <RetCell v={s.total_return_pct} />
                   </td>
-                  <td className="p-2 text-right tabular text-neutral-300">
-                    ${s.total_equity.toFixed(0)}
-                  </td>
                   <td className="p-2 text-right tabular hidden sm:table-cell">
                     {s.closed_count > 0 ? (
-                      <span className={s.win_rate >= 0.5 ? "text-fog-lime" : "text-fog-loss"}>
+                      <span className={s.win_rate >= 0.5 ? "text-emerald-300" : "text-rose-300"}>
                         {(s.win_rate * 100).toFixed(0)}%
                       </span>
                     ) : (
@@ -1670,10 +1761,12 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                     {s.closed_count}
                   </td>
                 </tr>
-                {!isFamily && expandedId === s.id && (
+                {expandedId === s.id && (
                   <tr>
                     <td colSpan={8} className="p-0">
-                      <StrategyDetailPanel s={s} all={strategies} />
+                      {isFamily
+                        ? <FamilyDetailPanel family={s} members={strategies.filter((x) => x.grp === s.grp)} />
+                        : <StrategyDetailPanel s={s} all={strategies} />}
                     </td>
                   </tr>
                 )}
@@ -1870,6 +1963,9 @@ function SimInsightsSection({ sim }: { sim: SimResults }) {
     <div className="space-y-4">
       {/* Wat werkt? samenvatting */}
       <WatWerktCard insights={insights} signal_type_stats={signal_type_stats} meta={meta} />
+      <SectionHint>
+        <strong className="text-neutral-300">Wat werkt?</strong> trekt de duidelijkste patronen uit alle 200+ strategieën samen: welke parameter-dimensies maken het grootste verschil in rendement en welk signaaltype levert het meest op. Eén alinea, geen tabel.
+      </SectionHint>
 
       {/* Aanbevelingen */}
       <Card className="p-4 space-y-3">
@@ -1886,32 +1982,55 @@ function SimInsightsSection({ sim }: { sim: SimResults }) {
           </ul>
         )}
       </Card>
+      <SectionHint>
+        <strong className="text-neutral-300">Aanbevelingen</strong> zijn regel-gebaseerde tips uit dezelfde data: als een dimensie significant beter scoort dan de slechtste variant, of als één groep de top-10 domineert, krijg je daar hier een melding over. Concrete suggesties voor parameter-aanpassingen.
+      </SectionHint>
 
       {/* Per-dimension insights met bar-charts */}
       {insights.length > 0 && (
-        <Card className="p-0 overflow-hidden">
-          <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
-            Rendement per configuratie-dimensie
-          </div>
-          <div className="divide-y divide-ink-5/40">
-            {insights.map((ins) => (
-              <DimensionInsightRow key={ins.dimension} ins={ins} />
-            ))}
-          </div>
-        </Card>
+        <>
+          <Card className="p-0 overflow-hidden">
+            <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
+              Rendement per configuratie-dimensie
+            </div>
+            <div className="divide-y divide-ink-5/40">
+              {insights.map((ins) => (
+                <DimensionInsightRow key={ins.dimension} ins={ins} />
+              ))}
+            </div>
+          </Card>
+          <SectionHint>
+            Per <strong className="text-neutral-300">configuratie-dimensie</strong> (Score-drempel, Hold-venster, Stop-loss, TP, Sector, Concentratie, ...) zie je hoe elke variant gemiddeld scoort. Bredere balk = hoger gem. rendement; 🏆 markeert de beste variant in die dimensie, ▼ de slechtste. Zo zie je in één oogopslag of bv. een hogere score-drempel echt beter werkt.
+          </SectionHint>
+        </>
       )}
 
       {/* Signaaltype rendement */}
       {signal_type_stats && signal_type_stats.length > 0 && (
-        <Card className="p-0 overflow-hidden">
-          <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
-            Rendement per signaaltype
-          </div>
-          <div className="p-3">
-            <SignalTypeChart stats={signal_type_stats} />
-          </div>
-        </Card>
+        <>
+          <Card className="p-0 overflow-hidden">
+            <div className="p-3 text-[10px] uppercase tracking-wider text-neutral-500 font-bold border-b border-ink-5">
+              Rendement per signaaltype
+            </div>
+            <div className="p-3">
+              <SignalTypeChart stats={signal_type_stats} />
+            </div>
+          </Card>
+          <SectionHint>
+            Alle gesloten posities aggregreert per <strong className="text-neutral-300">entry-signaaltype</strong> (bv. bonanza, permit, FDA-approval, deal). Per signaal: aantal trades, win-rate (% positief) en gem. % rendement. Hier zie je welk signaal écht voorspellende kracht had — en welk signaal vaak een valkuil bleek.
+          </SectionHint>
+        </>
       )}
+    </div>
+  );
+}
+
+// Zachte hint-balk onder een sectie. Gebruikt door SimInsightsSection om
+// dummyproof uit te leggen wat je in dat blok ziet.
+function SectionHint({ children }: { children: ReactNode }) {
+  return (
+    <div className="text-[11px] text-neutral-500 leading-relaxed px-3 py-2 rounded border border-ink-5/40 bg-ink-3/15">
+      ℹ️ {children}
     </div>
   );
 }
@@ -2417,7 +2536,12 @@ export function SimulationView() {
         ))}
       </div>
 
-      {activeTab === "ranking" && <SimRankingTable strategies={sim.strategies} />}
+      {activeTab === "ranking" && (
+        <>
+          <SimRankingTable strategies={sim.strategies} />
+          <PotjeLegend />
+        </>
+      )}
       {activeTab === "insights" && <SimInsightsSection sim={sim} />}
       {activeTab === "evolutie" && (
         <div className="space-y-4">
@@ -2427,6 +2551,44 @@ export function SimulationView() {
         </div>
       )}
     </section>
+  );
+}
+
+// Dummyproof uitleg-blok onderaan Potje. Beschrijft elke KPI in plain Dutch
+// zodat je nooit hoeft te raden wat een kolom of leaderboard betekent.
+function PotjeLegend() {
+  return (
+    <Card className="p-4 mt-6 text-xs leading-relaxed text-neutral-400 space-y-3">
+      <div className="text-[11px] uppercase tracking-wider text-neutral-300 font-bold">
+        ℹ️ Wat betekent wat — Potje uitleg
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+        <div><strong className="text-neutral-200">Rang</strong>: positie in de huidige ranglijst (op basis van het gekozen leaderboard).</div>
+        <div><strong className="text-neutral-200">🥇🥈🥉</strong>: top-3 van de huidige ranking.</div>
+        <div><strong className="text-neutral-200">Strategie / Familie</strong>: naam + parameters van de strategie, of de familie-naam (gemiddelde van alle strategieën in die groep).</div>
+        <div><strong className="text-neutral-200">Rendement</strong>: totaal % t.o.v. startkapitaal $10.000. Cash + open posities − initieel.</div>
+        <div><strong className="text-neutral-200">Hit-rate</strong>: aandeel gesloten posities met return &gt; 0% (positieve trade).</div>
+        <div><strong className="text-neutral-200">Winst-drempels (5 / 10 / 25 / 50 / 100%)</strong>: per drempel het percentage gesloten posities dat dat rendement haalde.</div>
+        <div><strong className="text-neutral-200">Trades</strong>: aantal gesloten posities sinds start van de simulatie.</div>
+      </div>
+      <div className="pt-2 border-t border-ink-5/40 text-[11px] uppercase tracking-wider text-neutral-300 font-bold">
+        🏆 Leaderboard-categorieën
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+        <div><strong className="text-neutral-200">Rendement</strong>: totaal %, gem. per trade, mediaan, beste trade, slechtste trade.</div>
+        <div><strong className="text-neutral-200">Drempels</strong>: hit-rate (&gt;0%) en % trades met ≥5/10/25/50/100% winst.</div>
+        <div><strong className="text-neutral-200">Risico</strong>: profit factor (winsten$ ÷ verliezen$), expectancy per trade, % dagen positief.</div>
+        <div><strong className="text-neutral-200">Activiteit</strong>: aantal trades en unieke tickers ooit aangekocht.</div>
+        <div><strong className="text-neutral-200">Capture</strong>: hoe vaak een feniks- of poefie-event binnen de hold-periode viel (date-overlap, niet "ticker staat nu op die lijst").</div>
+        <div><strong className="text-neutral-200">Mega-winners</strong>: absolute aantallen trades met ≥50 / ≥100 / ≥200 / ≥500% rendement.</div>
+      </div>
+      <div className="pt-2 border-t border-ink-5/40 text-[11px] text-neutral-500 leading-relaxed">
+        <strong className="text-neutral-300">Klik op een rij</strong> om de uitklap te zien met alle KPI's, de verkoopstrategie (hoe werden posities gesloten?), deelwinsten, én — voor top-10 individuele strategieën én voor families — een 💡 <strong className="text-neutral-200">Food for Thought</strong>-blok met advies wat aan de verkoopstrategie beter zou kunnen.
+      </div>
+      <div className="text-[11px] text-neutral-500 leading-relaxed">
+        <strong className="text-neutral-300">"Per familie" vs "Individueel"</strong>: in familie-modus zie je het gemiddelde van alle strategieën in een groep — handig om te zien welke parameter-keuzes (Score-drempel, Hold-venster, Stop, TP, Sector, Concentratie, ...) op welke KPI bovenaan staan. Aantal-velden worden afgerond zodat ze als hele getallen leesbaar zijn (Feniks/Poefie-capture houden 1 decimaal omdat ze vaak &lt;1 per strategie liggen).
+      </div>
+    </Card>
   );
 }
 
