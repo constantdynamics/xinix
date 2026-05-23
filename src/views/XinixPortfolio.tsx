@@ -1148,9 +1148,35 @@ function StrategyDetailPanel({ s, all }: { s: SimStrategy; all: SimStrategy[] })
   );
 }
 
+// Compact cel met de vijf winst-drempel-percentages naast elkaar.
+// Toont per drempel het aandeel gesloten posities dat die drempel haalde.
+// Kleur loopt van neutraal → groen naarmate hoger.
+function ThresholdsCell({ s }: { s: SimStrategy }) {
+  const items: Array<[string, number | undefined]> = [
+    ["5",   s.win_rate_5pct],
+    ["10",  s.win_rate_10pct],
+    ["25",  s.win_rate_25pct],
+    ["50",  s.win_rate_50pct],
+    ["100", s.win_rate_100pct],
+  ];
+  return (
+    <div className="inline-flex items-center gap-1 font-mono text-[10px] tabular-nums" title="Aandeel gesloten posities met ≥5% / ≥10% / ≥25% / ≥50% / ≥100% winst">
+      {items.map(([label, v]) => {
+        const pct = (v ?? 0) * 100;
+        const tone = pct >= 50 ? "text-fog-lime" : pct >= 25 ? "text-yellow-300" : pct > 0 ? "text-neutral-300" : "text-neutral-600";
+        return (
+          <span key={label} className={`${tone} w-7 text-right`}>
+            {pct.toFixed(0)}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
   const [grpFilter, setGrpFilter] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<"rank" | "winrate" | "closed">("rank");
+  const [sortBy, setSortBy] = useState<"rank" | "winrate" | "closed" | "w10" | "w25" | "w100" | "posdays">("rank");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const groups = useMemo(() => ["all", ...new Set(strategies.map((s) => s.grp))], [strategies]);
@@ -1158,6 +1184,10 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
     let rows = grpFilter === "all" ? strategies : strategies.filter((s) => s.grp === grpFilter);
     if (sortBy === "winrate") rows = [...rows].sort((a, b) => b.win_rate - a.win_rate);
     else if (sortBy === "closed") rows = [...rows].sort((a, b) => b.closed_count - a.closed_count);
+    else if (sortBy === "w10") rows = [...rows].sort((a, b) => (b.win_rate_10pct ?? 0) - (a.win_rate_10pct ?? 0));
+    else if (sortBy === "w25") rows = [...rows].sort((a, b) => (b.win_rate_25pct ?? 0) - (a.win_rate_25pct ?? 0));
+    else if (sortBy === "w100") rows = [...rows].sort((a, b) => (b.win_rate_100pct ?? 0) - (a.win_rate_100pct ?? 0));
+    else if (sortBy === "posdays") rows = [...rows].sort((a, b) => (b.positive_days_pct ?? 0) - (a.positive_days_pct ?? 0));
     return rows;
   }, [strategies, grpFilter, sortBy]);
 
@@ -1179,15 +1209,23 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
           </button>
         ))}
       </div>
-      <div className="flex gap-2 mb-3 text-[11px]">
+      <div className="flex gap-2 mb-3 text-[11px] flex-wrap">
         <span className="text-neutral-500">Sorteer:</span>
-        {(["rank", "winrate", "closed"] as const).map((k) => (
+        {([
+          ["rank", "Rendement"],
+          ["winrate", "Hit-rate"],
+          ["w10", "≥10% winst"],
+          ["w25", "≥25% winst"],
+          ["w100", "≥100% winst"],
+          ["posdays", "Dagen +"],
+          ["closed", "Trades"],
+        ] as const).map(([k, label]) => (
           <button
             key={k}
             onClick={() => setSortBy(k)}
             className={`underline-offset-2 ${sortBy === k ? "text-fog-lime underline" : "text-neutral-400 hover:text-neutral-200"}`}
           >
-            {k === "rank" ? "Rendement" : k === "winrate" ? "Hit-rate" : "Trades"}
+            {label}
           </button>
         ))}
       </div>
@@ -1203,6 +1241,19 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
               <th className="text-right p-2 font-semibold">Rendement</th>
               <th className="text-right p-2 font-semibold">Equity</th>
               <th className="text-right p-2 font-semibold hidden sm:table-cell">Hit-rate</th>
+              <th
+                className="text-center p-2 font-semibold hidden lg:table-cell"
+                title="Aandeel gesloten posities met ≥5% / ≥10% / ≥25% / ≥50% / ≥100% winst"
+              >
+                Winst-drempels
+                <div className="text-[8px] font-normal text-neutral-600 mt-0.5">5 / 10 / 25 / 50 / 100%</div>
+              </th>
+              <th
+                className="text-right p-2 font-semibold hidden lg:table-cell"
+                title="Aandeel dagen waarop de portefeuille positief stond t.o.v. startkapitaal"
+              >
+                Dagen +
+              </th>
               <th className="text-right p-2 font-semibold hidden sm:table-cell">Trades</th>
               <th className="text-right p-2 font-semibold hidden lg:table-cell">Open</th>
             </tr>
@@ -1248,6 +1299,22 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                       <span className="text-neutral-500">—</span>
                     )}
                   </td>
+                  <td className="p-2 text-center tabular hidden lg:table-cell">
+                    {s.closed_count > 0 ? (
+                      <ThresholdsCell s={s} />
+                    ) : (
+                      <span className="text-neutral-500">—</span>
+                    )}
+                  </td>
+                  <td className="p-2 text-right tabular hidden lg:table-cell">
+                    {(s.total_days ?? 0) > 0 ? (
+                      <span className={(s.positive_days_pct ?? 0) >= 0.5 ? "text-fog-lime" : "text-neutral-300"} title={`${((s.positive_days_pct ?? 0) * 100).toFixed(0)}% van ${s.total_days} dagen`}>
+                        {((s.positive_days_pct ?? 0) * 100).toFixed(0)}%
+                      </span>
+                    ) : (
+                      <span className="text-neutral-500">—</span>
+                    )}
+                  </td>
                   <td className="p-2 text-right tabular hidden sm:table-cell text-neutral-400">
                     {s.closed_count}
                   </td>
@@ -1257,7 +1324,7 @@ function SimRankingTable({ strategies }: { strategies: SimStrategy[] }) {
                 </tr>
                 {expandedId === s.id && (
                   <tr>
-                    <td colSpan={9} className="p-0">
+                    <td colSpan={11} className="p-0">
                       <StrategyDetailPanel s={s} all={strategies} />
                     </td>
                   </tr>

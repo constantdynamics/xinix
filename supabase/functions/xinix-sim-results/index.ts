@@ -59,15 +59,28 @@ Deno.serve(async (req) => {
       if (r.last_close != null) priceMap.set(r.ticker as string, Number(r.last_close));
     }
 
-    type Agg = { realizedUsd: number; closed: number; wins: number; sumRetPct: number };
+    type Agg = {
+      realizedUsd: number;
+      closed: number;
+      wins: number;
+      sumRetPct: number;
+      // Drempel-tellers: gesloten posities met return_pct ≥ N%.
+      wins5: number; wins10: number; wins25: number; wins50: number; wins100: number;
+    };
     const agg = new Map<number, Agg>();
     for (const p of (closedRes.data ?? [])) {
       const sid = p.strategy_id as number;
-      const a = agg.get(sid) ?? { realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0 };
+      const a = agg.get(sid) ?? { realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0, wins5: 0, wins10: 0, wins25: 0, wins50: 0, wins100: 0 };
       a.realizedUsd += Number(p.return_usd ?? 0);
       a.closed++;
-      if (Number(p.return_pct ?? 0) > 0) a.wins++;
-      a.sumRetPct += Number(p.return_pct ?? 0);
+      const r = Number(p.return_pct ?? 0);
+      if (r > 0) a.wins++;
+      if (r >= 5) a.wins5++;
+      if (r >= 10) a.wins10++;
+      if (r >= 25) a.wins25++;
+      if (r >= 50) a.wins50++;
+      if (r >= 100) a.wins100++;
+      a.sumRetPct += r;
       agg.set(sid, a);
     }
 
@@ -121,6 +134,23 @@ Deno.serve(async (req) => {
     const stateByStrat = new Map<number, Record<string, unknown>>();
     for (const s of (statesRes.data ?? [])) stateByStrat.set(s.strategy_id as number, s as Record<string, unknown>);
 
+    // Positieve-dagen per strategie: aandeel equity-snapshots waar
+    // total_equity > initial_capital. Maatstaf voor hoe vaak de portefeuille
+    // in de plus stond gedurende de hele simulatie-reeks.
+    type PosDays = { pos: number; total: number };
+    const posDaysByStrat = new Map<number, PosDays>();
+    for (const r of (equityRes.data ?? [])) {
+      const sid = r.strategy_id as number;
+      const state = stateByStrat.get(sid);
+      const initial = state ? Number((state as Record<string, unknown>).initial_capital ?? 10000) : 10000;
+      const eq = Number(r.total_equity);
+      if (!Number.isFinite(eq) || initial <= 0) continue;
+      const cur = posDaysByStrat.get(sid) ?? { pos: 0, total: 0 };
+      cur.total++;
+      if (eq > initial) cur.pos++;
+      posDaysByStrat.set(sid, cur);
+    }
+
     interface StratResult {
       id: number; slug: string; name: string; grp: string; config: Record<string, unknown>;
       generation: number; protected: boolean; parent_id: number | null;
@@ -129,6 +159,10 @@ Deno.serve(async (req) => {
       realized_usd: number; unrealized_usd: number;
       open_count: number; closed_count: number;
       win_rate: number; avg_return_pct: number;
+      // Aandeel gesloten posities met return ≥ N% (0..1).
+      win_rate_5pct: number; win_rate_10pct: number; win_rate_25pct: number; win_rate_50pct: number; win_rate_100pct: number;
+      // Aandeel equity-snapshots waarop de portefeuille positief stond (0..1).
+      positive_days_pct: number; total_days: number;
       last_run_at: string | null;
       open_pos_detail: OpenDetail[];
       closed_pos_detail: ClosedDetail[];
@@ -148,9 +182,10 @@ Deno.serve(async (req) => {
       const totalEquity = cash + posVal;
       const totalReturnUsd = totalEquity - initial;
       const totalReturnPct = initial > 0 ? (totalReturnUsd / initial) * 100 : 0;
-      const a = agg.get(sid) ?? { realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0 };
+      const a = agg.get(sid) ?? { realizedUsd: 0, closed: 0, wins: 0, sumRetPct: 0, wins5: 0, wins10: 0, wins25: 0, wins50: 0, wins100: 0 };
       // Marktwaarde open posities − werkelijke aankoopkost (incl. transactiekosten).
       const unrealizedUsd = posVal - openCost;
+      const pd = posDaysByStrat.get(sid) ?? { pos: 0, total: 0 };
       results.push({
         id: sid, slug: strat.slug as string, name: strat.name as string,
         grp: strat.grp as string, config: strat.config as Record<string, unknown>,
@@ -163,6 +198,13 @@ Deno.serve(async (req) => {
         open_count: openCnt, closed_count: a.closed,
         win_rate: a.closed > 0 ? a.wins / a.closed : 0,
         avg_return_pct: a.closed > 0 ? a.sumRetPct / a.closed : 0,
+        win_rate_5pct:   a.closed > 0 ? a.wins5   / a.closed : 0,
+        win_rate_10pct:  a.closed > 0 ? a.wins10  / a.closed : 0,
+        win_rate_25pct:  a.closed > 0 ? a.wins25  / a.closed : 0,
+        win_rate_50pct:  a.closed > 0 ? a.wins50  / a.closed : 0,
+        win_rate_100pct: a.closed > 0 ? a.wins100 / a.closed : 0,
+        positive_days_pct: pd.total > 0 ? pd.pos / pd.total : 0,
+        total_days: pd.total,
         last_run_at: (state.last_run_at as string | null) ?? null,
         open_pos_detail: openDetailMap.get(sid) ?? [],
         closed_pos_detail: closedDetailMap.get(sid) ?? [],
