@@ -24,6 +24,7 @@ import {
   StarHeader,
 } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout } from "../components/ColumnPicker";
+import { PriceChartModal } from "./PriceChartModal";
 
 function fmtPct(v: number | null, decimals = 1): string {
   if (v == null) return "—";
@@ -159,6 +160,7 @@ export function ZwitserlevenView() {
   const [autoFoundDelta, setAutoFoundDelta] = useState(0);
   const [showSeen, setShowSeen] = useState(false);
   const [hideFavorites, setHideFavorites] = useState(false);
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
   const marks = useMarks();
   const stopRef = useRef(false);
 
@@ -351,9 +353,18 @@ export function ZwitserlevenView() {
       th: <th className="px-3 py-2 text-left text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Naam</th>,
       td: (s) => (
         <td className="px-3 py-2.5">
-          <div className="text-xs text-neutral-200 truncate max-w-[220px]" title={s.company ?? undefined}>
-            {s.company ?? <span className="text-neutral-600">—</span>}
-          </div>
+          {s.company ? (
+            <button
+              type="button"
+              onClick={() => setChartFor({ ticker: s.ticker, company: s.company ?? s.ticker, exchange: s.exchange })}
+              className="block text-xs text-neutral-200 truncate max-w-[220px] hover:text-fog-pink hover:underline transition-colors text-left"
+              title={`Bekijk koersgrafiek van ${s.company}`}
+            >
+              {s.company}
+            </button>
+          ) : (
+            <span className="text-neutral-600 text-xs">—</span>
+          )}
         </td>
       ),
     },
@@ -718,6 +729,15 @@ export function ZwitserlevenView() {
             </table>
           </div>
         </Card>
+      )}
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
       )}
     </div>
   );

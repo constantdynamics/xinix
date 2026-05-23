@@ -48,6 +48,7 @@ import {
 } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { GradientTabIcon } from "../tabIcons";
+import { PriceChartModal } from "./PriceChartModal";
 
 const SIGNAL_LABELS: Record<string, string> = {
   near_90d_low: "Bij 90d-bodem",
@@ -1929,6 +1930,7 @@ export function PhoenixView() {
   const fullScanStopRef = useRef(false);
   const [showSeen, setShowSeen] = useState(false);
   const [hideFavorites, setHideFavorites] = useState(false);
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
   const marks = useMarks();
   const isAdmin = !!getToken();
 
@@ -2114,7 +2116,16 @@ export function PhoenixView() {
             >
               {p.ticker}
             </a>
-            {p.company && <span className="text-xs text-neutral-400 truncate max-w-[140px]">{p.company}</span>}
+            {p.company && (
+              <button
+                type="button"
+                onClick={() => setChartFor({ ticker: p.ticker, company: p.company ?? p.ticker, exchange: p.exchange })}
+                className="text-xs text-neutral-400 truncate max-w-[140px] hover:text-fog-pink hover:underline transition-colors text-left"
+                title={`Bekijk koersgrafiek van ${p.company}`}
+              >
+                {p.company}
+              </button>
+            )}
             {p.sector && <Pill>{p.sector}</Pill>}
           </div>
           <div className="mt-0.5 text-[10px] text-neutral-500 flex items-center gap-1.5">
@@ -2345,6 +2356,15 @@ export function PhoenixView() {
               : "De dagelijkse scanners (scan-bottoms, scan-losers) voegen automatisch nieuwe feniks-aandelen toe zodra ze worden gevonden."}
           </div>
         </Card>
+      )}
+
+      {chartFor && (
+        <PriceChartModal
+          ticker={chartFor.ticker}
+          company={chartFor.company}
+          exchange={chartFor.exchange}
+          onClose={() => setChartFor(null)}
+        />
       )}
     </div>
   );
