@@ -92,11 +92,19 @@ const FAV_COLUMNS: ColumnMeta[] = [
   { key: "limiet", label: "Limiet" },
 ];
 
-export function FavorietenView() {
+// Optionele props: als App.tsx al een dashboard/scans-fetch heeft gedaan, kunnen
+// die hergebruikt worden in plaats van opnieuw te halen. Scheelt een dubbele
+// fetch en een merkbaar laadmoment bij het openen van de tab.
+interface FavorietenViewProps {
+  initialDashboard?: Dashboard | null;
+  initialScans?: ScanResults | null;
+}
+
+export function FavorietenView({ initialDashboard, initialScans }: FavorietenViewProps = {}) {
   const marks = useMarks();
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
-  const [scans, setScans] = useState<ScanResults | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [dashboard, setDashboard] = useState<Dashboard | null>(initialDashboard ?? null);
+  const [scans, setScans] = useState<ScanResults | null>(initialScans ?? null);
+  const [loading, setLoading] = useState(!(initialDashboard && initialScans));
   const [error, setError] = useState<string | null>(null);
   // Default: sorteer op afstand tot aankooplimiet (oplopend) — wat het dichtst
   // bij de koop-trigger zit komt bovenaan.
@@ -130,15 +138,28 @@ export function FavorietenView() {
   const isAdmin = !!getToken();
   const { visibleKeys } = useColumnLayout("favorieten", FAV_COLUMNS, "ticker");
 
+  // Sync dashboard/scans wanneer de parent ze (later) doorgeeft — anders
+  // zelf één keer fetchen. Wanneer beide al binnen zijn slaan we de fetch
+  // volledig over, zodat de favorieten-tab direct getoond wordt.
   useEffect(() => {
+    if (initialDashboard) setDashboard(initialDashboard);
+  }, [initialDashboard]);
+  useEffect(() => {
+    if (initialScans) setScans(initialScans);
+  }, [initialScans]);
+  useEffect(() => {
+    if (dashboard && scans) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    Promise.all([fetchDashboard(), fetchScanResults()])
-      .then(([d, s]) => {
-        setDashboard(d);
-        setScans(s);
-      })
+    const needs: Promise<unknown>[] = [];
+    if (!dashboard) needs.push(fetchDashboard().then(setDashboard));
+    if (!scans) needs.push(fetchScanResults().then(setScans));
+    Promise.all(needs)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const rows = useMemo<FavRow[]>(() => {
