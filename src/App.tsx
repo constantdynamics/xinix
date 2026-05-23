@@ -13,6 +13,7 @@ import { PoefiesView } from "./views/Poefies";
 import { HikkertjesView } from "./views/Hikkertjes";
 import { ZwitserlevenView } from "./views/Zwitserleven";
 import { FavorietenView } from "./views/Favorieten";
+import { EncyclopedieView } from "./views/Encyclopedie";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
 import { fetchDashboard, fetchScanResults, fetchZwitserlevenResults, getToken, setToken, type ScanResults, type ZwitserlevenResults } from "./api";
@@ -42,6 +43,7 @@ const HELP_PAGE: Record<Tab, string> = {
   zwitserleven: "zwitserleven",
   favorieten: "favorieten",
   status: "status",
+  encyclopedie: "encyclopedie",
   settings: "settings",
 };
 
@@ -362,14 +364,23 @@ export function App() {
         {tab === "zwitserleven" && <ZwitserlevenView />}
         {tab === "favorieten" && <FavorietenView initialDashboard={data} initialScans={scans} />}
         {tab === "status" && <HealthView />}
+        {tab === "encyclopedie" && <EncyclopedieView />}
         <HelpPanel pageId={HELP_PAGE[tab]} />
       </main>
 
       <footer className="border-t border-ink-5 mt-8">
-        <div className="mx-auto max-w-7xl px-4 py-4 text-[11px] text-neutral-400 flex items-center justify-between">
+        <div className="mx-auto max-w-7xl px-4 py-4 text-[11px] text-neutral-400 flex items-center justify-between gap-3 flex-wrap">
           <span>
             <span className="wordmark">Xinix</span> — pre/post-event detection
           </span>
+          <button
+            type="button"
+            onClick={() => setTab("encyclopedie")}
+            className="text-neutral-400 hover:text-fog-lime underline-offset-2 hover:underline"
+            title="Doorzoekbaar register van alle Xinix-termen, KPI's en secties"
+          >
+            📖 Encyclopedie · uitleg van termen
+          </button>
           <span className="tabular">v2 · {new Date().getFullYear()}</span>
         </div>
       </footer>

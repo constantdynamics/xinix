@@ -17,6 +17,7 @@ export type Tab =
   | "zwitserleven"
   | "favorieten"
   | "status"
+  | "encyclopedie"
   | "settings";
 
 export interface TabDef {
