@@ -2,16 +2,45 @@
 // per-tab kolominstellingen). Eén GET per pagina-load; alle tabel-views
 // delen dezelfde state zodat een kolomkeuze meteen overal doorwerkt.
 // Volgt hetzelfde module-level-store-patroon als useMarks.
+//
+// Bij module-init lezen we eerst een localStorage-cache uit zodat het
+// initiële render meteen de juiste tab-volgorde + kolommen heeft (geen
+// flikker van de default-config naar de custom-config). Daarna wordt
+// een verse versie van de server gehaald en de cache bijgewerkt.
 
 import { useEffect, useState } from "react";
 import { fetchUiSettings, saveUiSettings, type TableColumnPref, type UiSettings } from "../api";
 
+const CACHE_KEY = "xinix_ui_settings_cache_v1";
+
 type Listener = () => void;
 
+function readCache(): UiSettings | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as UiSettings;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(s: UiSettings | null): void {
+  if (typeof window === "undefined" || !s) return;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(s));
+  } catch {
+    // localStorage vol of geblokkeerd — laat stil falen.
+  }
+}
+
+const cached = readCache();
+
 const state = {
-  loaded: false,
+  loaded: cached != null,
   loading: false,
-  settings: null as UiSettings | null,
+  settings: cached,
 };
 const listeners = new Set<Listener>();
 
@@ -24,8 +53,10 @@ async function load(): Promise<void> {
   try {
     state.settings = await fetchUiSettings();
     state.loaded = true;
+    writeCache(state.settings);
   } catch {
-    // Laat settings null — consumers vallen terug op hun defaults.
+    // Laat settings staan (uit cache of null) — consumers vallen terug
+    // op hun defaults.
   } finally {
     state.loading = false;
     emit();
@@ -33,7 +64,9 @@ async function load(): Promise<void> {
 }
 
 function ensureLoaded(): void {
-  if (state.loaded || state.loading) return;
+  // Ook al hebben we een cache, halen we één keer een verse versie op om
+  // bij te blijven met wijzigingen die elders gemaakt zijn.
+  if (state.loading) return;
   void load();
 }
 
@@ -61,5 +94,6 @@ export async function saveTableColumns(tabKey: string, pref: TableColumnPref): P
   const saved = await saveUiSettings({ table_columns: next });
   state.settings = saved;
   state.loaded = true;
+  writeCache(state.settings);
   emit();
 }
