@@ -377,9 +377,9 @@ export function App() {
             type="button"
             onClick={() => setTab("encyclopedie")}
             className="text-neutral-400 hover:text-fog-lime underline-offset-2 hover:underline"
-            title="Doorzoekbaar register van alle Xinix-termen, KPI's en secties"
+            title="Doorzoekbaar register + ruimte om vragen + antwoorden te bewaren"
           >
-            📖 Encyclopedie · uitleg van termen
+            🤔 ik snap iets niet
           </button>
           <span className="tabular">v2 · {new Date().getFullYear()}</span>
         </div>
