@@ -12,6 +12,7 @@ import { XinixPortfolioView, PhoenixView } from "./views/XinixPortfolio";
 import { PoefiesView } from "./views/Poefies";
 import { HikkertjesView } from "./views/Hikkertjes";
 import { ZwitserlevenView } from "./views/Zwitserleven";
+import { ZwitserlevenProtoView } from "./views/ZwitserlevenProto";
 import { FavorietenView } from "./views/Favorieten";
 import { EncyclopedieView } from "./views/Encyclopedie";
 import { HealthView } from "./views/Health";
@@ -41,6 +42,7 @@ const HELP_PAGE: Record<Tab, string> = {
   poefies: "poefies",
   hikkertjes: "hikkertjes",
   zwitserleven: "zwitserleven",
+  "zwit-proto": "zwitserleven",
   favorieten: "favorieten",
   status: "status",
   encyclopedie: "encyclopedie",
@@ -362,6 +364,7 @@ export function App() {
         {tab === "poefies" && <PoefiesView />}
         {tab === "hikkertjes" && <HikkertjesView />}
         {tab === "zwitserleven" && <ZwitserlevenView />}
+        {tab === "zwit-proto" && <ZwitserlevenProtoView />}
         {tab === "favorieten" && <FavorietenView initialDashboard={data} initialScans={scans} />}
         {tab === "status" && <HealthView />}
         {tab === "encyclopedie" && <EncyclopedieView />}
