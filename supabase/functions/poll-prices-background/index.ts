@@ -150,6 +150,7 @@ Deno.serve(runBackground("poll-prices", async () => {
       const last = valid[valid.length - 1];
       const prev = valid[valid.length - 2];
       const fiveAgo = valid[valid.length - 6];
+      const twentyTwoAgo = valid.length >= 23 ? valid[valid.length - 23] : null;
       const window90 = valid.slice(-90);
       const closes90 = window90.map((b) => b.close);
       const low90 = Math.min(...closes90);
@@ -159,7 +160,7 @@ Deno.serve(runBackground("poll-prices", async () => {
       const avgVol = validVolumes.reduce((a, b) => a + b, 0) / (validVolumes.length || 1);
       const lastVol = last.volume ?? 0;
       const volRatio = avgVol > 0 ? lastVol / avgVol : 0;
-      const summary = { ticker, last_close: last.close, last_volume: lastVol, low_90d: low90, high_90d: high90, pct_above_90d_low: low90 > 0 ? pct(last.close, low90) : 0, pct_change_1d: prev ? pct(last.close, prev.close) : 0, pct_change_5d: fiveAgo ? pct(last.close, fiveAgo.close) : 0, avg_volume_30d: Math.round(avgVol), volume_ratio: Number(volRatio.toFixed(2)), updated_at: new Date().toISOString() };
+      const summary = { ticker, last_close: last.close, last_volume: lastVol, low_90d: low90, high_90d: high90, pct_above_90d_low: low90 > 0 ? pct(last.close, low90) : 0, pct_change_1d: prev ? pct(last.close, prev.close) : 0, pct_change_5d: fiveAgo ? pct(last.close, fiveAgo.close) : 0, pct_change_22d: twentyTwoAgo ? pct(last.close, twentyTwoAgo.close) : null, avg_volume_30d: Math.round(avgVol), volume_ratio: Number(volRatio.toFixed(2)), updated_at: new Date().toISOString() };
       await sb.from("signal_price_summary").upsert(summary, { onConflict: "ticker" });
       const divYield = last.close > 0 ? Number((dividendTtm / last.close).toFixed(5)) : 0;
       const tickerUpdate: Record<string, unknown> = { price_polled_at: new Date().toISOString(), price_fail_count: 0, price_last_error: null, dividend_yield: divYield };
