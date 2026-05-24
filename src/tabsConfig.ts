@@ -17,6 +17,7 @@ export type Tab =
   | "zwitserleven"
   | "zwit-proto"
   | "zwit-proto2"
+  | "zwit-proto3"
   | "favorieten"
   | "status"
   | "encyclopedie"
@@ -43,5 +44,6 @@ export const DEFAULT_TABS: TabDef[] = [
   { key: "zwitserleven", label: "Zwitserleven" },
   { key: "zwit-proto", label: "🌴 Proto 1–5" },
   { key: "zwit-proto2", label: "🌴 Proto 6–10" },
+  { key: "zwit-proto3", label: "🌴 Proto 11–20" },
   { key: "favorieten", label: "♥ Favorieten" },
 ];
