@@ -71,7 +71,7 @@ const NOTIFY_MIN_BRONZE_1Y = 4; // of ≥4 brons in het afgelopen jaar
 // Bewust GEEN OTC/PINK: dat zijn de gemanipuleerde pink-sheet shells.
 const TV_EXCHANGE_TO_YAHOO_SUFFIX: Record<string, string> = {
   NASDAQ: "", NYSE: "", AMEX: "", BATS: "",
-  TSX: ".TO", TSXV: ".V", CSE: ".CN", NEO: ".NE",
+  TSX: ".TO", TSXV: ".V",
   ASX: ".AX",
   LSE: ".L", AQSE: ".L",
 };
@@ -86,7 +86,7 @@ const TV_EXCHANGE_TO_GF: Record<string, string> = {
 
 // Yahoo suffix -> Google Finance exchange code (niet-US tickers).
 const SUFFIX_TO_GF: Record<string, string> = {
-  TO: "TSE", V: "CVE", CN: "CNSX", NE: "NEO",
+  TO: "TSE", V: "CVE",
   L: "LON", AX: "ASX", NZ: "NZE",
 };
 
