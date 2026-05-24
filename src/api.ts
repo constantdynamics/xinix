@@ -41,7 +41,7 @@ export async function fetchDashboard(fresh = false): Promise<Dashboard> {
   return (await res.json()) as Dashboard;
 }
 
-export type PriceRange = "1d" | "5d" | "1mo" | "1y" | "5y" | "max";
+export type PriceRange = "1d" | "5d" | "1mo" | "6mo" | "1y" | "3y" | "5y" | "max";
 export interface PricePoint { t: number; c: number; }
 export interface PriceHistory {
   ticker: string;

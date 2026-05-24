@@ -1,7 +1,7 @@
 // ReviewMode — swipe-door-beoordeling van aandelen per lijst.
 // Knop rechtsboven in de header → stap 1: lijstkeuze → stap 2: één voor één beoordelen.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   fetchPriceHistory,
   type ScanResults,
@@ -13,75 +13,270 @@ import { useMarks } from "../hooks/useMarks";
 import { GradientTabIcon } from "../tabIcons";
 
 // ── Chart helper ──────────────────────────────────────────────────────────────
-// Eenvoudige 1-jaar koersgrafiek, ingesloten in de review-kaart.
-// Geen as, geen hover — alleen de vorm van het koersverloop.
+
+type ChartRange = "1d" | "5d" | "1mo" | "6mo" | "1y" | "3y" | "5y" | "max";
+
+const RANGE_OPTS: { key: ChartRange; label: string }[] = [
+  { key: "1d",  label: "1D" },
+  { key: "5d",  label: "1W" },
+  { key: "1mo", label: "1M" },
+  { key: "6mo", label: "6M" },
+  { key: "1y",  label: "1J" },
+  { key: "3y",  label: "3J" },
+  { key: "5y",  label: "5J" },
+  { key: "max", label: "Max" },
+];
+
+const RANGE_LABELS: Record<ChartRange, string> = {
+  "1d": "1 dag", "5d": "1 week", "1mo": "1 mnd", "6mo": "6 mnd",
+  "1y": "1 jaar", "3y": "3 jaar", "5y": "5 jaar", "max": "max",
+};
+
+function fmtYLabel(v: number): string {
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
+  if (v >= 100)  return v.toFixed(0);
+  if (v >= 10)   return v.toFixed(1);
+  return v.toFixed(2);
+}
+
+function fmtXLabel(ts: number, range: ChartRange): string {
+  const d = new Date(ts * 1000);
+  if (range === "1d") {
+    return d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
+  }
+  if (range === "5d") {
+    return d.toLocaleDateString("nl-NL", { weekday: "short" });
+  }
+  if (range === "1mo" || range === "6mo") {
+    return d.toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
+  }
+  if (range === "1y") {
+    return d.toLocaleDateString("nl-NL", { month: "short" });
+  }
+  return d.toLocaleDateString("nl-NL", { month: "short", year: "2-digit" });
+}
 
 function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | null }) {
+  const [range, setRange] = useState<ChartRange>("1y");
   const [pts, setPts] = useState<{ t: number; c: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setPts([]);
-    fetchPriceHistory(ticker, "1y")
+    setHoverIdx(null);
+    fetchPriceHistory(ticker, range)
       .then((h) => { if (!cancelled) setPts(h.points ?? []); })
-      .catch(() => { /* stil falen */ })
+      .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [ticker]);
+  }, [ticker, range]);
 
-  if (loading) {
-    return (
-      <div className="w-full h-28 flex items-center justify-center text-xs text-neutral-600 animate-pulse">
-        grafiek laden…
-      </div>
-    );
-  }
-  if (pts.length < 2) {
-    return (
-      <div className="w-full h-28 flex items-center justify-center text-xs text-neutral-600">
-        geen koersdata
-      </div>
-    );
-  }
-
-  const W = 600;
-  const H = 112;
-  const PAD = { l: 0, r: 0, t: 4, b: 4 };
+  // SVG layout constants
+  const W = 560;
+  const H = 140;
+  const PAD = { l: 38, r: 6, t: 6, b: 22 };
   const PW = W - PAD.l - PAD.r;
   const PH = H - PAD.t - PAD.b;
 
-  const closes = pts.map((p) => p.c);
-  const lo = Math.min(...closes);
-  const hi = Math.max(...closes);
-  const span = hi - lo || 1;
-  const up = closes[closes.length - 1] >= closes[0];
-  const color = up ? "#1ae85a" : "#ff1a1a";
+  const periodLabel = RANGE_LABELS[range];
 
-  const x = (i: number) => PAD.l + (i / (pts.length - 1)) * PW;
-  const y = (c: number) => PAD.t + (1 - (c - lo) / span) * PH;
+  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    if (!svgRef.current || pts.length < 2) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const mouseX = ((e.clientX - rect.left) / rect.width) * W;
+    const relX = mouseX - PAD.l;
+    const fraction = Math.max(0, Math.min(1, relX / PW));
+    const idx = Math.round(fraction * (pts.length - 1));
+    setHoverIdx(idx);
+  }
 
-  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.c).toFixed(1)}`).join(" ");
-  const area = `${line} L${x(pts.length - 1).toFixed(1)},${(PAD.t + PH).toFixed(1)} L${x(0).toFixed(1)},${(PAD.t + PH).toFixed(1)} Z`;
+  function chartBody() {
+    if (loading) {
+      return (
+        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600 animate-pulse" style={{ height: "9rem" }}>
+          grafiek laden…
+        </div>
+      );
+    }
+    if (pts.length < 2) {
+      return (
+        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600" style={{ height: "9rem" }}>
+          geen koersdata
+        </div>
+      );
+    }
 
-  const gfUrl = googleFinanceUrl(ticker, exchange);
-  const changePct = closes[0] !== 0 ? ((closes[closes.length - 1] - closes[0]) / closes[0]) * 100 : 0;
+    const closes = pts.map((p) => p.c);
+    const lo = Math.min(...closes);
+    const hi = Math.max(...closes);
+    const span = hi - lo || lo * 0.01 || 1;
+    const up = closes[closes.length - 1] >= closes[0];
+    const color = up ? "#1ae85a" : "#ff1a1a";
+
+    // Bij hover: change t.o.v. begin van periode; anders: totale periode-change
+    const baseClose = closes[0];
+    const displayClose = hoverIdx !== null ? closes[hoverIdx] : closes[closes.length - 1];
+    const changePct = baseClose !== 0 ? ((displayClose - baseClose) / baseClose) * 100 : 0;
+    const changeUp = displayClose >= baseClose;
+    const changeColor = changeUp ? "#1ae85a" : "#ff1a1a";
+
+    const cx = (i: number) => PAD.l + (i / (pts.length - 1)) * PW;
+    const cy = (c: number) => PAD.t + (1 - (c - lo) / span) * PH;
+
+    const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${cx(i).toFixed(1)},${cy(p.c).toFixed(1)}`).join(" ");
+    const area = `${line} L${cx(pts.length - 1).toFixed(1)},${(PAD.t + PH).toFixed(1)} L${cx(0).toFixed(1)},${(PAD.t + PH).toFixed(1)} Z`;
+
+    // Y-as: 4 niveaus
+    const yTicks = Array.from({ length: 4 }, (_, i) => lo + (span * i) / 3);
+    // X-as: 5 labels
+    const xTicks = Array.from({ length: 5 }, (_, i) => Math.round(i * (pts.length - 1) / 4));
+
+    // Hover punt
+    const hPt = hoverIdx !== null ? pts[hoverIdx] : null;
+    const hx = hPt ? cx(hoverIdx!) : null;
+    const hy = hPt ? cy(hPt.c) : null;
+
+    // Tooltip positie: links of rechts van het bolletje
+    const tooltipLeft = hoverIdx !== null && hoverIdx > pts.length * 0.65;
+
+    const gfUrl = googleFinanceUrl(ticker, exchange);
+
+    return (
+      <>
+        <div className="relative w-full">
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            className="w-full block cursor-crosshair"
+            style={{ height: "9rem" }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={() => setHoverIdx(null)}
+          >
+            <defs>
+              <linearGradient id={`cg-${ticker}-${range}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity="0.18" />
+                <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+
+            {/* Horizontale gridlines + Y-labels */}
+            {yTicks.map((v, i) => {
+              const yy = cy(v).toFixed(1);
+              return (
+                <g key={i}>
+                  <line x1={PAD.l} y1={yy} x2={W - PAD.r} y2={yy} stroke="#ffffff" strokeOpacity="0.06" strokeWidth="1" strokeDasharray="3,4" />
+                  <text x={PAD.l - 3} y={yy} textAnchor="end" dominantBaseline="middle" fill="#555" fontSize="9" fontFamily="monospace">
+                    {fmtYLabel(v)}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Koerslijn + area */}
+            <path d={area} fill={`url(#cg-${ticker}-${range})`} />
+            <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+
+            {/* X-as lijn */}
+            <line x1={PAD.l} y1={PAD.t + PH} x2={W - PAD.r} y2={PAD.t + PH} stroke="#ffffff" strokeOpacity="0.1" strokeWidth="1" />
+
+            {/* X-as labels */}
+            {xTicks.map((idx) => (
+              <text key={idx} x={cx(idx).toFixed(1)} y={H - 4} textAnchor="middle" fill="#555" fontSize="9" fontFamily="sans-serif">
+                {fmtXLabel(pts[idx].t, range)}
+              </text>
+            ))}
+
+            {/* Hover: verticale lijn + bolletje + tooltip */}
+            {hPt && hx !== null && hy !== null && (
+              <g>
+                <line x1={hx} y1={PAD.t} x2={hx} y2={PAD.t + PH} stroke="#ffffff" strokeOpacity="0.2" strokeWidth="1" strokeDasharray="2,3" />
+                <circle cx={hx} cy={hy} r="4" fill={color} stroke="#1a1a1a" strokeWidth="1.5" />
+                {/* Tooltip box */}
+                <g transform={`translate(${tooltipLeft ? hx - 6 : hx + 6},${Math.min(hy - 14, PAD.t + PH - 28)})`}>
+                  <rect
+                    x={tooltipLeft ? -74 : 0}
+                    y="0"
+                    width="70"
+                    height="24"
+                    rx="3"
+                    fill="#1a1a1a"
+                    stroke="#333"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={tooltipLeft ? -39 : 35}
+                    y="9"
+                    textAnchor="middle"
+                    fill="#aaa"
+                    fontSize="8"
+                    fontFamily="sans-serif"
+                  >
+                    {fmtXLabel(hPt.t, range)}
+                  </text>
+                  <text
+                    x={tooltipLeft ? -39 : 35}
+                    y="20"
+                    textAnchor="middle"
+                    fill="#fff"
+                    fontSize="10"
+                    fontFamily="monospace"
+                    fontWeight="bold"
+                  >
+                    {fmtYLabel(hPt.c)}
+                  </text>
+                </g>
+              </g>
+            )}
+          </svg>
+
+          {/* Google Finance link — apart van de SVG zodat hover niet interfereert */}
+          <a
+            href={gfUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute top-1 right-1 text-[9px] text-neutral-600 hover:text-fog-lime transition-colors"
+            title={`Open ${ticker} op Google Finance`}
+          >
+            ↗
+          </a>
+        </div>
+
+        {/* Change % — update live bij hover */}
+        <div className="text-center text-[11px] font-semibold tabular-nums mt-0.5" style={{ color: changeColor }}>
+          {changeUp ? "+" : ""}{changePct.toFixed(1)}%
+          {hPt
+            ? <span className="text-neutral-500 font-normal"> op {fmtXLabel(hPt.t, range)}</span>
+            : <span className="text-neutral-500 font-normal"> ({periodLabel})</span>
+          }
+        </div>
+      </>
+    );
+  }
 
   return (
-    <a href={gfUrl} target="_blank" rel="noopener noreferrer" className="block w-full group" title={`Open ${ticker} op Google Finance`}>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full block rounded-lg overflow-hidden group-hover:opacity-80 transition-opacity"
-        style={{ height: "7rem" }}
-      >
-        <path d={area} fill={color} fillOpacity={0.12} />
-        <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
-      </svg>
-      <div className="text-center mt-1 text-[11px] font-semibold tabular-nums" style={{ color }}>
-        {up ? "+" : ""}{changePct.toFixed(1)}% (1 jaar)
+    <div className="w-full space-y-1.5">
+      {/* Periode-knoppen */}
+      <div className="flex gap-0.5 justify-center">
+        {RANGE_OPTS.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setRange(key)}
+            className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+              range === key
+                ? "bg-neutral-200/15 text-neutral-100"
+                : "text-neutral-500 hover:text-neutral-300"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
-    </a>
+      {chartBody()}
+    </div>
   );
 }
 

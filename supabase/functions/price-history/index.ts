@@ -24,7 +24,9 @@ const RANGE_MAP: Record<string, { range: string; interval: string }> = {
   "1d":  { range: "1d",  interval: "5m" },
   "5d":  { range: "5d",  interval: "30m" },
   "1mo": { range: "1mo", interval: "1d" },
+  "6mo": { range: "6mo", interval: "1d" },
   "1y":  { range: "1y",  interval: "1d" },
+  "3y":  { range: "3y",  interval: "1wk" },
   "5y":  { range: "5y",  interval: "1wk" },
   "max": { range: "max", interval: "1mo" },
 };
