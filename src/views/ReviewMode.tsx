@@ -77,21 +77,32 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
   // SVG layout constants
   const W = 560;
-  const H = 140;
-  const PAD = { l: 38, r: 6, t: 6, b: 22 };
+  const H = 148;
+  const PAD = { l: 44, r: 6, t: 6, b: 26 };
   const PW = W - PAD.l - PAD.r;
   const PH = H - PAD.t - PAD.b;
 
   const periodLabel = RANGE_LABELS[range];
 
-  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
-    if (!svgRef.current || pts.length < 2) return;
+  function idxFromClientX(clientX: number): number {
+    if (!svgRef.current || pts.length < 2) return 0;
     const rect = svgRef.current.getBoundingClientRect();
-    const mouseX = ((e.clientX - rect.left) / rect.width) * W;
-    const relX = mouseX - PAD.l;
-    const fraction = Math.max(0, Math.min(1, relX / PW));
-    const idx = Math.round(fraction * (pts.length - 1));
-    setHoverIdx(idx);
+    const svgX = ((clientX - rect.left) / rect.width) * W;
+    const fraction = Math.max(0, Math.min(1, (svgX - PAD.l) / PW));
+    return Math.round(fraction * (pts.length - 1));
+  }
+
+  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    setHoverIdx(idxFromClientX(e.clientX));
+  }
+
+  function handleTouchMove(e: React.TouchEvent<SVGSVGElement>) {
+    e.preventDefault(); // voorkom scrollen terwijl je over de grafiek sleept
+    if (e.touches.length > 0) setHoverIdx(idxFromClientX(e.touches[0].clientX));
+  }
+
+  function handleTouchStart(e: React.TouchEvent<SVGSVGElement>) {
+    if (e.touches.length > 0) setHoverIdx(idxFromClientX(e.touches[0].clientX));
   }
 
   function chartBody() {
@@ -151,10 +162,13 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
-            className="w-full block cursor-crosshair"
-            style={{ height: "9rem" }}
+            className="w-full block cursor-crosshair touch-none"
+            style={{ height: "9.5rem" }}
             onMouseMove={handleMouseMove}
             onMouseLeave={() => setHoverIdx(null)}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={() => setHoverIdx(null)}
           >
             <defs>
               <linearGradient id={`cg-${ticker}-${range}`} x1="0" y1="0" x2="0" y2="1">
@@ -168,8 +182,8 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
               const yy = cy(v).toFixed(1);
               return (
                 <g key={i}>
-                  <line x1={PAD.l} y1={yy} x2={W - PAD.r} y2={yy} stroke="#ffffff" strokeOpacity="0.06" strokeWidth="1" strokeDasharray="3,4" />
-                  <text x={PAD.l - 3} y={yy} textAnchor="end" dominantBaseline="middle" fill="#555" fontSize="9" fontFamily="monospace">
+                  <line x1={PAD.l} y1={yy} x2={W - PAD.r} y2={yy} stroke="#ffffff" strokeOpacity="0.07" strokeWidth="1" strokeDasharray="3,4" />
+                  <text x={PAD.l - 4} y={yy} textAnchor="end" dominantBaseline="middle" fill="#ccc" fontSize="11" fontFamily="monospace">
                     {fmtYLabel(v)}
                   </text>
                 </g>
@@ -185,7 +199,7 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
             {/* X-as labels */}
             {xTicks.map((idx) => (
-              <text key={idx} x={cx(idx).toFixed(1)} y={H - 4} textAnchor="middle" fill="#555" fontSize="9" fontFamily="sans-serif">
+              <text key={idx} x={cx(idx).toFixed(1)} y={H - 5} textAnchor="middle" fill="#ccc" fontSize="11" fontFamily="sans-serif">
                 {fmtXLabel(pts[idx].t, range)}
               </text>
             ))}
@@ -196,33 +210,33 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
                 <line x1={hx} y1={PAD.t} x2={hx} y2={PAD.t + PH} stroke="#ffffff" strokeOpacity="0.2" strokeWidth="1" strokeDasharray="2,3" />
                 <circle cx={hx} cy={hy} r="4" fill={color} stroke="#1a1a1a" strokeWidth="1.5" />
                 {/* Tooltip box */}
-                <g transform={`translate(${tooltipLeft ? hx - 6 : hx + 6},${Math.min(hy - 14, PAD.t + PH - 28)})`}>
+                <g transform={`translate(${tooltipLeft ? hx - 8 : hx + 8},${Math.min(hy - 18, PAD.t + PH - 36)})`}>
                   <rect
-                    x={tooltipLeft ? -74 : 0}
+                    x={tooltipLeft ? -82 : 0}
                     y="0"
-                    width="70"
-                    height="24"
-                    rx="3"
-                    fill="#1a1a1a"
-                    stroke="#333"
+                    width="78"
+                    height="32"
+                    rx="4"
+                    fill="#111"
+                    stroke="#444"
                     strokeWidth="1"
                   />
                   <text
-                    x={tooltipLeft ? -39 : 35}
-                    y="9"
+                    x={tooltipLeft ? -43 : 39}
+                    y="12"
                     textAnchor="middle"
-                    fill="#aaa"
-                    fontSize="8"
+                    fill="#fff"
+                    fontSize="10"
                     fontFamily="sans-serif"
                   >
                     {fmtXLabel(hPt.t, range)}
                   </text>
                   <text
-                    x={tooltipLeft ? -39 : 35}
-                    y="20"
+                    x={tooltipLeft ? -43 : 39}
+                    y="26"
                     textAnchor="middle"
                     fill="#fff"
-                    fontSize="10"
+                    fontSize="13"
                     fontFamily="monospace"
                     fontWeight="bold"
                   >
@@ -513,7 +527,7 @@ function ReviewCard({
               <div className="font-mono font-bold text-neutral-100">{fmtPrice(item.last_close)}</div>
             )}
             {item.buy_limit != null && (
-              <div className="text-[11px] text-neutral-500 font-mono">limit {fmtPrice(item.buy_limit)}</div>
+              <div className="text-[11px] text-neutral-100 font-mono">limit {fmtPrice(item.buy_limit)}</div>
             )}
           </div>
         </div>
