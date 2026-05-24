@@ -663,7 +663,7 @@ export function ZwitserlevenView() {
         )}
       </div>
 
-      {/* Tabel */}
+      {/* Tabel / kaarten */}
       {filtered.length === 0 ? (
         <Card className="p-10 text-center text-sm text-neutral-500">
           <div className="text-3xl mb-3">🌴</div>
@@ -686,44 +686,154 @@ export function ZwitserlevenView() {
           )}
         </Card>
       ) : (
-        <Card className="p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-ink-5 flex items-center justify-between flex-wrap gap-2">
-            <div className="font-semibold text-sm text-emerald-300">
-              🌴 Zwitserleven ranking
-            </div>
-            <div className="text-xs text-neutral-500">klik kolomkop om te sorteren · gebruik 'Kolommen' om te verbergen en herordenen</div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[800px]">
-              <thead className="border-b border-ink-5 bg-ink-2/40">
-                <tr>
-                  <SeenHeader />
-                  <HeartHeader />
-                  <StarHeader />
-                  {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-ink-5">
-                {filtered.map((s, idx) => {
-                  const seen = marks.isSeen(s.ticker);
-                  return (
-                    <tr
-                      key={s.ticker}
-                      className={`hover:bg-ink-3/30 transition-colors ${
-                        s.is_manual ? "bg-amber-500/[0.05]" : s.meets_criteria ? "bg-emerald-500/[0.03]" : ""
-                      } ${seen ? "opacity-50" : ""}`}
+        <>
+          {/* ── Mobiel: kaartjesweergave ──────────────────────────────── */}
+          <div className="md:hidden space-y-2">
+            {filtered.map((s) => {
+              const seen = marks.isSeen(s.ticker);
+              const tax = dividendTax(s.country);
+              const netYield = s.dividend_yield_pct != null && tax != null
+                ? s.dividend_yield_pct * (1 - tax.rate / 100)
+                : s.dividend_yield_pct;
+              const riskCls = RISK_COLORS[s.risk_label ?? ""] ?? "text-neutral-400";
+              return (
+                <Card
+                  key={s.ticker}
+                  className={`p-3 ${seen ? "opacity-50" : ""} ${
+                    s.is_manual ? "border-amber-500/30" : s.meets_criteria ? "border-emerald-500/20" : ""
+                  }`}
+                >
+                  {/* Rij 1: ticker + marks + delete */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <SeenCell ticker={s.ticker} />
+                    <HeartCell ticker={s.ticker} />
+                    <StarCell ticker={s.ticker} />
+                    <a
+                      href={googleFinanceUrl(s.ticker, s.exchange)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono font-bold text-sm tab-accent-text hover:underline"
                     >
-                      <SeenCell ticker={s.ticker} />
-                      <HeartCell ticker={s.ticker} />
-                      <StarCell ticker={s.ticker} />
-                      {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(s, idx)}</Fragment>)}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      {s.ticker}
+                    </a>
+                    {s.is_manual && (
+                      <span className="text-[9px] uppercase font-semibold text-amber-400 bg-amber-400/15 px-1 rounded">handm.</span>
+                    )}
+                    {s.meets_criteria && (
+                      <span className="text-emerald-400 text-xs ml-0.5">✓</span>
+                    )}
+                    <button
+                      onClick={() => deleteRow(s.ticker, s.company)}
+                      disabled={deletingTicker === s.ticker}
+                      className="ml-auto text-neutral-500 hover:text-red-400 disabled:opacity-30 transition-colors"
+                    >
+                      {deletingTicker === s.ticker ? "…" : "🗑"}
+                    </button>
+                  </div>
+
+                  {/* Rij 2: bedrijfsnaam + sparkline */}
+                  <div className="flex items-center gap-2 mb-2">
+                    {s.company ? (
+                      <button
+                        type="button"
+                        onClick={() => setChartFor({ ticker: s.ticker, company: s.company ?? s.ticker, exchange: s.exchange })}
+                        className="text-xs text-neutral-200 hover:text-fog-pink hover:underline transition-colors text-left truncate flex-1"
+                      >
+                        {s.company}
+                      </button>
+                    ) : (
+                      <span className="flex-1 text-neutral-600 text-xs">—</span>
+                    )}
+                    <TickerSparkline ticker={s.ticker} width={64} height={18} />
+                  </div>
+
+                  {/* Rij 3: yields + bronbel */}
+                  <div className="flex gap-3 flex-wrap text-xs mb-2">
+                    <div>
+                      <span className="text-neutral-500">Bruto </span>
+                      <span className={`font-semibold ${(s.dividend_yield_pct ?? 0) >= 8 ? "text-emerald-400" : "text-neutral-200"}`}>
+                        {fmtPct(s.dividend_yield_pct)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500">Bron </span>
+                      <span className={tax ? (tax.rate === 0 ? "text-emerald-400" : tax.rate <= 15 ? "text-neutral-200" : tax.rate <= 25 ? "text-yellow-400" : "text-orange-400") : "text-neutral-600"}>
+                        {tax ? `${tax.rate}%` : "—"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-neutral-500">Netto </span>
+                      <span className={`font-semibold ${netYield != null && netYield >= 6 ? "text-emerald-400" : "text-neutral-300"}`}>
+                        {fmtPct(netYield)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Rij 4: koers + val + risico + land */}
+                  <div className="flex gap-3 flex-wrap text-xs text-neutral-400">
+                    <span className="font-mono text-neutral-200">{fmtCurrency(s.last_close, s.currency)}</span>
+                    {s.pct_under_5y_high != null && (
+                      <span className={(s.pct_under_5y_high ?? 0) >= 60 ? "text-orange-400" : ""}>
+                        {fmtPct(s.pct_under_5y_high)} v 5j
+                      </span>
+                    )}
+                    {s.years_5pct_growth_5y != null && (
+                      <span className={s.years_5pct_growth_5y >= 2 ? "text-emerald-400" : ""}>
+                        {s.years_5pct_growth_5y} groeijr
+                      </span>
+                    )}
+                    {s.risk_label && (
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${riskCls}`}>
+                        {s.risk_label}
+                      </span>
+                    )}
+                    {s.country && <span className="text-neutral-500">{s.country}</span>}
+                  </div>
+                </Card>
+              );
+            })}
           </div>
-        </Card>
+
+          {/* ── Desktop: tabelweergave ────────────────────────────────── */}
+          <Card className="hidden md:block p-0 overflow-hidden">
+            <div className="px-4 py-3 border-b border-ink-5 flex items-center justify-between flex-wrap gap-2">
+              <div className="font-semibold text-sm text-emerald-300">
+                🌴 Zwitserleven ranking
+              </div>
+              <div className="text-xs text-neutral-500">klik kolomkop om te sorteren · gebruik 'Kolommen' om te verbergen en herordenen</div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[800px]">
+                <thead className="border-b border-ink-5 bg-ink-2/40">
+                  <tr>
+                    <SeenHeader />
+                    <HeartHeader />
+                    <StarHeader />
+                    {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.th}</Fragment>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-5">
+                  {filtered.map((s, idx) => {
+                    const seen = marks.isSeen(s.ticker);
+                    return (
+                      <tr
+                        key={s.ticker}
+                        className={`hover:bg-ink-3/30 transition-colors ${
+                          s.is_manual ? "bg-amber-500/[0.05]" : s.meets_criteria ? "bg-emerald-500/[0.03]" : ""
+                        } ${seen ? "opacity-50" : ""}`}
+                      >
+                        <SeenCell ticker={s.ticker} />
+                        <HeartCell ticker={s.ticker} />
+                        <StarCell ticker={s.ticker} />
+                        {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(s, idx)}</Fragment>)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
       )}
 
       {chartFor && (

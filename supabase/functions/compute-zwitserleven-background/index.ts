@@ -219,8 +219,15 @@ const INDEX_UNIVERSE: string[] = [...new Set([
 interface Bar { date: string; close: number; }
 interface DivEvent { date: string; amount: number; }
 
-async function fetchYahoo5yWeekly(ticker: string): Promise<{ bars: Bar[]; divs: DivEvent[] }> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5y&interval=1wk&events=div`;
+async function fetchYahooHistory(ticker: string): Promise<{ bars: Bar[]; divs: DivEvent[] }> {
+  // Gebruik period1/period2 i.p.v. range=5y: range=5y start op vandaag-5j waardoor
+  // dividenden met een ex-datum vroeg in het vijfde jaar (bijv. jan-apr 2021 als vandaag
+  // mei 2026 is) buiten de range vallen en als nul worden meegeteld. Door terug te gaan
+  // naar 1 jan van (currentYear-6) zijn alle kalenderjaren y1-y5 altijd volledig.
+  const now = Math.floor(Date.now() / 1000);
+  const currentYear = new Date().getFullYear();
+  const periodStart = Math.floor(new Date(`${currentYear - 6}-01-01T00:00:00Z`).getTime() / 1000);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?period1=${periodStart}&period2=${now}&interval=1wk&events=div`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; ZwitserBot/1.0; +https://github.com)" } });
   if (!res.ok) throw new Error(`Yahoo ${ticker} HTTP ${res.status}`);
   const json = await res.json() as {
@@ -239,8 +246,10 @@ async function fetchYahoo5yWeekly(ticker: string): Promise<{ bars: Bar[]; divs: 
   const r = json.chart.result?.[0];
   if (!r) throw new Error(`Yahoo ${ticker}: ${json.chart.error?.description ?? "no result"}`);
   const ts = r.timestamp ?? [];
-  const adj = r.indicators.adjclose?.[0]?.adjclose;
-  const closes = adj ?? r.indicators.quote[0]?.close ?? [];
+  // Gebruik onbijgewerkte slotkoers (quote.close) zodat dividend-aanpassingen de
+  // historische 5j-hoog niet kunstmatig verlagen. Val terug op adjclose als quote.close
+  // niet beschikbaar is (sommige tickers/periodes hebben dit niet).
+  const closes = r.indicators.quote[0]?.close ?? r.indicators.adjclose?.[0]?.adjclose ?? [];
   const bars = ts
     .map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN }))
     .filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
@@ -294,13 +303,20 @@ interface Metrics {
 
 function computeMetrics(bars: Bar[], divs: DivEvent[]): Metrics | null {
   if (bars.length < 10) return null;
-  const lastClose = bars[bars.length - 1].close;
-  const high5y = Math.max(...bars.map((b) => b.close));
+
+  // Prijsberekeningen (hoog, rendement) alleen op de laatste 5 jaar. De fetch levert
+  // nu ~6 jaar data zodat dividenden volledig zijn, maar "5j-hoog" blijft 5 jaar.
+  const fiveYearsAgo = new Date(Date.now() - 5 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const priceBars = bars.filter((b) => b.date >= fiveYearsAgo);
+  if (priceBars.length < 10) return null;
+
+  const lastClose = priceBars[priceBars.length - 1].close;
+  const high5y = Math.max(...priceBars.map((b) => b.close));
   const pctUnder5yHigh = high5y > 0 ? ((high5y - lastClose) / high5y) * 100 : 0;
 
   // Jaarlijkse rendementen: vergelijk eindekoers van elk jaar met het vorige
   const byYear: Record<number, number[]> = {};
-  for (const b of bars) {
+  for (const b of priceBars) {
     const y = parseInt(b.date.slice(0, 4));
     if (!byYear[y]) byYear[y] = [];
     byYear[y].push(b.close);
@@ -445,7 +461,7 @@ Deno.serve(runBackground("compute-zwitserleven", async (req) => {
     const now = new Date().toISOString();
     try {
       const [{ bars, divs }, summary] = await Promise.all([
-        fetchYahoo5yWeekly(row.ticker),
+        fetchYahooHistory(row.ticker),
         fetchQuoteSummary(row.ticker),
       ]);
       const m = computeMetrics(bars, divs);
