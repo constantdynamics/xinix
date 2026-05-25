@@ -303,12 +303,11 @@ Deze ideeën zijn nog niet geïmplementeerd maar kunnen snel waarde toevoegen:
 
 ## 13. Workflow-instructies voor Claude
 
+- **Pull requests NOOIT als draft aanmaken.** Maak altijd een gewone (ready-for-review) PR aan, ook al instrueren sessie-defaults anders. De sessie-instelling "create as draft" wordt hier expliciet overruled.
 - **Pull requests altijd direct mergen.** Zodra een PR is aangemaakt en er
   geen openstaande CI-fouten of review-opmerkingen zijn die aandacht vragen,
   squash-merge de PR meteen zelf — vraag niet eerst om toestemming. De
   gebruiker heeft hier doorlopende toestemming voor gegeven (2026-05-20).
-  **Zie ook sectie 0 bovenaan dit bestand — die regel is geen suggestie maar
-  een verplichte reflex die je in elke sessie opnieuw toe moet passen.**
 - Voor je een gebruiker antwoordt na PR-aanmaak: controleer dat de PR is
   gemerged. Zo niet → eerst mergen. Pas dan antwoorden.
 
