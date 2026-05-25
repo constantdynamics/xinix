@@ -121,7 +121,7 @@ Deno.serve(runBackground("poll-prices", async () => {
   ].join(",");
   const { data: queue, error: qErr } = await sb
     .from("signal_tickers")
-    .select("ticker, buy_limit, price_fail_count, exchange")
+    .select("ticker, buy_limit, price_fail_count, exchange, score")
     .eq("active", true)
     .eq("price_benched", false)
     .or(orClause)
@@ -132,6 +132,8 @@ Deno.serve(runBackground("poll-prices", async () => {
   const { data: extremes } = await sb.from("signal_price_summary").select("ticker, high_1y");
   const high1yByTicker = new Map<string, number | null>();
   for (const r of extremes ?? []) high1yByTicker.set(r.ticker as string, ((r as { high_1y?: number | null }).high_1y) ?? null);
+  const { data: favData } = await sb.from("xinix_favorites").select("ticker");
+  const favSet = new Set<string>((favData ?? []).map((f) => f.ticker as string));
 
   let scanned = 0, ok = 0, failed = 0, benched = 0, signalsInserted = 0;
   const errSamples: string[] = [];
@@ -141,6 +143,8 @@ Deno.serve(runBackground("poll-prices", async () => {
     const ticker = tk.ticker as string;
     const buyLimit = (tk as { buy_limit?: number | null }).buy_limit ?? null;
     const hasLimit = typeof buyLimit === "number" && buyLimit > 0;
+    const score = (tk as { score?: number | null }).score ?? null;
+    const isFav = favSet.has(ticker);
     const failCount = (tk as { price_fail_count?: number }).price_fail_count ?? 0;
     scanned++;
     try {
@@ -203,6 +207,19 @@ Deno.serve(runBackground("poll-prices", async () => {
       else if (summary.pct_change_1d >= 15 && volRatio >= 2) { const id = await insertSignal(sb, { ticker, signal_type: "price_spike_up", severity: "orange", title: `${ticker} +${summary.pct_change_1d.toFixed(1)}% (vol ${volRatio.toFixed(1)}×)`, detail: `Koers $${last.close.toFixed(2)}. Materiële beweging.`, payload: { pct: summary.pct_change_1d, volume_ratio: volRatio }, expires_at: expires7, dedup_key: `price_spike_up:${ticker}:${today}` }); if (id) signalsInserted++; }
       else if (summary.pct_change_1d >= 8) { const id = await insertSignal(sb, { ticker, signal_type: "price_spike_up", severity: "yellow", title: `${ticker} +${summary.pct_change_1d.toFixed(1)}% intraday`, detail: `Koers $${last.close.toFixed(2)}. Volume ratio ${volRatio.toFixed(1)}×.`, payload: { pct: summary.pct_change_1d, volume_ratio: volRatio }, expires_at: expires7, dedup_key: `price_spike_up:${ticker}:${today}` }); if (id) signalsInserted++; }
       if (volRatio >= 3 && Math.abs(summary.pct_change_1d) < 5 && summary.pct_change_1d >= -5) { const id = await insertSignal(sb, { ticker, signal_type: "volume_spike", severity: "yellow", title: `${ticker} ongewoon volume (${volRatio.toFixed(1)}×)`, detail: `Volume ${lastVol.toLocaleString()} vs gem. ${Math.round(avgVol).toLocaleString()}.`, payload: { volume_ratio: volRatio }, expires_at: expires7, dedup_key: `volume_spike:${ticker}:${today}` }); if (id) signalsInserted++; }
+
+      // === favoriet-signalen ===
+      if (isFav) {
+        if (summary.pct_change_1d <= -10) { const id = await insertSignal(sb, { ticker, signal_type: "fav_big_drop_1d", severity: "red", title: `⭐ ${ticker} -${Math.abs(summary.pct_change_1d).toFixed(1)}% vandaag (favoriet)`, detail: `Koers $${last.close.toFixed(2)}. Scherpe daling bij een favoriet.`, payload: { pct: summary.pct_change_1d, last_close: last.close }, expires_at: expires7, dedup_key: `fav_big_drop_1d:${ticker}:${today}` }); if (id) signalsInserted++; }
+        if (summary.pct_change_5d <= -20) { const since7 = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(); const { data: rDrop5 } = await sb.from("signal_events").select("id").eq("ticker", ticker).eq("signal_type", "fav_big_drop_5d").gte("detected_at", since7).limit(1); if (!rDrop5 || rDrop5.length === 0) { const id = await insertSignal(sb, { ticker, signal_type: "fav_big_drop_5d", severity: "red", title: `⭐ ${ticker} -${Math.abs(summary.pct_change_5d).toFixed(1)}% deze week (favoriet)`, detail: `Koers $${last.close.toFixed(2)}. Weekverlies bij een favoriet.`, payload: { pct: summary.pct_change_5d, last_close: last.close }, expires_at: expires7, dedup_key: `fav_big_drop_5d:${ticker}:${today}` }); if (id) signalsInserted++; } }
+        if (hasLimit) {
+          if (last.close <= buyLimit!) { const id = await insertSignal(sb, { ticker, signal_type: "fav_buy_limit_hit", severity: "red", title: `⭐ ${ticker} onder aankooplimiet $${buyLimit!.toFixed(2)} (favoriet)`, detail: `Koers $${last.close.toFixed(2)} — onder jouw limiet. Koopmoment?`, payload: { last_close: last.close, buy_limit: buyLimit }, expires_at: expires7, dedup_key: `fav_buy_limit_hit:${ticker}:${today}` }); if (id) signalsInserted++; }
+          else { const abovePct = ((last.close - buyLimit!) / buyLimit!) * 100; if (abovePct <= 10) { const since7 = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(); const { data: rNear } = await sb.from("signal_events").select("id").eq("ticker", ticker).eq("signal_type", "fav_near_buy_limit").gte("detected_at", since7).limit(1); if (!rNear || rNear.length === 0) { const id = await insertSignal(sb, { ticker, signal_type: "fav_near_buy_limit", severity: "orange", title: `⭐ ${ticker} +${abovePct.toFixed(1)}% boven aankooplimiet (favoriet)`, detail: `Koers $${last.close.toFixed(2)}, limiet $${buyLimit!.toFixed(2)}. Bijna koopbaar.`, payload: { last_close: last.close, buy_limit: buyLimit, above_pct: abovePct }, expires_at: expires7, dedup_key: `fav_near_buy_limit:${ticker}:${today}` }); if (id) signalsInserted++; } } }
+        }
+      }
+
+      // === #50: hoog dividendrendement (score ≥65, bruto yield >6%) ===
+      if (typeof score === "number" && score >= 65 && divYield > 0.06) { const since180 = new Date(now - 180 * 24 * 60 * 60 * 1000).toISOString(); const { data: rDiv } = await sb.from("signal_events").select("id").eq("ticker", ticker).eq("signal_type", "high_div_yield").gte("detected_at", since180).limit(1); if (!rDiv || rDiv.length === 0) { const id = await insertSignal(sb, { ticker, signal_type: "high_div_yield", severity: "yellow", title: `${ticker} dividendrendement ${(divYield * 100).toFixed(1)}% (score ${score})`, detail: `Bruto yield ${(divYield * 100).toFixed(1)}% bij koers $${last.close.toFixed(2)}. Gecombineerd met score ≥65.`, payload: { div_yield: divYield, score, last_close: last.close }, expires_at: expires180, dedup_key: `high_div_yield:${ticker}:${today}` }); if (id) signalsInserted++; } }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const newFail = failCount + 1;
