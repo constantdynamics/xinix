@@ -196,7 +196,6 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
             className="w-full block cursor-crosshair touch-none"
-            style={{ height: "15rem" }}
             onMouseMove={handleMouseMove}
             onMouseLeave={() => setHoverIdx(null)}
             onTouchStart={handleTouchStart}
@@ -628,20 +627,34 @@ function ReviewCard({
 
       {/* Actieknoppen onderin — altijd zichtbaar, geen scrollen nodig */}
       <div className="space-y-2 pt-2 border-t border-ink-5">
-        {/* Hart — rood zodat het direct als 'favoriet' herkenbaar is */}
-        <button
-          onClick={() => onAction("heart")}
-          className={
-            "w-full flex items-center justify-center gap-2 py-3 rounded-xl text-base font-bold border-2 transition-all " +
-            (isFav
-              ? "border-[#ff1a1a] text-[#ff1a1a] bg-[#ff1a1a]/10 hover:bg-[#ff1a1a]/20"
-              : "border-ink-5 text-neutral-400 hover:border-[#ff1a1a] hover:text-[#ff1a1a] hover:bg-[#ff1a1a]/5")
-          }
-          style={isFav ? { textShadow: "0 0 4px rgba(255,26,26,0.5)" } : undefined}
-        >
-          <HeartSvg filled={isFav} />
-          {isFav ? "Favoriet (klik om te verwijderen)" : "Favoriet"}
-        </button>
+        {/* Favoriet + Gezien op één rij */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => onAction("heart")}
+            className={
+              "flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border-2 transition-all " +
+              (isFav
+                ? "border-[#ff1a1a] text-[#ff1a1a] bg-[#ff1a1a]/10 hover:bg-[#ff1a1a]/20"
+                : "border-ink-5 text-neutral-400 hover:border-[#ff1a1a] hover:text-[#ff1a1a] hover:bg-[#ff1a1a]/5")
+            }
+            style={isFav ? { textShadow: "0 0 4px rgba(255,26,26,0.5)" } : undefined}
+          >
+            <HeartSvg filled={isFav} />
+            Favoriet
+          </button>
+          <button
+            onClick={() => onAction("seen")}
+            className={
+              "flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border-2 transition-all " +
+              (isSeen
+                ? "border-fog-lime text-fog-lime bg-fog-lime/10 hover:bg-fog-lime/20"
+                : "border-ink-5 text-neutral-400 hover:border-fog-lime hover:text-fog-lime hover:bg-fog-lime/5")
+            }
+          >
+            <span className="text-base">🔭</span>
+            {isSeen ? "Gezien" : "Markeer gezien"}
+          </button>
+        </div>
 
         {/* Sterren */}
         <div className="flex gap-1.5">
@@ -662,20 +675,6 @@ function ReviewCard({
             </button>
           ))}
         </div>
-
-        {/* Gezien */}
-        <button
-          onClick={() => onAction("seen")}
-          className={
-            "w-full flex items-center justify-center gap-2 py-3 rounded-xl text-base font-bold border-2 transition-all " +
-            (isSeen
-              ? "border-fog-lime text-fog-lime bg-fog-lime/10 hover:bg-fog-lime/20"
-              : "border-ink-5 text-neutral-400 hover:border-fog-lime hover:text-fog-lime hover:bg-fog-lime/5")
-          }
-        >
-          <span className="text-lg">🔭</span>
-          {isSeen ? "Gezien (klik om te wissen)" : "Markeer als gezien"}
-        </button>
       </div>
     </div>
   );
@@ -739,13 +738,13 @@ function ReviewModeModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-3 pb-3 bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-4 px-3 pb-3 bg-black/80 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         className="w-full max-w-md bg-ink-2 border border-ink-5 rounded-2xl shadow-2xl flex flex-col"
         style={{
-          maxHeight: "min(calc(100vh - 5rem), 720px)",
+          maxHeight: "min(calc(100vh - 1rem), 820px)",
           borderColor: "color-mix(in srgb, #cc00ff 30%, #262626)",
         }}
         onClick={(e) => e.stopPropagation()}
