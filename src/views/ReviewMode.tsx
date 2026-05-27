@@ -853,6 +853,7 @@ function ReviewModeModal({
           {/* Stap 2: Review card */}
           {selectedList && currentItem && !isDone && (
             <ReviewCard
+              key={queueIdx}
               item={currentItem}
               idx={queueIdx}
               total={queue.length}
