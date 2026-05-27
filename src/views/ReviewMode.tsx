@@ -401,9 +401,20 @@ function buildQueue(
           last_close: s.last_close,
           dividend_yield_pct: s.dividend_yield_pct,
         }));
-    case "watchlist":
+    case "watchlist": {
       return (data?.cards ?? [])
         .filter((c) => notReviewed(c.ticker))
+        .filter((c) => {
+          // Medaille-filter: ≥1 goud OF ≥2 zilver (5j) OF ≥3 brons (5j als proxy voor 1j)
+          const medalOK = (c.medal_gold ?? 0) >= 1 || (c.medal_silver ?? 0) >= 2 || (c.medal_bronze ?? 0) >= 3;
+          if (!medalOK) return false;
+          // Limiet-filter: moet buy_limit hebben; prijs op/onder/binnen 20% boven limiet
+          const limit = c.buy_limit ?? null;
+          if (!limit) return false;
+          const price = c.summary?.last_close ?? null;
+          if (price === null) return true; // limiet gezet maar nog geen prijs → toon
+          return price <= limit * 1.20;
+        })
         .map((c) => ({
           ticker: c.ticker,
           company: c.company,
@@ -413,9 +424,10 @@ function buildQueue(
           medal_silver: c.medal_silver,
           medal_bronze: c.medal_bronze,
           buy_limit: c.buy_limit ?? null,
-          last_close: null,
+          last_close: c.summary?.last_close ?? null,
           dividend_yield_pct: c.dividend_yield ?? null,
         }));
+    }
   }
 }
 
