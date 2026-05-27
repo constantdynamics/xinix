@@ -121,13 +121,13 @@ Deno.serve(runBackground("poll-prices", async () => {
   ].join(",");
   const { data: queue, error: qErr } = await sb
     .from("signal_tickers")
-    .select("ticker, buy_limit, price_fail_count, exchange, score")
+    .select("ticker, buy_limit, price_fail_count, exchange, goud_score")
     .eq("active", true)
     .eq("price_benched", false)
     .or(orClause)
     .order("price_polled_at", { ascending: true, nullsFirst: true })
     .limit(BATCH_SIZE);
-  if (qErr) throw qErr;
+  if (qErr) throw new Error((qErr as { message?: string }).message ?? String(qErr));
   if (!queue || queue.length === 0) return { ok: true, message: "queue leeg (open markten: " + openExchanges.length + ")" };
   const { data: extremes } = await sb.from("signal_price_summary").select("ticker, high_1y");
   const high1yByTicker = new Map<string, number | null>();
@@ -143,7 +143,7 @@ Deno.serve(runBackground("poll-prices", async () => {
     const ticker = tk.ticker as string;
     const buyLimit = (tk as { buy_limit?: number | null }).buy_limit ?? null;
     const hasLimit = typeof buyLimit === "number" && buyLimit > 0;
-    const score = (tk as { score?: number | null }).score ?? null;
+    const score = (tk as { goud_score?: number | null }).goud_score ?? null;
     const isFav = favSet.has(ticker);
     const failCount = (tk as { price_fail_count?: number }).price_fail_count ?? 0;
     scanned++;
