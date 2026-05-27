@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchPriceHistory, type PriceHistory, type PriceRange } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
+import { computeTop3Swings } from "../chartUtils";
 
 interface Props {
   ticker: string;
@@ -20,10 +21,14 @@ const RANGES: { key: PriceRange; label: string; full: string }[] = [
 
 // Grafiek-geometrie (SVG viewBox-coördinaten — schaalt mee met de container).
 const W = 760;
-const H = 320;
-const PAD = { l: 68, r: 16, t: 16, b: 36 };
+const H = 406;
+const PAD = { l: 68, r: 16, t: 96, b: 36 };
 const PLOT_W = W - PAD.l - PAD.r;
 const PLOT_H = H - PAD.t - PAD.b;
+// Label-rijen boven de grafiek (in SVG-coördinaten)
+const ROW1 = 22;  // piek (groen)
+const ROW2 = 56;  // verschil (wit)
+const ROW3 = 88;  // low (rood)
 
 const GAIN = "#1ae85a";
 const LOSS = "#ff1a1a";
@@ -56,6 +61,9 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [shownSwings, setShownSwings] = useState<Set<number>>(new Set([0]));
+
+  useEffect(() => { setShownSwings(new Set([0])); }, [ticker, range]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -109,8 +117,13 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
       const i = Math.round((k / (labelCount - 1)) * (n - 1));
       return { i, x: x(i), text: fmtAxisDate(pts[i].t, range) };
     });
-    return { pts, n, x, y, line, area, first, last, change, changePct, up, ticks, xLabels, refY: y(first) };
+    return { pts, n, x, y, line, area, first, last, change, changePct, up, ticks, xLabels, refY: y(first), closes };
   }, [history, range]);
+
+  const top3 = useMemo(() => {
+    if (!chart) return [];
+    return computeTop3Swings(chart.closes, chart.pts, range);
+  }, [chart, range]);
 
   const lineColor = chart ? (chart.up ? GAIN : LOSS) : GAIN;
   const gradId = `chart-grad-${ticker.replace(/[^A-Za-z0-9]/g, "")}`;
@@ -204,16 +217,39 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
           {loading && <span className="text-xs text-neutral-500 ml-1 animate-pulse">laden…</span>}
         </div>
 
+        {/* Schakelknoppen voor top-3 stijgingen */}
+        {top3.length > 0 && (
+          <div className="px-5 pt-2 flex gap-2 flex-wrap">
+            {top3.map((sw, si) => (
+              <button
+                key={si}
+                onClick={() => setShownSwings((prev) => {
+                  const next = new Set(prev);
+                  next.has(si) ? next.delete(si) : next.add(si);
+                  return next;
+                })}
+                className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${
+                  shownSwings.has(si)
+                    ? "border-emerald-500/60 text-emerald-400 bg-emerald-500/10"
+                    : "border-ink-5 text-neutral-500 hover:text-neutral-300"
+                }`}
+              >
+                #{si + 1} +{sw.pct.toFixed(0)}%
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Grafiek */}
         <div className="p-5 pt-3">
           <div className="relative">
             {error ? (
-              <div className="h-[320px] flex items-center justify-center text-sm text-fog-loss text-center px-6">
+              <div className="h-[406px] flex items-center justify-center text-sm text-fog-loss text-center px-6">
                 Koersdata niet beschikbaar.<br />
                 <span className="text-neutral-500 text-xs">{error}</span>
               </div>
             ) : !chart ? (
-              <div className="h-[320px] flex items-center justify-center text-sm text-neutral-500">
+              <div className="h-[406px] flex items-center justify-center text-sm text-neutral-500">
                 {loading ? "Koersgrafiek laden…" : "Te weinig koersdata voor dit venster."}
               </div>
             ) : (
@@ -253,6 +289,33 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
                 {/* Vlak + lijn */}
                 <path d={chart.area} fill={`url(#${gradId})`} />
                 <path d={chart.line} fill="none" stroke={lineColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+
+                {/* Top-3 stijgingen: ROW1=piek, ROW2=verschil, ROW3=low */}
+                {top3.map((sw, si) => {
+                  if (!shownSwings.has(si)) return null;
+                  const lxn = Math.min(Math.max(chart.x(sw.lowIdx), PAD.l + 28), W - PAD.r - 28);
+                  const hxn = Math.min(Math.max(chart.x(sw.highIdx), PAD.l + 28), W - PAD.r - 28);
+                  const lyn = chart.y(chart.closes[sw.lowIdx]);
+                  const hyn = chart.y(chart.closes[sw.highIdx]);
+                  const midX = Math.min(Math.max((lxn + hxn) / 2, PAD.l + 50), W - PAD.r - 50);
+                  return (
+                    <g key={si}>
+                      <line x1={hxn} y1={hyn} x2={hxn} y2={PAD.t} stroke="#44dd88" strokeWidth="1.2" strokeOpacity="0.45" strokeDasharray="3,5" />
+                      <circle cx={hxn} cy={hyn} r="5" fill="#44dd88" stroke="#111" strokeWidth="2" />
+                      <text x={hxn} y={ROW1} textAnchor="middle" fill="#44dd88" fontSize="18" fontFamily="monospace" fontWeight="bold">
+                        {"$" + fmtPrice(chart.closes[sw.highIdx])}
+                      </text>
+                      <text x={midX} y={ROW2} textAnchor="middle" fill="#ffffff" fontSize="16" fontFamily="monospace">
+                        {"+" + sw.pct.toFixed(0) + "% in " + sw.dur}
+                      </text>
+                      <line x1={lxn} y1={lyn} x2={lxn} y2={PAD.t} stroke="#ff5555" strokeWidth="1.2" strokeOpacity="0.45" strokeDasharray="3,5" />
+                      <circle cx={lxn} cy={lyn} r="5" fill="#ff5555" stroke="#111" strokeWidth="2" />
+                      <text x={lxn} y={ROW3} textAnchor="middle" fill="#ff5555" fontSize="18" fontFamily="monospace" fontWeight="bold">
+                        {"$" + fmtPrice(chart.closes[sw.lowIdx])}
+                      </text>
+                    </g>
+                  );
+                })}
 
                 {/* Hover-crosshair */}
                 {hover && hoverIdx != null && (
