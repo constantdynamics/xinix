@@ -103,7 +103,10 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
   const [pts, setPts] = useState<{ t: number; c: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [shownSwings, setShownSwings] = useState<Set<number>>(new Set([0]));
   const svgRef = useRef<SVGSVGElement>(null);
+
+  useEffect(() => { setShownSwings(new Set([0])); }, [ticker, range]);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,12 +122,10 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
   // SVG layout constants
   const W = 560;
-  const H = 222;
-  const PAD = { l: 50, r: 6, t: 60, b: 30 };
-  // Vaste y-posities van de 3 label-rijen boven de grafiek
-  const ROW1 = 14;  // hoogtepunten (groen)
-  const ROW2 = 33;  // groei % + duur (low→high)
-  const ROW3 = 52;  // dieptepunten (rood)
+  const H = 192;
+  const PAD = { l: 50, r: 6, t: 44, b: 30 };
+  const ROW1 = 17;  // high- en low-waarden
+  const ROW2 = 33;  // groei % + duur
   const PW = W - PAD.l - PAD.r;
   const PH = H - PAD.t - PAD.b;
 
@@ -154,14 +155,14 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
   function chartBody() {
     if (loading) {
       return (
-        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600 animate-pulse" style={{ height: "14rem" }}>
+        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600 animate-pulse" style={{ height: "12rem" }}>
           grafiek laden…
         </div>
       );
     }
     if (pts.length < 2) {
       return (
-        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600" style={{ height: "14rem" }}>
+        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600" style={{ height: "12rem" }}>
           geen koersdata
         </div>
       );
@@ -192,9 +193,22 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
     // X-as: 5 labels
     const xTicks = Array.from({ length: 5 }, (_, i) => Math.round(i * (pts.length - 1) / 4));
 
-    // Zigzag extrema
+    // Zigzag extrema → top-3 stijgingen (low→high, gesorteerd op %)
     const minSwing = ZIGZAG_SWING[range] ?? 0;
     const zigzag = minSwing > 0 ? findZigzag(closes, minSwing) : [];
+    const allSwings: { lowIdx: number; highIdx: number; pct: number; dur: string }[] = [];
+    for (let i = 1; i < zigzag.length; i++) {
+      const a = zigzag[i - 1], b = zigzag[i];
+      if (a.type === "low" && b.type === "high") {
+        allSwings.push({
+          lowIdx: a.idx, highIdx: b.idx,
+          pct: (closes[b.idx] - closes[a.idx]) / closes[a.idx] * 100,
+          dur: fmtDuration(pts[b.idx].t - pts[a.idx].t),
+        });
+      }
+    }
+    allSwings.sort((a, b) => b.pct - a.pct);
+    const top3 = allSwings.slice(0, 3);
 
     // Hover punt
     const hPt = hoverIdx !== null ? pts[hoverIdx] : null;
@@ -208,12 +222,34 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
     return (
       <>
+        {/* Schakelknoppen voor top-3 stijgingen */}
+        {top3.length > 0 && (
+          <div className="flex gap-1 justify-center mb-1">
+            {top3.map((sw, si) => (
+              <button
+                key={si}
+                onClick={() => setShownSwings((prev) => {
+                  const next = new Set(prev);
+                  next.has(si) ? next.delete(si) : next.add(si);
+                  return next;
+                })}
+                className={`px-2.5 py-0.5 rounded text-[11px] font-bold transition-colors border ${
+                  shownSwings.has(si)
+                    ? "bg-neutral-200/10 text-fog-lime border-fog-lime/40"
+                    : "text-neutral-500 border-ink-5 hover:text-neutral-300"
+                }`}
+              >
+                #{si + 1} +{sw.pct.toFixed(0)}%
+              </button>
+            ))}
+          </div>
+        )}
         <div className="relative w-full">
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
             className="w-full block cursor-crosshair touch-none"
-            style={{ height: "14rem" }}
+            style={{ height: "12rem" }}
             onMouseMove={handleMouseMove}
             onMouseLeave={() => setHoverIdx(null)}
             onTouchStart={handleTouchStart}
@@ -254,40 +290,32 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
               </text>
             ))}
 
-            {/* Zigzag extrema: rij 1 = highs, rij 2 = groei%, rij 3 = lows */}
-            {zigzag.map(({ idx, type }, zi) => {
-              const xn = cx(idx);
-              const yn = cy(closes[idx]);
-              const isLow = type === "low";
-              const dotColor = isLow ? "#ff5555" : "#44dd88";
-              // Groei-annotatie voor high die direct volgt op een low
-              const prev = zi > 0 ? zigzag[zi - 1] : null;
-              const hasGrowth = !isLow && prev?.type === "low";
-              const growthPct = hasGrowth
-                ? ((closes[idx] - closes[prev!.idx]) / closes[prev!.idx]) * 100
-                : null;
-              const growthDur = hasGrowth ? fmtDuration(pts[idx].t - pts[prev!.idx].t) : null;
-              const growthX = hasGrowth
-                ? Math.min(Math.max((cx(prev!.idx) + xn) / 2, PAD.l + 30), W - PAD.r - 30)
-                : null;
-              // Clamp x zodat labels niet buiten de grafiek vallen
-              const labelX = Math.min(Math.max(xn, PAD.l + 18), W - PAD.r - 18);
+            {/* Top-3 stijgingen: elk met low-dot, high-dot, stippellijnen en labels */}
+            {top3.map((sw, si) => {
+              if (!shownSwings.has(si)) return null;
+              const lxn = Math.min(Math.max(cx(sw.lowIdx), PAD.l + 20), W - PAD.r - 20);
+              const hxn = Math.min(Math.max(cx(sw.highIdx), PAD.l + 20), W - PAD.r - 20);
+              const lyn = cy(closes[sw.lowIdx]);
+              const hyn = cy(closes[sw.highIdx]);
+              const midX = Math.min(Math.max((lxn + hxn) / 2, PAD.l + 36), W - PAD.r - 36);
               return (
-                <g key={"zz-" + idx + "-" + type}>
-                  {/* Verticale stippellijn van dot naar bovenkant grafiekgebied */}
-                  <line x1={xn} y1={yn} x2={xn} y2={PAD.t} stroke={dotColor} strokeWidth="1" strokeOpacity="0.4" strokeDasharray="2,4" />
-                  {/* Dot */}
-                  <circle cx={xn} cy={yn} r="4" fill={dotColor} stroke="#111" strokeWidth="1.5" />
-                  {/* Rij 1: high-waarde (groen) — Rij 3: low-waarde (rood) */}
-                  <text x={labelX} y={isLow ? ROW3 : ROW1} textAnchor="middle" fill={dotColor} fontSize="14" fontFamily="monospace" fontWeight="bold">
-                    {"$" + fmtYLabel(closes[idx])}
+                <g key={si}>
+                  {/* Low: stippellijn + dot + waarde */}
+                  <line x1={lxn} y1={lyn} x2={lxn} y2={PAD.t} stroke="#ff5555" strokeWidth="1" strokeOpacity="0.45" strokeDasharray="2,4" />
+                  <circle cx={lxn} cy={lyn} r="4" fill="#ff5555" stroke="#111" strokeWidth="1.5" />
+                  <text x={lxn} y={ROW1} textAnchor="middle" fill="#ff5555" fontSize="14" fontFamily="monospace" fontWeight="bold">
+                    {"$" + fmtYLabel(closes[sw.lowIdx])}
                   </text>
-                  {/* Rij 2: groei % + duur (alleen voor low→high paren) */}
-                  {hasGrowth && growthPct !== null && growthX !== null && (
-                    <text x={growthX} y={ROW2} textAnchor="middle" fill="#88ffbb" fontSize="12" fontFamily="monospace">
-                      {"+" + growthPct.toFixed(0) + "% in " + growthDur}
-                    </text>
-                  )}
+                  {/* High: stippellijn + dot + waarde */}
+                  <line x1={hxn} y1={hyn} x2={hxn} y2={PAD.t} stroke="#44dd88" strokeWidth="1" strokeOpacity="0.45" strokeDasharray="2,4" />
+                  <circle cx={hxn} cy={hyn} r="4" fill="#44dd88" stroke="#111" strokeWidth="1.5" />
+                  <text x={hxn} y={ROW1} textAnchor="middle" fill="#44dd88" fontSize="14" fontFamily="monospace" fontWeight="bold">
+                    {"$" + fmtYLabel(closes[sw.highIdx])}
+                  </text>
+                  {/* Groei % + duur in rij 2 */}
+                  <text x={midX} y={ROW2} textAnchor="middle" fill="#88ffbb" fontSize="12" fontFamily="monospace">
+                    {"+" + sw.pct.toFixed(0) + "% in " + sw.dur}
+                  </text>
                 </g>
               );
             })}
