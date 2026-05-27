@@ -122,10 +122,11 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
   // SVG layout constants
   const W = 560;
-  const H = 192;
-  const PAD = { l: 50, r: 6, t: 44, b: 30 };
-  const ROW1 = 17;  // high- en low-waarden
-  const ROW2 = 33;  // groei % + duur
+  const H = 208;
+  const PAD = { l: 50, r: 6, t: 52, b: 30 };
+  const ROW1 = 13;  // piek (high, groen)
+  const ROW2 = 28;  // verschil (groei %, lichtgroen)
+  const ROW3 = 44;  // low (rood)
   const PW = W - PAD.l - PAD.r;
   const PH = H - PAD.t - PAD.b;
 
@@ -300,21 +301,21 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
               const midX = Math.min(Math.max((lxn + hxn) / 2, PAD.l + 36), W - PAD.r - 36);
               return (
                 <g key={si}>
-                  {/* Low: stippellijn + dot + waarde */}
-                  <line x1={lxn} y1={lyn} x2={lxn} y2={PAD.t} stroke="#ff5555" strokeWidth="1" strokeOpacity="0.45" strokeDasharray="2,4" />
-                  <circle cx={lxn} cy={lyn} r="4" fill="#ff5555" stroke="#111" strokeWidth="1.5" />
-                  <text x={lxn} y={ROW1} textAnchor="middle" fill="#ff5555" fontSize="14" fontFamily="monospace" fontWeight="bold">
-                    {"$" + fmtYLabel(closes[sw.lowIdx])}
-                  </text>
-                  {/* High: stippellijn + dot + waarde */}
+                  {/* ROW1: piek (high, groen) */}
                   <line x1={hxn} y1={hyn} x2={hxn} y2={PAD.t} stroke="#44dd88" strokeWidth="1" strokeOpacity="0.45" strokeDasharray="2,4" />
                   <circle cx={hxn} cy={hyn} r="4" fill="#44dd88" stroke="#111" strokeWidth="1.5" />
-                  <text x={hxn} y={ROW1} textAnchor="middle" fill="#44dd88" fontSize="14" fontFamily="monospace" fontWeight="bold">
+                  <text x={hxn} y={ROW1} textAnchor="middle" fill="#44dd88" fontSize="13" fontFamily="monospace" fontWeight="bold">
                     {"$" + fmtYLabel(closes[sw.highIdx])}
                   </text>
-                  {/* Groei % + duur in rij 2 */}
-                  <text x={midX} y={ROW2} textAnchor="middle" fill="#88ffbb" fontSize="12" fontFamily="monospace">
+                  {/* ROW2: verschil (groei %, gecentreerd) */}
+                  <text x={midX} y={ROW2} textAnchor="middle" fill="#88ffbb" fontSize="11" fontFamily="monospace">
                     {"+" + sw.pct.toFixed(0) + "% in " + sw.dur}
+                  </text>
+                  {/* ROW3: low (rood) */}
+                  <line x1={lxn} y1={lyn} x2={lxn} y2={PAD.t} stroke="#ff5555" strokeWidth="1" strokeOpacity="0.45" strokeDasharray="2,4" />
+                  <circle cx={lxn} cy={lyn} r="4" fill="#ff5555" stroke="#111" strokeWidth="1.5" />
+                  <text x={lxn} y={ROW3} textAnchor="middle" fill="#ff5555" fontSize="13" fontFamily="monospace" fontWeight="bold">
+                    {"$" + fmtYLabel(closes[sw.lowIdx])}
                   </text>
                 </g>
               );
