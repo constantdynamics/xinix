@@ -56,6 +56,40 @@ function fmtXLabel(ts: number, range: ChartRange): string {
   return d.toLocaleDateString("nl-NL", { month: "short", year: "2-digit" });
 }
 
+const ZIGZAG_SWING: Partial<Record<ChartRange, number>> = {
+  "1mo": 0.10, "6mo": 0.12, "1y": 0.15, "3y": 0.20, "5y": 0.25, "max": 0.25,
+};
+
+function findZigzag(closes: number[], minSwing: number): { idx: number; type: "low" | "high" }[] {
+  const n = closes.length;
+  if (n < 6) return [];
+  const win = Math.max(3, Math.floor(n / 20));
+  const extrema: { idx: number; val: number; type: "low" | "high" }[] = [];
+  for (let i = win; i < n - win; i++) {
+    const v = closes[i];
+    let isMin = true, isMax = true;
+    for (let j = i - win; j <= i + win; j++) {
+      if (j === i) continue;
+      if (closes[j] < v) isMin = false;
+      if (closes[j] > v) isMax = false;
+    }
+    if (isMin && v < closes[i - 1] && v < closes[i + 1]) extrema.push({ idx: i, val: v, type: "low" });
+    else if (isMax && v > closes[i - 1] && v > closes[i + 1]) extrema.push({ idx: i, val: v, type: "high" });
+  }
+  if (!extrema.length) return [];
+  const zz: typeof extrema = [extrema[0]];
+  for (let i = 1; i < extrema.length; i++) {
+    const cur = extrema[i];
+    const last = zz[zz.length - 1];
+    if (cur.type === last.type) {
+      if (cur.type === "low" ? cur.val < last.val : cur.val > last.val) zz[zz.length - 1] = cur;
+    } else if (Math.abs(cur.val - last.val) / last.val >= minSwing) {
+      zz.push(cur);
+    }
+  }
+  return zz.map(({ idx, type }) => ({ idx, type }));
+}
+
 function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | null }) {
   const [range, setRange] = useState<ChartRange>("1y");
   const [pts, setPts] = useState<{ t: number; c: number }[]>([]);
@@ -77,8 +111,8 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
   // SVG layout constants
   const W = 560;
-  const H = 148;
-  const PAD = { l: 44, r: 6, t: 6, b: 26 };
+  const H = 158;
+  const PAD = { l: 50, r: 6, t: 6, b: 30 };
   const PW = W - PAD.l - PAD.r;
   const PH = H - PAD.t - PAD.b;
 
@@ -108,14 +142,14 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
   function chartBody() {
     if (loading) {
       return (
-        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600 animate-pulse" style={{ height: "9rem" }}>
+        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600 animate-pulse" style={{ height: "10.5rem" }}>
           grafiek laden…
         </div>
       );
     }
     if (pts.length < 2) {
       return (
-        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600" style={{ height: "9rem" }}>
+        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600" style={{ height: "10.5rem" }}>
           geen koersdata
         </div>
       );
@@ -146,6 +180,10 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
     // X-as: 5 labels
     const xTicks = Array.from({ length: 5 }, (_, i) => Math.round(i * (pts.length - 1) / 4));
 
+    // Zigzag extrema
+    const minSwing = ZIGZAG_SWING[range] ?? 0;
+    const zigzag = minSwing > 0 ? findZigzag(closes, minSwing) : [];
+
     // Hover punt
     const hPt = hoverIdx !== null ? pts[hoverIdx] : null;
     const hx = hPt ? cx(hoverIdx!) : null;
@@ -163,7 +201,7 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
             className="w-full block cursor-crosshair touch-none"
-            style={{ height: "9.5rem" }}
+            style={{ height: "10.5rem" }}
             onMouseMove={handleMouseMove}
             onMouseLeave={() => setHoverIdx(null)}
             onTouchStart={handleTouchStart}
@@ -183,7 +221,7 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
               return (
                 <g key={i}>
                   <line x1={PAD.l} y1={yy} x2={W - PAD.r} y2={yy} stroke="#ffffff" strokeOpacity="0.07" strokeWidth="1" strokeDasharray="3,4" />
-                  <text x={PAD.l - 4} y={yy} textAnchor="end" dominantBaseline="middle" fill="#ccc" fontSize="11" fontFamily="monospace">
+                  <text x={PAD.l - 4} y={yy} textAnchor="end" dominantBaseline="middle" fill="#ccc" fontSize="13" fontFamily="monospace">
                     {fmtYLabel(v)}
                   </text>
                 </g>
@@ -199,10 +237,32 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
             {/* X-as labels */}
             {xTicks.map((idx) => (
-              <text key={idx} x={cx(idx).toFixed(1)} y={H - 5} textAnchor="middle" fill="#ccc" fontSize="11" fontFamily="sans-serif">
+              <text key={idx} x={cx(idx).toFixed(1)} y={H - 5} textAnchor="middle" fill="#ccc" fontSize="13" fontFamily="sans-serif">
                 {fmtXLabel(pts[idx].t, range)}
               </text>
             ))}
+
+            {/* Zigzag extrema: rode punten = dieptepunt voor stijging, groen = piek */}
+            {zigzag.map(({ idx, type }) => {
+              const xn = cx(idx);
+              const yn = cy(closes[idx]);
+              const val = closes[idx];
+              const label = "$" + fmtYLabel(val);
+              const isLow = type === "low";
+              const dotColor = isLow ? "#ff5555" : "#44dd88";
+              const LW = label.length * 6.2 + 6;
+              const lx = Math.min(Math.max(xn - LW / 2, PAD.l + 1), W - PAD.r - LW - 1);
+              const ly = isLow
+                ? Math.max(PAD.t + 13, yn - 18)
+                : Math.min(PAD.t + PH - 14, yn + 9);
+              return (
+                <g key={"zz-" + idx + "-" + type}>
+                  <rect x={lx} y={ly - 10} width={LW} height={12} rx="2" fill="#111" fillOpacity="0.9" />
+                  <text x={lx + LW / 2} y={ly} textAnchor="middle" fill={dotColor} fontSize="10" fontFamily="monospace" fontWeight="bold">{label}</text>
+                  <circle cx={xn} cy={yn} r="3.5" fill={dotColor} stroke="#111" strokeWidth="1.5" />
+                </g>
+              );
+            })}
 
             {/* Hover: verticale lijn + bolletje + tooltip */}
             {hPt && hx !== null && hy !== null && (
@@ -210,33 +270,33 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
                 <line x1={hx} y1={PAD.t} x2={hx} y2={PAD.t + PH} stroke="#ffffff" strokeOpacity="0.2" strokeWidth="1" strokeDasharray="2,3" />
                 <circle cx={hx} cy={hy} r="4" fill={color} stroke="#1a1a1a" strokeWidth="1.5" />
                 {/* Tooltip box */}
-                <g transform={`translate(${tooltipLeft ? hx - 8 : hx + 8},${Math.min(hy - 18, PAD.t + PH - 36)})`}>
+                <g transform={`translate(${tooltipLeft ? hx - 8 : hx + 8},${Math.min(hy - 18, PAD.t + PH - 38)})`}>
                   <rect
-                    x={tooltipLeft ? -82 : 0}
+                    x={tooltipLeft ? -86 : 0}
                     y="0"
-                    width="78"
-                    height="32"
+                    width="86"
+                    height="36"
                     rx="4"
                     fill="#111"
                     stroke="#444"
                     strokeWidth="1"
                   />
                   <text
-                    x={tooltipLeft ? -43 : 39}
-                    y="12"
+                    x={tooltipLeft ? -43 : 43}
+                    y="14"
                     textAnchor="middle"
                     fill="#fff"
-                    fontSize="10"
+                    fontSize="12"
                     fontFamily="sans-serif"
                   >
                     {fmtXLabel(hPt.t, range)}
                   </text>
                   <text
-                    x={tooltipLeft ? -43 : 39}
-                    y="26"
+                    x={tooltipLeft ? -43 : 43}
+                    y="30"
                     textAnchor="middle"
                     fill="#fff"
-                    fontSize="13"
+                    fontSize="15"
                     fontFamily="monospace"
                     fontWeight="bold"
                   >
@@ -260,7 +320,7 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
         </div>
 
         {/* Change % — update live bij hover */}
-        <div className="text-center text-[11px] font-semibold tabular-nums mt-0.5" style={{ color: changeColor }}>
+        <div className="text-center text-[13px] font-semibold tabular-nums mt-0.5" style={{ color: changeColor }}>
           {changeUp ? "+" : ""}{changePct.toFixed(1)}%
           {hPt
             ? <span className="text-neutral-500 font-normal"> op {fmtXLabel(hPt.t, range)}</span>
