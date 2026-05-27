@@ -56,6 +56,14 @@ function fmtXLabel(ts: number, range: ChartRange): string {
   return d.toLocaleDateString("nl-NL", { month: "short", year: "2-digit" });
 }
 
+function fmtDuration(secs: number): string {
+  const d = Math.round(secs / 86400);
+  if (d < 14) return `${d}d`;
+  if (d < 60) return `${Math.round(d / 7)}wk`;
+  if (d < 365) return `${Math.round(d / 30)}mnd`;
+  return `${(d / 365).toFixed(1)}j`;
+}
+
 const ZIGZAG_SWING: Partial<Record<ChartRange, number>> = {
   "1mo": 0.10, "6mo": 0.12, "1y": 0.15, "3y": 0.20, "5y": 0.25, "max": 0.25,
 };
@@ -111,8 +119,12 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
   // SVG layout constants
   const W = 560;
-  const H = 158;
-  const PAD = { l: 50, r: 6, t: 6, b: 30 };
+  const H = 222;
+  const PAD = { l: 50, r: 6, t: 60, b: 30 };
+  // Vaste y-posities van de 3 label-rijen boven de grafiek
+  const ROW1 = 14;  // hoogtepunten (groen)
+  const ROW2 = 33;  // groei % + duur (low→high)
+  const ROW3 = 52;  // dieptepunten (rood)
   const PW = W - PAD.l - PAD.r;
   const PH = H - PAD.t - PAD.b;
 
@@ -142,14 +154,14 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
   function chartBody() {
     if (loading) {
       return (
-        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600 animate-pulse" style={{ height: "10.5rem" }}>
+        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600 animate-pulse" style={{ height: "14rem" }}>
           grafiek laden…
         </div>
       );
     }
     if (pts.length < 2) {
       return (
-        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600" style={{ height: "10.5rem" }}>
+        <div className="w-full flex items-center justify-center text-[11px] text-neutral-600" style={{ height: "14rem" }}>
           geen koersdata
         </div>
       );
@@ -201,7 +213,7 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
             className="w-full block cursor-crosshair touch-none"
-            style={{ height: "10.5rem" }}
+            style={{ height: "14rem" }}
             onMouseMove={handleMouseMove}
             onMouseLeave={() => setHoverIdx(null)}
             onTouchStart={handleTouchStart}
@@ -242,24 +254,40 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
               </text>
             ))}
 
-            {/* Zigzag extrema: rode punten = dieptepunt voor stijging, groen = piek */}
-            {zigzag.map(({ idx, type }) => {
+            {/* Zigzag extrema: rij 1 = highs, rij 2 = groei%, rij 3 = lows */}
+            {zigzag.map(({ idx, type }, zi) => {
               const xn = cx(idx);
               const yn = cy(closes[idx]);
-              const val = closes[idx];
-              const label = "$" + fmtYLabel(val);
               const isLow = type === "low";
               const dotColor = isLow ? "#ff5555" : "#44dd88";
-              const LW = label.length * 6.2 + 6;
-              const lx = Math.min(Math.max(xn - LW / 2, PAD.l + 1), W - PAD.r - LW - 1);
-              const ly = isLow
-                ? Math.max(PAD.t + 13, yn - 18)
-                : Math.min(PAD.t + PH - 14, yn + 9);
+              // Groei-annotatie voor high die direct volgt op een low
+              const prev = zi > 0 ? zigzag[zi - 1] : null;
+              const hasGrowth = !isLow && prev?.type === "low";
+              const growthPct = hasGrowth
+                ? ((closes[idx] - closes[prev!.idx]) / closes[prev!.idx]) * 100
+                : null;
+              const growthDur = hasGrowth ? fmtDuration(pts[idx].t - pts[prev!.idx].t) : null;
+              const growthX = hasGrowth
+                ? Math.min(Math.max((cx(prev!.idx) + xn) / 2, PAD.l + 30), W - PAD.r - 30)
+                : null;
+              // Clamp x zodat labels niet buiten de grafiek vallen
+              const labelX = Math.min(Math.max(xn, PAD.l + 18), W - PAD.r - 18);
               return (
                 <g key={"zz-" + idx + "-" + type}>
-                  <rect x={lx} y={ly - 10} width={LW} height={12} rx="2" fill="#111" fillOpacity="0.9" />
-                  <text x={lx + LW / 2} y={ly} textAnchor="middle" fill={dotColor} fontSize="10" fontFamily="monospace" fontWeight="bold">{label}</text>
-                  <circle cx={xn} cy={yn} r="3.5" fill={dotColor} stroke="#111" strokeWidth="1.5" />
+                  {/* Verticale stippellijn van dot naar bovenkant grafiekgebied */}
+                  <line x1={xn} y1={yn} x2={xn} y2={PAD.t} stroke={dotColor} strokeWidth="1" strokeOpacity="0.4" strokeDasharray="2,4" />
+                  {/* Dot */}
+                  <circle cx={xn} cy={yn} r="4" fill={dotColor} stroke="#111" strokeWidth="1.5" />
+                  {/* Rij 1: high-waarde (groen) — Rij 3: low-waarde (rood) */}
+                  <text x={labelX} y={isLow ? ROW3 : ROW1} textAnchor="middle" fill={dotColor} fontSize="14" fontFamily="monospace" fontWeight="bold">
+                    {"$" + fmtYLabel(closes[idx])}
+                  </text>
+                  {/* Rij 2: groei % + duur (alleen voor low→high paren) */}
+                  {hasGrowth && growthPct !== null && growthX !== null && (
+                    <text x={growthX} y={ROW2} textAnchor="middle" fill="#88ffbb" fontSize="12" fontFamily="monospace">
+                      {"+" + growthPct.toFixed(0) + "% in " + growthDur}
+                    </text>
+                  )}
                 </g>
               );
             })}
