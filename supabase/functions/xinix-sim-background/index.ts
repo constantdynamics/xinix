@@ -32,8 +32,7 @@ function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r
 function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
 
 // ── Transactiekosten ──────────────────────────────────────────────────────────
-// Bron: _shared/constants.ts — wijzig daar, niet hier.
-import { TX_COST } from "../_shared/constants.ts";
+const TX_COST = 0.001;
 
 // ── Strategy config type ──────────────────────────────────────────────────────
 interface Cfg {
@@ -771,7 +770,7 @@ interface OpenPos {
   entry_signal_types: string[];
   partial_exits: Array<{ qty_sold: number; net_proceeds: number; at: string; reason: string }>;
 }
-interface TickerRow { ticker: string; sector: string | null; goud_score: number | null; buy_limit: number | null; medal_gold: number | null; is_hikkertje: boolean | null; is_poefie: boolean | null; dividend_yield: number | null; }
+interface TickerRow { ticker: string; sector: string | null; goud_score: number | null; buy_limit: number | null; medal_gold: number | null; is_hikkertje: boolean | null; is_poefie: boolean | null; dividend_yield: number | null; first_price_date: string | null; }
 interface SigRow { ticker: string; signal_type: string; severity: string; }
 
 Deno.serve(async (req) => {
@@ -822,7 +821,7 @@ async function run() {
     sb.from("xinix_strategy_positions")
       .select("id, strategy_id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, take_profit_price, entry_signal_types, partial_exits")
       .is("closed_at", null),
-    sb.from("signal_tickers").select("ticker, sector, goud_score, buy_limit, medal_gold, is_hikkertje, is_poefie, dividend_yield").eq("active", true).eq("price_benched", false),
+    sb.from("signal_tickers").select("ticker, sector, goud_score, buy_limit, medal_gold, is_hikkertje, is_poefie, dividend_yield, first_price_date").eq("active", true).eq("price_benched", false),
     sb.from("signal_price_summary").select("ticker, last_close"),
     sb.from("signal_events").select("ticker, signal_type, severity")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
@@ -882,6 +881,8 @@ async function run() {
     arr.push(s);
     sigsByTicker.set(s.ticker, arr);
   }
+
+  const twoYearsAgo = new Date(Date.now() - 2 * 365.25 * 24 * 3600 * 1000);
 
   // 3. Simuleer elke strategie
   const exits: Array<{ id: number; data: Record<string, unknown> }> = [];
@@ -1094,6 +1095,8 @@ async function run() {
         if (stillOpenTickers.has(t.ticker)) continue;
         if (cfg.sector !== "all" && t.sector !== cfg.sector) continue;
         if ((t.medal_gold ?? 0) < cfg.minGold) continue;
+        // Aandelen jonger dan 2 jaar overslaan (te weinig koershistorie)
+        if (t.first_price_date != null && new Date(t.first_price_date) > twoYearsAgo) continue;
         if (cfg.requireHikkertje && !t.is_hikkertje) continue;
         if (cfg.requireZwitserleven && !zwitserlevenSet.has(t.ticker)) continue;
         if (cfg.requirePoefie && !t.is_poefie) continue;
