@@ -119,21 +119,52 @@ Deno.serve(runBackground("poll-prices", async () => {
     ...openExchanges.map((e) => `exchange.eq.${e}`),
     "exchange.is.null",
   ].join(",");
-  const { data: queue, error: qErr } = await sb
-    .from("signal_tickers")
-    .select("ticker, buy_limit, price_fail_count, exchange, goud_score")
-    .eq("active", true)
-    .eq("price_benched", false)
-    .or(orClause)
-    .order("price_polled_at", { ascending: true, nullsFirst: true })
-    .limit(BATCH_SIZE);
-  if (qErr) throw new Error((qErr as { message?: string }).message ?? String(qErr));
-  if (!queue || queue.length === 0) return { ok: true, message: "queue leeg (open markten: " + openExchanges.length + ")" };
-  const { data: extremes } = await sb.from("signal_price_summary").select("ticker, high_1y");
+
+  // Laad favorieten en koers-extremen parallel vóór queue-opbouw zodat we
+  // favorieten altijd als eerste in de batch kunnen plaatsen (dagelijks vers).
+  const [{ data: favData }, { data: extremes }] = await Promise.all([
+    sb.from("xinix_favorites").select("ticker"),
+    sb.from("signal_price_summary").select("ticker, high_1y"),
+  ]);
   const high1yByTicker = new Map<string, number | null>();
   for (const r of extremes ?? []) high1yByTicker.set(r.ticker as string, ((r as { high_1y?: number | null }).high_1y) ?? null);
-  const { data: favData } = await sb.from("xinix_favorites").select("ticker");
   const favSet = new Set<string>((favData ?? []).map((f) => f.ticker as string));
+  const favTickers = Array.from(favSet);
+
+  // Poll-queue: favorieten altijd eerst (garandeert dagelijkse koersverversing),
+  // daarna resterende slots vullen met reguliere tickers (oudst gepollt eerst).
+  type QueueRow = { ticker: string; buy_limit: number | null; price_fail_count: number; exchange: string | null; goud_score: number | null };
+  let queue: QueueRow[] = [];
+  if (favTickers.length > 0) {
+    const { data: favQueue, error: fErr } = await sb
+      .from("signal_tickers")
+      .select("ticker, buy_limit, price_fail_count, exchange, goud_score")
+      .eq("active", true)
+      .eq("price_benched", false)
+      .in("ticker", favTickers)
+      .or(orClause)
+      .order("price_polled_at", { ascending: true, nullsFirst: true })
+      .limit(BATCH_SIZE);
+    if (fErr) throw new Error((fErr as { message?: string }).message ?? String(fErr));
+    queue = (favQueue ?? []) as QueueRow[];
+  }
+  const remaining = BATCH_SIZE - queue.length;
+  if (remaining > 0) {
+    const baseQuery = sb
+      .from("signal_tickers")
+      .select("ticker, buy_limit, price_fail_count, exchange, goud_score")
+      .eq("active", true)
+      .eq("price_benched", false)
+      .or(orClause)
+      .order("price_polled_at", { ascending: true, nullsFirst: true })
+      .limit(remaining);
+    const { data: regularQueue, error: rErr } = favTickers.length > 0
+      ? await baseQuery.not("ticker", "in", `(${favTickers.join(",")})`)
+      : await baseQuery;
+    if (rErr) throw new Error((rErr as { message?: string }).message ?? String(rErr));
+    queue = [...queue, ...((regularQueue ?? []) as QueueRow[])];
+  }
+  if (queue.length === 0) return { ok: true, message: "queue leeg (open markten: " + openExchanges.length + ")" };
 
   let scanned = 0, ok = 0, failed = 0, benched = 0, signalsInserted = 0;
   const errSamples: string[] = [];
