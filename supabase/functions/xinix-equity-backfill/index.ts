@@ -40,9 +40,11 @@ interface ParsedPosition {
   partials: Array<{ at: string; qty: number; net: number }>;
 }
 
-function ymd(s: string | null | undefined): string | null {
-  if (!s) return null;
-  return s.length >= 10 ? s.slice(0, 10) : s;
+function ymd(s: unknown): string | null {
+  if (s == null) return null;
+  if (s instanceof Date) return s.toISOString().slice(0, 10);
+  const str = String(s);
+  return str.length >= 10 ? str.slice(0, 10) : str || null;
 }
 
 function parsePosition(p: PositionRow): ParsedPosition {
@@ -114,6 +116,34 @@ function priceOnOrBefore(closes: Map<string, number>, date: string, fallback: nu
   return fallback;
 }
 
+// Markt-waarde per aandeel voor één positie op datum `date`.
+// - Gesloten positie met bekende closed_price: lineaire interpolatie van
+//   avg_price (op entry) naar closed_price (op close). Voorkomt Yahoo-glitches
+//   voor illiquide tickers en is consistent met wat de sim daadwerkelijk
+//   realiseerde bij close.
+// - Open positie of geen closed_price: Yahoo daily close, fallback avg_price.
+function markPriceFor(
+  ticker: string,
+  date: string,
+  avgPrice: number,
+  entryDate: string,
+  closedAt: string | null,
+  closedPrice: number | null,
+  closes: Map<string, number>,
+): number {
+  if (closedAt != null && closedPrice != null && entryDate) {
+    const startMs = Date.parse(entryDate);
+    const endMs = Date.parse(closedAt);
+    const dateMs = Date.parse(date);
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+      const frac = Math.max(0, Math.min(1, (dateMs - startMs) / (endMs - startMs)));
+      return avgPrice + frac * (closedPrice - avgPrice);
+    }
+    return avgPrice;
+  }
+  return priceOnOrBefore(closes, date, avgPrice);
+}
+
 interface EquityRow {
   strategy_id?: number;
   date: string;
@@ -158,7 +188,11 @@ function computeEquityRows(
         qty = 0;
       }
       if (qty > 0) {
-        const px = priceOnOrBefore(closesByTicker.get(pos.ticker) ?? new Map(), date, pos.avgPrice);
+        const px = markPriceFor(
+          pos.ticker, date, pos.avgPrice,
+          pos.entryDate, pos.closedAt, pos.closedPrice,
+          closesByTicker.get(pos.ticker) ?? new Map(),
+        );
         posVal += qty * px;
         posCount++;
       }
