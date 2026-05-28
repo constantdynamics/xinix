@@ -46,6 +46,7 @@ interface FavRow {
   exchange: string | null;
   score: number | null;
   last_close: number | null;
+  price_polled_at: string | null;
   buy_limit: number | null;
   above_limit_pct: number | null;
   dividend_yield: number | null;
@@ -74,6 +75,15 @@ function fmtPrice(v: number | null): string {
 function fmtYield(v: number | null): string {
   if (v == null || v <= 0) return "—";
   return `${(v * 100).toFixed(1)}%`;
+}
+
+// Geeft "Xd" als de koers meer dan 2 dagen oud is (mogelijk gemiste poll).
+function priceAge(polledAt: string | null): string | null {
+  if (!polledAt) return null;
+  const days = (Date.now() - new Date(polledAt).getTime()) / (1000 * 60 * 60 * 24);
+  if (days < 2) return null;
+  if (days < 30) return `${Math.floor(days)}d`;
+  return `${Math.floor(days / 30)}mnd`;
 }
 
 // Tabelkolommen voor de kolom-kiezer. Ticker is de vaste anker-kolom
@@ -222,6 +232,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         exchange: card?.exchange ?? p?.exchange ?? null,
         score: card?.goud_score ?? null,
         last_close,
+        price_polled_at: card?.price_polled_at ?? null,
         buy_limit,
         above_limit_pct,
         dividend_yield: card?.dividend_yield ?? null,
@@ -489,11 +500,28 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           Koers <span className="text-fog-lime text-[9px]">{sortArrow("last_close")}</span>
         </th>
       ),
-      td: (r) => (
-        <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
-          {r.last_close != null ? fmtPrice(r.last_close) : <span className="text-neutral-600">—</span>}
-        </td>
-      ),
+      td: (r) => {
+        const age = priceAge(r.price_polled_at);
+        return (
+          <td className="px-3 py-2 text-right font-mono tabular-nums">
+            {r.last_close != null ? (
+              <>
+                <span className="text-neutral-200">{fmtPrice(r.last_close)}</span>
+                {age && (
+                  <span
+                    className={`ml-1 text-[9px] ${parseInt(age) >= 7 ? "text-fog-loss" : "text-fog-warn"}`}
+                    title={r.price_polled_at ? `Gepollt op ${new Date(r.price_polled_at).toLocaleDateString("nl-NL")}` : undefined}
+                  >
+                    {age}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-neutral-600">—</span>
+            )}
+          </td>
+        );
+      },
     },
     above_limit_pct: {
       th: (
@@ -505,7 +533,9 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         <td className="px-3 py-2 text-right font-mono tabular-nums">
           {r.above_limit_pct != null ? (
             <span className={r.above_limit_pct <= 0 ? "text-fog-lime font-semibold" : r.above_limit_pct <= 10 ? "text-fog-warn" : "text-neutral-300"}>
-              {r.above_limit_pct <= 0 ? "✓ onder" : `+${r.above_limit_pct.toFixed(1)}%`}
+              {r.above_limit_pct < 0
+                ? `−${Math.abs(r.above_limit_pct).toFixed(1)}%`
+                : `+${r.above_limit_pct.toFixed(1)}%`}
             </span>
           ) : (
             <span className="text-neutral-600">—</span>
@@ -821,7 +851,9 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
             <div className="font-mono tabular-nums text-base font-bold leading-none">
               {r.above_limit_pct != null ? (
                 <span className={atOrUnder ? "text-fog-lime" : near ? "text-fog-warn" : "text-neutral-300"}>
-                  {atOrUnder ? "✓ onder limiet" : `+${r.above_limit_pct.toFixed(1)}%`}
+                  {r.above_limit_pct < 0
+                    ? `−${Math.abs(r.above_limit_pct).toFixed(1)}%`
+                    : `+${r.above_limit_pct.toFixed(1)}%`}
                 </span>
               ) : (
                 <span className="text-neutral-600 text-xs">geen limiet</span>
