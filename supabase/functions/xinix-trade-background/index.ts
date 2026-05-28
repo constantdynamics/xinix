@@ -44,8 +44,7 @@ function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r
 function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
 
 // TX_COST en RED_SEVERITY_QUALIFIES zijn niet instelbaar via de DB — zij blijven constant.
-// TX_COST komt uit _shared/constants.ts — wijzig daar, niet hier.
-import { TX_COST } from "../_shared/constants.ts";
+const TX_COST = 0.001;
 const RED_SEVERITY_QUALIFIES = true;
 
 const POSITIVE_SIGNAL_TYPES = new Set([
@@ -114,7 +113,7 @@ async function run(): Promise<RunResult> {
       .select("id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, entry_signal_types, entry_sector, partial_exits")
       .is("closed_at", null),
     sb.from("signal_price_summary").select("ticker, last_close"),
-    sb.from("signal_tickers").select("ticker, company, sector, goud_score, buy_limit, active, price_benched").eq("active", true).eq("price_benched", false),
+    sb.from("signal_tickers").select("ticker, company, sector, goud_score, buy_limit, active, price_benched, first_price_date").eq("active", true).eq("price_benched", false),
     sb.from("signal_events").select("ticker, signal_type, severity, detected_at")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
       .order("detected_at", { ascending: false }).limit(2000),
@@ -151,7 +150,7 @@ async function run(): Promise<RunResult> {
   }
   const allTickers = (tickersRes.data ?? []) as Array<{
     ticker: string; company: string | null; sector: string | null;
-    goud_score: number | null; buy_limit: number | null;
+    goud_score: number | null; buy_limit: number | null; first_price_date: string | null;
   }>;
   const signalsByTicker = new Map<string, Array<{ signal_type: string; severity: string }>>();
   for (const s of (signalsRes.data ?? [])) {
@@ -289,9 +288,12 @@ async function run(): Promise<RunResult> {
     signals: Array<{ signal_type: string; severity: string }>;
     rankScore: number; reason: string;
   }
+  const twoYearsAgo = new Date(Date.now() - 2 * 365.25 * 24 * 3600 * 1000);
   const candidates: Candidate[] = [];
   for (const t of allTickers) {
     if (openTickers.has(t.ticker)) continue;
+    // Aandelen jonger dan 2 jaar overslaan (te weinig koershistorie)
+    if (t.first_price_date != null && new Date(t.first_price_date) > twoYearsAgo) continue;
     const price = priceByTicker.get(t.ticker);
     if (price == null || price <= 0) continue;
     const score = t.goud_score ?? 0;

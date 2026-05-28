@@ -282,9 +282,11 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
   if (inQuietHours(s)) return { ok: true, message: "quiet hours; skipping" };
 
   // Genereer phoenix_near_limit events voor feniks-aandelen die op/onder aankooplimiet staan.
-  // Deduplicatie: max 1 event per ticker per 7 dagen.
+  // Deduplicatie: max 1 event per ticker per 30 dagen, tenzij de koers ≥10% verder gedaald is
+  // t.o.v. de koers bij de laatste melding (dan is het een wezenlijk nieuw signaal).
   const PHOENIX_THRESHOLD_PCT = 5; // notificeer wanneer ≤5% boven buy_limit (of eronder)
-  const PHOENIX_DEDUP_DAYS = 7;
+  const PHOENIX_DEDUP_DAYS = 30;
+  const PHOENIX_REPRICE_DROP_PCT = 10; // re-alert als koers ≥10% lager dan bij vorige melding
   let phoenixGenerated = 0;
   {
     const { data: phoenixTickers } = await sb
@@ -309,19 +311,36 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       const dedupSince = new Date(Date.now() - PHOENIX_DEDUP_DAYS * 24 * 3600 * 1000).toISOString();
       const { data: existing } = await sb
         .from("signal_events")
-        .select("ticker")
+        .select("ticker, payload, detected_at")
         .eq("signal_type", "phoenix_near_limit")
         .gte("detected_at", dedupSince)
-        .in("ticker", ptickers);
-      const alreadyNotified = new Set((existing ?? []).map((e) => e.ticker as string));
+        .in("ticker", ptickers)
+        .order("detected_at", { ascending: false });
+
+      // Meest recente event per ticker (+ de koers waarmee die melding werd gedaan)
+      const lastNotified = new Map<string, number | null>();
+      for (const e of existing ?? []) {
+        const t = e.ticker as string;
+        if (!lastNotified.has(t)) {
+          const payload = e.payload as { last_close?: number | null } | null;
+          lastNotified.set(t, payload?.last_close ?? null);
+        }
+      }
 
       for (const p of phoenixTickers) {
-        if (alreadyNotified.has(p.ticker as string)) continue;
         const lastClose = priceMap.get(p.ticker as string) ?? null;
         const buyLimit = p.buy_limit as number | null;
         if (lastClose == null || !buyLimit) continue;
         const abovePct = ((lastClose - buyLimit) / buyLimit) * 100;
         if (abovePct > PHOENIX_THRESHOLD_PCT) continue;
+
+        // Skip als er een recente melding was EN de koers niet significant verder gedaald is.
+        if (lastNotified.has(p.ticker as string)) {
+          const prevClose = lastNotified.get(p.ticker as string) ?? null;
+          if (prevClose == null) continue; // legacy event zonder koerspayload → conservatief: skip
+          const dropPct = ((prevClose - lastClose) / prevClose) * 100;
+          if (dropPct < PHOENIX_REPRICE_DROP_PCT) continue;
+        }
 
         const direction = abovePct <= 0 ? "onder" : "dicht bij";
         const pctStr = abovePct <= 0
@@ -335,6 +354,7 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
           severity: "orange",
           title: `${p.ticker} · Feniks ${direction} aankooplimiet · ${pctStr}`,
           detail: `Koers: ${priceStr} · Aankooplimiet: ${limitStr} · Dit aandeel heeft ooit ≥50× gestegen.`,
+          payload: { last_close: lastClose },
         });
         phoenixGenerated++;
       }

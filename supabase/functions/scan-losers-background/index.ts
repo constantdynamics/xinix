@@ -289,6 +289,7 @@ Deno.serve(runBackground("scan-losers", async () => {
     gold: number; silver: number; bronze: number; bronze1y: number;
     changePct: number | null; low5y: number | null; isPhoenix: boolean;
     isHighQuality: boolean; // voldoet aan notificatiedrempel (≥2g of ≥3s of ≥4b1y)
+    firstPriceDate: string | null;
   }> = [];
   let checked = 0;
   const yahooErrors: string[] = [];
@@ -319,6 +320,7 @@ Deno.serve(runBackground("scan-losers", async () => {
           yahoo: c.yahoo, gfBase: c.gfBase, tvExch: c.tvExch, name: c.name,
           sector: inferSector(c.name), ...medals, bronze1y: medals1y.bronze,
           changePct: c.changePct, low5y, isPhoenix: phoenixOk, isHighQuality,
+          firstPriceDate: bars[0]?.date ?? null,
         });
       }
     } catch (e) {
@@ -342,6 +344,7 @@ Deno.serve(runBackground("scan-losers", async () => {
         exchange,
         buy_limit: smartLimit,
         is_phoenix: g.isPhoenix,
+        first_price_date: g.firstPriceDate ?? null,
         notes: `Auto-toegevoegd: biggest-loser-van-de-dag met ${g.gold}× goud + ${g.silver}× zilver (5y koers-runs)${g.changePct != null ? ` — dag ${g.changePct.toFixed(1)}%` : ""}.`,
       };
     });
