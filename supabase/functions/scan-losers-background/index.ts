@@ -67,6 +67,14 @@ const NOTIFY_MIN_GOLD = 2;   // ≥2 goud
 const NOTIFY_MIN_SILVER = 3; // of ≥3 zilver
 const NOTIFY_MIN_BRONZE_1Y = 4; // of ≥4 brons in het afgelopen jaar
 
+// Minimum koers voor medaille-kwalificatie. Onder ~$0,05 zijn percentage-runs
+// betekenisloos: één tick of afrondingsstap is al tientallen procenten, en een
+// reverse split/consolidatie ziet er in de ruwe close uit als een explosieve
+// rally → nep-goud op sub-penny shells (zoals VOX.L à $0,0017) zonder enig
+// verhandelbaar rendement. Het medaille-track-record is daar simpelweg niet
+// betrouwbaar, dus die kandidaten gaan noch de watchlist in, noch pingen ze.
+const MIN_MEDAL_PRICE = 0.05;
+
 // TradingView exchange-prefix -> Yahoo suffix ("" = US, geen suffix).
 // Bewust GEEN OTC/PINK: dat zijn de gemanipuleerde pink-sheet shells.
 const TV_EXCHANGE_TO_YAHOO_SUFFIX: Record<string, string> = {
@@ -303,13 +311,16 @@ Deno.serve(runBackground("scan-losers", async () => {
       const medals = countMedals(bars5y);
       const lastClose = bars[bars.length - 1]?.close ?? 0;
       const medals1y = countMedals(bars.slice(-52));
-      const bronze1yOk = medals1y.bronze >= MIN_BRONZE_1Y && lastClose >= 0.05;
+      const bronze1yOk = medals1y.bronze >= MIN_BRONZE_1Y;
       const phoenixOk = hasPhoenixRun(bars, 50);
-      const qualifiesForWatchlist = (medals.gold >= MIN_GOLD && medals.silver >= MIN_SILVER)
+      // Sub-penny aandelen overslaan: hun medailles/feniks-runs zijn ruis-artefacten
+      // (zie MIN_MEDAL_PRICE). Geldt voor álle kwalificatie-routes.
+      const qualifiesForWatchlist = lastClose >= MIN_MEDAL_PRICE && (
+              (medals.gold >= MIN_GOLD && medals.silver >= MIN_SILVER)
               || medals.gold >= MIN_GOLD_ALT
               || medals.silver >= MIN_SILVER_ALT
               || bronze1yOk
-              || phoenixOk;
+              || phoenixOk);
       if (qualifiesForWatchlist) {
         const low5y = bars5y.length ? Math.min(...bars5y.map((b) => b.close)) : null;
         // Notificatiedrempel: alleen hoge kwaliteit (≥2g OF ≥3s OF ≥4b1y)
