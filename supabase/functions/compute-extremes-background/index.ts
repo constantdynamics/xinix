@@ -109,8 +109,18 @@ Deno.serve(runBackground("compute-extremes", async () => {
   if (todo.length === 0) return { ok: true, message: "alle extremes zijn vers" };
 
   const batch = todo.slice(0, MAX_PER_RUN);
-  let updated = 0, failed = 0, processed = 0;
+  let updated = 0, failed = 0, processed = 0, notFound = 0;
   const errors: string[] = [];
+  // "Yahoo kent de ticker niet" (404 / geen result / lege reeks) is geen échte
+  // fout maar een permanente eigenschap. Die tickers stempelen we als
+  // 'gecontroleerd' (last_extremes_at = nu) zodat ze 7 dagen met rust worden
+  // gelaten i.p.v. elke 30 min opnieuw te proberen en de job permanent rood te
+  // maken. Echt benchen laten we aan poll-prices (na 3 fouten) — zo bencht een
+  // tijdelijke Yahoo-hik nooit per ongeluk een goede ticker voorgoed.
+  const isNotFound = (msg: string) => /HTTP 404/.test(msg) || /no result/i.test(msg);
+  const markChecked = async (ticker: string) => {
+    await sb.from("signal_price_summary").upsert({ ticker, last_extremes_at: new Date().toISOString() }, { onConflict: "ticker" });
+  };
   const now = new Date();
   const oneYearAgo = new Date(now.getTime() - 365 * 86400000);
   const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 86400000);
@@ -120,7 +130,7 @@ Deno.serve(runBackground("compute-extremes", async () => {
     processed++;
     try {
       const bars = await fetchYahoo5y(ticker);
-      if (bars.length === 0) { failed++; continue; }
+      if (bars.length === 0) { await markChecked(ticker); notFound++; continue; }
       const oneY = extremesSince(bars, oneYearAgo);
       const fiveY = extremesSince(bars, fiveYearsAgo);
       const medals = countMedals(bars);
@@ -145,11 +155,19 @@ Deno.serve(runBackground("compute-extremes", async () => {
       if (e1 || e2 || e3) { failed++; errors.push(`${ticker}: ${(e1?.message ?? e2?.message ?? e3?.message) ?? "?"}`); }
       else updated++;
     } catch (e) {
-      failed++;
-      errors.push(`${ticker}: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isNotFound(msg)) {
+        // Yahoo kent deze ticker niet → 7 dagen met rust laten, telt niet als fout.
+        await markChecked(ticker);
+        notFound++;
+      } else {
+        failed++;
+        errors.push(`${ticker}: ${msg}`);
+      }
     }
     await new Promise((r) => setTimeout(r, 250));
   }
   const remaining = todo.length - processed;
-  return { ok: failed < processed / 2, message: `${updated} bijgewerkt, ${failed} mislukt, ${remaining} nog te doen` + (errors.length ? `; ${errors.slice(0, 3).join("; ")}` : ""), metrics: { updated, failed, processed, remaining, todo_total: todo.length } };
+  const notFoundNote = notFound > 0 ? `, ${notFound} onbekend bij Yahoo (7d overgeslagen)` : "";
+  return { ok: failed < processed / 2, message: `${updated} bijgewerkt, ${failed} mislukt${notFoundNote}, ${remaining} nog te doen` + (errors.length ? `; ${errors.slice(0, 3).join("; ")}` : ""), metrics: { updated, failed, not_found: notFound, processed, remaining, todo_total: todo.length } };
 }));

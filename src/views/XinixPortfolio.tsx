@@ -160,36 +160,13 @@ function fmtDate(s: string): string {
 }
 
 export function XinixPortfolioView() {
-  const [mainTab, setMainTab] = useState<"portfolio" | "sim" | "families">("sim");
-  const [data, setData] = useState<XinixPortfolio | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  function load() {
-    setLoading(true);
-    fetchXinixPortfolio()
-      .then((d) => { setData(d); setLoading(false); setError(null); })
-      .catch((e) => { setError(e instanceof Error ? e.message : String(e)); setLoading(false); });
-  }
-  useEffect(() => { load(); }, []);
-
-
-  if (loading) {
-    return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
-  }
-  if (error) {
-    return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
-  }
-  if (!data) return null;
-
-  const { state, open_positions, closed_positions, equity_history, signal_insights, sector_insights, recommendations } = data;
-  const returnTone = state.total_return_pct >= 0 ? "lime" : "loss";
+  const [mainTab, setMainTab] = useState<"sim" | "families">("sim");
 
   return (
     <div className="space-y-6">
-      {/* Tab-switcher: Portfolio vs Simulatie */}
+      {/* Tab-switcher: 200-strategie simulatie + families-overzicht */}
       <div className="flex gap-0 border-b border-ink-5">
-        {([["sim", "🔬 Potje"], ["families", "🧬 Families"], ["portfolio", "📈 Referentie-portefeuille"]] as const).map(([key, label]) => (
+        {([["sim", "🔬 Potje"], ["families", "🧬 Families"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setMainTab(key)}
@@ -206,101 +183,6 @@ export function XinixPortfolioView() {
 
       {mainTab === "sim" && <SimulationView />}
       {mainTab === "families" && <FamiliesView />}
-      {mainTab === "portfolio" && <div className="space-y-8">
-
-      {/* Intro */}
-      <Card className="p-4 tab-accent-panel">
-        <div className="flex items-start gap-3">
-          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="xinix" /></span>
-          <div className="flex-1">
-            <div className="font-bold text-base tab-accent-text">Xinix — fictieve $10K portefeuille</div>
-            <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
-              Xinix bestuurt zelf een papieren portefeuille van $10.000 op basis van scores + signalen.
-              Strategie: max 8 posities van ~$1200, vast tijdvenster van 60 dagen, stop-loss op -15%.
-              Doel: leren welke signalen voorspellende waarde hebben en aanbevelingen genereren om
-              de scoring slimmer af te stellen.
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* KPI's */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat
-          label="Totaal vermogen"
-          value={fmtUsd(state.total_equity)}
-          delta={{ value: state.total_return_pct }}
-          tone={state.total_return_pct >= 0 ? "lime" : undefined}
-          hint={`${fmtUsd(state.total_return_usd)} t.o.v. $${state.initial_capital.toFixed(0)}`}
-        />
-        <Stat
-          label="Rendement"
-          value={fmtPct(state.total_return_pct)}
-          tone={returnTone === "lime" ? "lime" : undefined}
-          hint={`gerealiseerd ${fmtUsd(state.realized_usd)} · open ${fmtUsd(state.unrealized_usd)}`}
-        />
-        <Stat
-          label="Open posities"
-          value={`${state.open_count}/8`}
-          hint={`cash ${fmtUsd(state.cash)}`}
-        />
-        <Stat
-          label="Gesloten trades"
-          value={state.closed_count}
-          hint={`gestart ${fmtDate(state.started_at)}`}
-        />
-      </div>
-
-      {/* Equity curve */}
-      {equity_history.length >= 2 && (
-        <section>
-          <SectionHeader
-            eyebrow="Performance"
-            title="Equity-curve"
-            subtitle={`${equity_history.length} dagen, gestart ${fmtDate(state.started_at)}`}
-          />
-          <Card className="p-4">
-            <div className="flex items-center gap-4">
-              <Sparkline
-                values={equity_history.map((p) => p.total_equity)}
-                width={500}
-                height={80}
-                tone={state.total_return_pct >= 0 ? "lime" : "loss"}
-              />
-              <div className="text-xs text-neutral-400">
-                <div className="flex justify-between gap-4">
-                  <span>Start</span>
-                  <span className="tabular text-neutral-200">{fmtUsd(state.initial_capital)}</span>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span>Nu</span>
-                  <span className="tabular text-neutral-100 font-bold">{fmtUsd(state.total_equity)}</span>
-                </div>
-                <div className={`flex justify-between gap-4 mt-1 ${state.total_return_pct >= 0 ? "text-fog-lime" : "text-fog-loss"}`}>
-                  <span>Δ</span>
-                  <span className="tabular font-bold">{fmtPct(state.total_return_pct)}</span>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </section>
-      )}
-
-      {/* Open posities */}
-      <OpenPositionsSection positions={open_positions} />
-
-      {/* Inzichten + aanbevelingen */}
-      {(recommendations.length > 0 || signal_insights.length > 0) && (
-        <InsightsSection
-          recommendations={recommendations}
-          signal_insights={signal_insights}
-          sector_insights={sector_insights}
-        />
-      )}
-
-      {/* Gesloten trades */}
-      <ClosedPositionsSection positions={closed_positions} />
-    </div>}
     </div>
   );
 }

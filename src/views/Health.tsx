@@ -153,6 +153,8 @@ export function HealthView() {
           last_metrics: null,
           runs_24h: 0,
           ok_24h: 0,
+          consecutive_failures: 0,
+          failing_since: null,
           recent: [],
         });
       }
@@ -174,6 +176,7 @@ export function HealthView() {
   }, [jobs, onlyProblems]);
 
   const hasProblems = counts.bad + counts.warn + counts.stale > 0;
+  const degraded = data?.degraded_jobs ?? [];
 
   return (
     <div className="space-y-5">
@@ -191,6 +194,36 @@ export function HealthView() {
           </Button>
         }
       />
+
+      {degraded.length > 0 && (
+        <Card className="p-4 border-2 border-fog-loss/70 bg-fog-loss/10">
+          <div className="flex items-start gap-3">
+            <span className="pt-0.5"><Dot tone="loss" pulse /></span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold text-fog-loss">
+                ⚠️ {degraded.length} job{degraded.length > 1 ? "s draaien" : " draait"} al ≥2 dagen onafgebroken fout
+              </div>
+              <div className="text-[11px] text-neutral-400 mt-0.5">
+                Dit is geen incidentele hik — hier ligt iets vast dat aandacht vraagt.
+              </div>
+              <div className="mt-2 space-y-1">
+                {degraded.map((d) => {
+                  const meta = JOB_META[d.job];
+                  return (
+                    <div key={d.job} className="text-xs text-neutral-200 flex flex-wrap items-baseline gap-x-2">
+                      <span className="font-semibold">{meta?.label ?? d.job}</span>
+                      <span className="font-mono text-[10px] text-neutral-500">{d.job}</span>
+                      <span className="text-fog-loss tabular">
+                        {d.consecutive_failures} runs op rij · sinds {new Date(d.failing_since).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* KPI strip — alleen niet-nul */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">

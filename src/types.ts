@@ -180,6 +180,7 @@ export interface Dashboard {
   upcoming_catalysts: Catalyst[];
   run_log: RunLog[];
   poll_status?: PollStatus;
+  degraded_jobs?: DegradedJob[];
   generated_at: string;
 }
 
@@ -210,9 +211,18 @@ export interface HealthJob {
   last_metrics: Record<string, unknown> | null;
   runs_24h: number;
   ok_24h: number;
+  consecutive_failures: number;
+  failing_since: string | null;
   recent: HealthRun[]; // nieuw -> oud, max 15
+}
+export interface DegradedJob {
+  job: string;
+  failing_since: string;
+  consecutive_failures: number;
+  last_message: string | null;
 }
 export interface Health {
   jobs: HealthJob[];
+  degraded_jobs: DegradedJob[];
   generated_at: string;
 }

@@ -112,6 +112,11 @@ type NavTarget =
 
 type ChartTarget = { ticker: string; company: string; exchange: string | null };
 
+// Hele dagen sinds een ISO-timestamp (voor "draait al Nd fout").
+function daysSince(iso: string): number {
+  return Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+}
+
 export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh: () => void; onNavigate?: (t: NavTarget) => void }) {
   const [chartFor, setChartFor] = useState<ChartTarget | null>(null);
   // Filters: 'Catalyst' is een schakelaar die altijd AND-combineert met de
@@ -206,6 +211,14 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
   // Compacte status-strip: groepeer recente run_log op job, vlag jobs met
   // een falende laatste run. Bron is hetzelfde dashboard-payload — geen
   // extra API-call nodig.
+  // Jobs die ≥2 dagen onafgebroken falen — die liggen écht vast en vragen
+  // aandacht (apart van een incidentele fout hieronder). Bron: degraded_jobs
+  // uit de dashboard-payload (server berekent de 2-daagse fout-streak).
+  const degradedJobs = data.degraded_jobs ?? [];
+  const degradedSet = useMemo(() => new Set(degradedJobs.map((d) => d.job)), [degradedJobs]);
+
+  // Incidentele fouten: laatste run mislukt, maar (nog) niet ≥2 dagen op rij.
+  // De degraded-jobs tonen we apart en sterker, dus die filteren we hier weg.
   const failedJobs = useMemo(() => {
     const seen = new Map<string, { ok: boolean | null; msg: string | null }>();
     for (const r of data.run_log ?? []) {
@@ -213,12 +226,31 @@ export function DashboardView({ data, onNavigate }: { data: Dashboard; onRefresh
       seen.set(r.job, { ok: r.ok, msg: r.message });
     }
     const failing: string[] = [];
-    for (const [job, st] of seen) if (st.ok === false) failing.push(job);
+    for (const [job, st] of seen) if (st.ok === false && !degradedSet.has(job)) failing.push(job);
     return failing;
-  }, [data.run_log]);
+  }, [data.run_log, degradedSet]);
 
   return (
     <div className="space-y-8">
+      {degradedJobs.length > 0 && (
+        <button
+          onClick={() => onNavigate?.("status")}
+          className="w-full text-left rounded-xl border-2 border-fog-loss/70 bg-fog-loss/15 hover:bg-fog-loss/20 transition px-4 py-3 flex items-start gap-3"
+        >
+          <span className="pt-0.5"><Dot tone="loss" pulse /></span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-bold text-fog-loss">
+              ⚠️ {degradedJobs.length} job{degradedJobs.length > 1 ? "s draaien" : " draait"} al ≥2 dagen fout
+            </div>
+            <div className="text-xs text-neutral-300 mt-0.5">
+              {degradedJobs.slice(0, 3).map((d) => `${d.job} (${daysSince(d.failing_since)}d)`).join(" · ")}
+              {degradedJobs.length > 3 && ` +${degradedJobs.length - 3}`}
+            </div>
+          </div>
+          <span className="ml-auto text-xs text-fog-loss font-bold shrink-0 pt-0.5">Bekijk Status →</span>
+        </button>
+      )}
+
       {failedJobs.length > 0 && (
         <button
           onClick={() => onNavigate?.("status")}
