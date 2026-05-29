@@ -216,5 +216,25 @@ Deno.serve(async (req) => {
     last_run: lastPriceRun ? { started_at: lastPriceRun.started_at, ok: lastPriceRun.ok, message: lastPriceRun.message, metrics: lastPriceRun.metrics } : null,
     bench_after_fails: 3, batch_size: 80, interval_minutes: 10,
   };
-  return j(req, { cards, recent_signals: signals.slice(0, 50), upcoming_catalysts: catalysts.slice(0, 50), run_log: runLog, poll_status: pollStatus, generated_at: new Date().toISOString() }, { headers: { "cache-control": "public, max-age=120" } });
+  // Degraded jobs: achtergrond-jobs die ≥2 dagen onafgebroken falen. De
+  // run_log hierboven is maar 20 rijen — te weinig voor een 2-daags venster,
+  // dus een aparte, lichte query. Zelfde streak-logica als de health-endpoint.
+  const STALE_FAIL_MS = 2 * 24 * 60 * 60 * 1000;
+  const failSince = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: failRuns } = await supabase
+    .from("signal_runs").select("job, started_at, ok")
+    .gte("started_at", failSince).order("started_at", { ascending: false }).limit(4000);
+  const byJobRuns = new Map<string, Array<{ started_at: string; ok: boolean | null }>>();
+  for (const r of (failRuns ?? []) as Array<{ job: string; started_at: string; ok: boolean | null }>) {
+    const a = byJobRuns.get(r.job); if (a) a.push(r); else byJobRuns.set(r.job, [r]);
+  }
+  const degradedJobs: Array<{ job: string; failing_since: string; consecutive_failures: number; last_message: string | null }> = [];
+  for (const [job, arr] of byJobRuns) {
+    let consec = 0; let since: string | null = null;
+    for (const r of arr) { if (r.ok === null) continue; if (r.ok === false) { consec++; since = r.started_at; } else break; }
+    if (since && consec >= 2 && Date.now() - new Date(since).getTime() >= STALE_FAIL_MS) {
+      degradedJobs.push({ job, failing_since: since, consecutive_failures: consec, last_message: (runLog.find((x: any) => x.job === job)?.message) ?? null });
+    }
+  }
+  return j(req, { cards, recent_signals: signals.slice(0, 50), upcoming_catalysts: catalysts.slice(0, 50), run_log: runLog, poll_status: pollStatus, degraded_jobs: degradedJobs, generated_at: new Date().toISOString() }, { headers: { "cache-control": "public, max-age=120" } });
 });

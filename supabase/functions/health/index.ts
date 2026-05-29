@@ -32,8 +32,19 @@ interface JobHealth {
   last_metrics: unknown;
   runs_24h: number;
   ok_24h: number;
+  consecutive_failures: number; // aantal opeenvolgende mislukte runs vanaf nu terug
+  failing_since: string | null; // started_at van de oudste run in de huidige fout-streak
   recent: HistEntry[]; // nieuw -> oud, max 15
 }
+interface DegradedJob {
+  job: string;
+  failing_since: string;
+  consecutive_failures: number;
+  last_message: string | null;
+}
+// Een job geldt als "degraded" zodra hij ≥2 dagen onafgebroken faalt. Dat
+// onderscheidt een incidentele hik van iets dat echt vastligt en aandacht vraagt.
+const STALE_FAIL_MS = 2 * 24 * 60 * 60 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
@@ -68,6 +79,15 @@ Deno.serve(async (req) => {
         if (r.ok === true) ok24++;
       }
     }
+    // Fout-streak: tel vanaf de nieuwste run terug hoeveel runs op rij faalden.
+    // Een nog lopende run (ok === null) negeren we; de eerste geslaagde run stopt.
+    let consecFail = 0;
+    let failingSince: string | null = null;
+    for (const r of arr) {
+      if (r.ok === null) continue;
+      if (r.ok === false) { consecFail++; failingSince = r.started_at; }
+      else break;
+    }
     jobs.push({
       job,
       last_started_at: last.started_at,
@@ -77,13 +97,20 @@ Deno.serve(async (req) => {
       last_metrics: last.metrics,
       runs_24h: runs24,
       ok_24h: ok24,
+      consecutive_failures: consecFail,
+      failing_since: failingSince,
       recent: arr.slice(0, 15).map((r) => ({ started_at: r.started_at, finished_at: r.finished_at, ok: r.ok, message: r.message })),
     });
   }
   jobs.sort((a, b) => a.job.localeCompare(b.job));
 
+  const nowMs = Date.now();
+  const degraded_jobs: DegradedJob[] = jobs
+    .filter((j) => j.failing_since != null && j.consecutive_failures >= 2 && (nowMs - new Date(j.failing_since).getTime()) >= STALE_FAIL_MS)
+    .map((j) => ({ job: j.job, failing_since: j.failing_since as string, consecutive_failures: j.consecutive_failures, last_message: j.last_message }));
+
   return new Response(
-    JSON.stringify({ jobs, generated_at: new Date().toISOString() }),
+    JSON.stringify({ jobs, degraded_jobs, generated_at: new Date().toISOString() }),
     { headers: { ...cors(req), "content-type": "application/json", "cache-control": "public, max-age=20" } },
   );
 });
