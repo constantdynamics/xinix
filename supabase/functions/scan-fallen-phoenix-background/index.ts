@@ -5,15 +5,16 @@
 // Elke treffer is per definitie een feniks. Bovenop dat alle treffers naar de
 // watchlist gaan, krijgt elke treffer een "profielmatch"-beoordeling op basis
 // van het 4-5★-patroon van de gebruiker (uit analyse van zijn hartjes):
-//   VS-genoteerd + goedkoop (≤ $15) + actueel thema (crypto/AI/quantum/…)
-//   + tekenen van leven (recente bounce of volume-opleving).
+//   geschikte beurs (VS/Canada/Australië/UK) + goedkoop (≤ $15)
+//   + actueel thema (crypto/AI/quantum/…) of tekenen van leven (bounce/volume).
 // Alleen profielmatches sturen een ntfy-melding (hoge prioriteit, met redenen);
 // overige feniksen gaan stil naar de watchlist — geen ruis.
 //
 // Goedkoop: TradingView's all-time-high-kolom (High.All) is een voorfilter
 // (≥90% onder een ATH ≥ $1); de échte run-detectie gebeurt op de Yahoo 10y-bars
-// (hasPhoenixRun + drawdown), conform compute-phoenix-background. VS wordt élke
-// run gescand (de meeste profielmatches zijn VS) plus de dag-rotatie van markten.
+// (hasPhoenixRun + drawdown), conform compute-phoenix-background. VS/Canada/
+// Australië worden élke run gescand (daar zitten je profielmatches), de overige
+// markten roteren over de week voor brede ontdekking.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
@@ -70,19 +71,29 @@ const SLEEP_MS = 210;
 const PROFILE_MAX_PRICE = 15;       // goedkoop genoeg voor "ruimte om te lopen"
 const LIVELY_BOUNCE_MULT = 1.30;    // ≥30% boven het 13-weeks-dieptepunt = bounce
 const LIVELY_VOL_MULT = 1.5;        // recente 8w-volume ≥1,5× het ~1j-gemiddelde
+// Geografie die voor jou meetelt als profielmatch — niet alleen VS, ook de
+// markten waar je 4-5★-picks zitten (Canada/UK/Australië).
+const PROFILE_REGIONS = new Set(["america", "canada", "australia", "uk"]);
+const REGION_LABEL: Record<string, string> = { america: "VS", canada: "Canada", australia: "Australië", uk: "UK" };
 
-// Saxo-achtige beurzen, verdeeld over de week (getUTCDay 0=zo … 6=za). VS wordt
-// daarbovenop élke run toegevoegd (de meeste profielmatches zijn VS-genoteerd).
+// Markten die élke run worden gescand: jouw profiel-markten met de meeste
+// matches. UK telt ook als profielmatch maar roteert mee (zie MARKETS_BY_DAY).
 interface Mkt { region: string; suffix: string }
-const US: Mkt = { region: "america", suffix: "" };
+const ALWAYS: Mkt[] = [
+  { region: "america", suffix: "" },
+  { region: "canada", suffix: ".TO" },
+  { region: "australia", suffix: ".AX" },
+];
+// Overige markten verdeeld over de week (getUTCDay 0=zo … 6=za) voor brede
+// ontdekking. america/canada/australia zitten al in ALWAYS.
 const MARKETS_BY_DAY: Record<number, Mkt[]> = {
-  0: [{ region: "canada", suffix: ".TO" }],
+  0: [],
   1: [{ region: "uk", suffix: ".L" }, { region: "germany", suffix: ".DE" }, { region: "france", suffix: ".PA" }],
   2: [{ region: "netherlands", suffix: ".AS" }, { region: "belgium", suffix: ".BR" }, { region: "italy", suffix: ".MI" }, { region: "spain", suffix: ".MC" }, { region: "portugal", suffix: ".LS" }, { region: "poland", suffix: ".WA" }],
   3: [{ region: "switzerland", suffix: ".SW" }, { region: "sweden", suffix: ".ST" }, { region: "norway", suffix: ".OL" }, { region: "denmark", suffix: ".CO" }, { region: "finland", suffix: ".HE" }],
-  4: [{ region: "australia", suffix: ".AX" }, { region: "hongkong", suffix: ".HK" }],
+  4: [{ region: "hongkong", suffix: ".HK" }],
   5: [{ region: "japan", suffix: ".T" }, { region: "singapore", suffix: ".SI" }],
-  6: [{ region: "canada", suffix: ".TO" }],
+  6: [],
 };
 const SKIP = " ";
 const PREFIX_OVERRIDE: Record<string, string> = {
@@ -127,10 +138,11 @@ function googleFinanceUrl(yahoo: string): string {
   return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`;
 }
 
-interface Cand { yahoo: string; name: string; exch: string; isUS: boolean }
-// TradingView per markt + zoekvenster (Perf.5Y én Perf.Y), met all-time-high
+interface Cand { yahoo: string; name: string; exch: string; region: string; geoOk: boolean }
+// TradingView per markt × zoekvenster (Perf.5Y én Perf.Y), met all-time-high
 // als goedkope voorfilter (≥90% onder een ATH ≥ $1).
-async function tvScan(region: string, sortBy: string, topN: number, suffix: string, isUS: boolean): Promise<Cand[]> {
+async function tvScan(region: string, sortBy: string, topN: number, suffix: string): Promise<Cand[]> {
+  const geoOk = PROFILE_REGIONS.has(region);
   const body = {
     filter: [
       { left: "type", operation: "equal", right: "stock" },
@@ -171,7 +183,7 @@ async function tvScan(region: string, sortBy: string, topN: number, suffix: stri
     }
     const yahoo = `${sym}${sfx}`;
     if (isLondonIOB(yahoo)) continue;
-    out.push({ yahoo, name, exch: prefix, isUS });
+    out.push({ yahoo, name, exch: prefix, region, geoOk });
   }
   return out;
 }
@@ -245,33 +257,32 @@ async function sendNtfy(server: string, topic: string, title: string, body: stri
 
 interface Gem {
   yahoo: string; name: string; sector: string; lastClose: number; peak: number; peakDate: string;
-  low5y: number; drawdownPct: number; exch: string; isUS: boolean; firstPriceDate: string | null;
+  low5y: number; drawdownPct: number; exch: string; region: string; geoOk: boolean; firstPriceDate: string | null;
   profileMatch: boolean; profileReasons: string[];
 }
 
 Deno.serve(runBackground("scan-fallen-phoenix", async () => {
   const sb = getServiceClient();
   const startMs = Date.now();
-  // VS élke run + de dag-rotatie (dedup op region).
-  const dayMarkets = MARKETS_BY_DAY[new Date().getUTCDay()] ?? [];
-  const markets: Mkt[] = [US, ...dayMarkets.filter((m) => m.region !== "america")];
+  // Profiel-markten élke run (VS/Canada/Australië) + de dag-rotatie. Dedup op region.
+  const dayMarkets = (MARKETS_BY_DAY[new Date().getUTCDay()] ?? []).filter((m) => !ALWAYS.some((a) => a.region === m.region));
+  const markets: Mkt[] = [...ALWAYS, ...dayMarkets];
 
   // 1) Kandidaten per markt × zoekvenster (Perf.5Y + Perf.Y), voorgefilterd op ATH.
   const candMap = new Map<string, Cand>();
   const tvErrors: string[] = [];
   for (const m of markets) {
-    const isUS = m.region === "america";
     for (const sortBy of ["Perf.5Y", "Perf.Y"]) {
       try {
-        const rows = await tvScan(m.region, sortBy, PERF_TOPN, m.suffix, isUS);
+        const rows = await tvScan(m.region, sortBy, PERF_TOPN, m.suffix);
         for (const c of rows) if (!candMap.has(c.yahoo)) candMap.set(c.yahoo, c);
       } catch (e) {
         tvErrors.push(`${m.region}/${sortBy}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   }
-  // VS eerst, zodat de meeste profielmatches binnen het fetch-budget passen.
-  const allCands = [...candMap.values()].sort((a, b) => (b.isUS ? 1 : 0) - (a.isUS ? 1 : 0));
+  // Profiel-markten eerst, zodat de meeste profielmatches binnen het budget passen.
+  const allCands = [...candMap.values()].sort((a, b) => (b.geoOk ? 1 : 0) - (a.geoOk ? 1 : 0));
 
   // 2) Al in de watchlist? Overslaan.
   const existing = new Set<string>();
@@ -302,13 +313,13 @@ Deno.serve(runBackground("scan-fallen-phoenix", async () => {
       const bars5y = bars.slice(-260);
       const low5y = Math.min(...bars5y.map((b) => b.close));
 
-      // Profielmatch (4-5★-patroon van de gebruiker): VS + goedkoop + (thema OF leeft).
+      // Profielmatch (4-5★-patroon): geschikte beurs + goedkoop + (thema OF leeft).
       const lively = livelinessReasons(bars);
       const themed = hasTheme(c.name);
       const cheap = lastClose <= PROFILE_MAX_PRICE;
-      const profileMatch = c.isUS && cheap && (themed || lively.length > 0);
+      const profileMatch = c.geoOk && cheap && (themed || lively.length > 0);
       const reasons: string[] = [];
-      if (c.isUS) reasons.push("VS-genoteerd");
+      if (c.geoOk) reasons.push(REGION_LABEL[c.region] ?? c.region);
       if (cheap) reasons.push(`goedkoop ($${lastClose.toFixed(lastClose < 5 ? 3 : 2)})`);
       if (themed) reasons.push("actueel thema");
       reasons.push(...lively);
@@ -316,7 +327,7 @@ Deno.serve(runBackground("scan-fallen-phoenix", async () => {
       gems.push({
         yahoo: c.yahoo, name: c.name, sector: inferSector(c.name),
         lastClose, peak, peakDate: bars[peakIdx]?.date ?? "", low5y,
-        drawdownPct: (1 - lastClose / peak) * 100, exch: c.exch, isUS: c.isUS,
+        drawdownPct: (1 - lastClose / peak) * 100, exch: c.exch, region: c.region, geoOk: c.geoOk,
         firstPriceDate: bars[0]?.date ?? null, profileMatch, profileReasons: reasons,
       });
     } catch (e) {
@@ -348,7 +359,7 @@ Deno.serve(runBackground("scan-fallen-phoenix", async () => {
         ticker: g.yahoo, signal_type: "fallen_phoenix_gem", severity: g.profileMatch ? "orange" : "yellow",
         title: `${g.profileMatch ? "★ " : ""}${g.yahoo} — gevallen feniks · -${g.drawdownPct.toFixed(0)}% onder piek`,
         detail: `${g.name} · koers ~${g.lastClose.toFixed(g.lastClose < 5 ? 3 : 2)}, piek $${g.peak.toFixed(g.peak < 5 ? 3 : 2)} (${g.peakDate}). Ooit ≥${PHOENIX_MULT}× gestegen en nu ${g.drawdownPct.toFixed(0)}% gevallen.${g.profileMatch ? " ★ Past bij je 4-5★-profiel: " + g.profileReasons.join(", ") + "." : ""} Auto-toegevoegd aan de watchlist.`,
-        payload: { source: "tradingview_fallen_phoenix", last_close: g.lastClose, peak: g.peak, peak_date: g.peakDate, drawdown_pct: g.drawdownPct, low_5y: g.low5y, profile_match: g.profileMatch, profile_reasons: g.profileReasons },
+        payload: { source: "tradingview_fallen_phoenix", last_close: g.lastClose, peak: g.peak, peak_date: g.peakDate, drawdown_pct: g.drawdownPct, low_5y: g.low5y, region: g.region, profile_match: g.profileMatch, profile_reasons: g.profileReasons },
         alerted: true,
         expires_at: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString(),
       });
@@ -369,7 +380,7 @@ Deno.serve(runBackground("scan-fallen-phoenix", async () => {
           (settings?.ntfy_server as string) ?? "https://ntfy.sh",
           topic,
           `\u{2B50} ${matches.length} feniks die bij je profiel past`,
-          lines.join("\n\n") + `\n\nGevallen feniksen die matchen met je 4-5★-patroon (feniks + VS + goedkoop + thema/leeft). Nu in je watchlist.`,
+          lines.join("\n\n") + `\n\nGevallen feniksen die matchen met je 4-5★-patroon (feniks + geschikte beurs + goedkoop + thema/leeft). Nu in je watchlist.`,
           5,
           ["star", "bird"],
           sorted.length === 1 ? googleFinanceUrl(sorted[0].yahoo) : undefined,
