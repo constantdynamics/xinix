@@ -207,11 +207,29 @@ async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
   return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
 }
 
-function hasPhoenixRun(bars: Bar[], mult: number): boolean {
-  let minSoFar = Infinity;
+// Feniks-detectie, in lijn met de afgesproken definitie in
+// compute-phoenix-background. De scanner haalt maar één koersreeks per ticker
+// op, dus we nemen de goedkope, hoog-impact eisen over die op één reeks kunnen:
+//   • ≥40× vanaf een lopend minimum (de afgesproken drempel)
+//   • piek raakt een echte koers ≥ $1  (weert sub-penny nep-feniksen zoals
+//     MEC.CN à $0,035 — daar is de procentuele "run" pure tick-ruis)
+//   • enkele bar ≥5× de vorige = split/ruis-artefact -> overslaan (cleanBars)
+// De volledige raw-vs-adjusted (≥20×) en split-datum-checks vergen meer data
+// per ticker dan de scanner ophaalt; die blijven exclusief in compute-phoenix.
+const PHOENIX_MULT = 40;
+const PHOENIX_MIN_PEAK = 1.0;
+const PHOENIX_MAX_BAR_JUMP = 5;
+function hasPhoenixRun(bars: Bar[]): boolean {
+  const clean: number[] = [];
+  let prev = NaN;
   for (const b of bars) {
-    if (b.close < minSoFar) { minSoFar = b.close; }
-    else if (minSoFar > 0 && b.close >= minSoFar * mult) { return true; }
+    if (Number.isFinite(prev) && prev > 0 && b.close >= prev * PHOENIX_MAX_BAR_JUMP) { prev = b.close; continue; }
+    clean.push(b.close); prev = b.close;
+  }
+  let minSoFar = Infinity;
+  for (const c of clean) {
+    if (c < minSoFar) { minSoFar = c; continue; }
+    if (minSoFar > 0 && c >= minSoFar * PHOENIX_MULT && c >= PHOENIX_MIN_PEAK) return true;
   }
   return false;
 }
@@ -321,7 +339,7 @@ Deno.serve(runBackground("scan-losers", async () => {
       const lastClose = bars[bars.length - 1]?.close ?? 0;
       const medals1y = countMedals(bars.slice(-52));
       const bronze1yOk = medals1y.bronze >= MIN_BRONZE_1Y;
-      const phoenixOk = hasPhoenixRun(bars, 50);
+      const phoenixOk = hasPhoenixRun(bars);
       // Sub-penny aandelen overslaan: hun medailles/feniks-runs zijn ruis-artefacten
       // (zie MIN_MEDAL_PRICE). Geldt voor álle kwalificatie-routes.
       const qualifiesForWatchlist = lastClose >= MIN_MEDAL_PRICE && (
