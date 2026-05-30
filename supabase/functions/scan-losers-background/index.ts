@@ -102,6 +102,14 @@ const SUFFIX_TO_GF: Record<string, string> = {
 const ETP_RE = /\b(leverage\s*shares|direxion|wisdomtree|proshares|invesco|graniteshares|boost\s*etp|roundhill)\b|\b[2-9]x\s+(long|short|bull|bear)\b|\betp\b|\betf\b/i;
 function isEtp(name: string): boolean { return ETP_RE.test(name); }
 
+// London IOB "ghost"-noteringen: buitenlandse bedrijven met een 4-tekens
+// alfanumerieke code beginnend met een cijfer (bv. 0JI3.L = Hunter Group ASA,
+// dat eigenlijk op Oslo handelt als HUNT.OL). Duplicaat-listings met nauwelijks
+// liquiditeit — nooit een echte watchlist-kandidaat. Legit UK-tickers zijn
+// alfabetisch (3IN.L = 3 tekens) en vallen er dus buiten.
+const LONDON_IOB_RE = /^[0-9][0-9A-Z]{3}\.L$/i;
+function isLondonIOB(yahoo: string): boolean { return LONDON_IOB_RE.test(yahoo); }
+
 const MINING_RE = /\b(mining|miner|mines|metals?|minerals?|resources?|exploration|drill(?:ing)?|royalt(?:y|ies)|streaming|gold|silver|copper|lithium|uranium|nickel|cobalt|graphite|zinc|platinum|palladium|tin|tungsten|molybdenum|rare\s*earth|potash|iron\s*ore|coal)\b/i;
 const BIOTECH_RE = /\b(pharma(?:ceuticals?)?|biopharma|therapeutics|bio(?:science|tech(?:nology)?|logics|pharm)?|genomics?|gene(?:tic|ric)?|oncolog(?:y|ic)|immuno(?:logy|therap)|cell\s*(?:therap|technolog)|gene\s*therap|medicines?|medical|laboratories|labs|sciences|clinical|antibody|antibodies|vaccines?|RNA|DNA|protein)\b/i;
 function inferSector(name: string | null | undefined): "biotech" | "mining" | "other" {
@@ -160,6 +168,7 @@ async function fetchMarketLosers(market: string): Promise<LoserRow[]> {
     if (changePct != null && changePct >= 0) continue; // alleen dalers
     if (changePct != null && changePct > MIN_DAILY_DROP_PCT) continue; // minimaal 10% daling
     if (isEtp(name)) continue;
+    if (isLondonIOB(yahoo)) continue; // London IOB ghost-notering -> overslaan
     out.push({ yahoo, gfBase: tvSym, tvExch, name, changePct, close });
   }
   return out;
