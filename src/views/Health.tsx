@@ -22,6 +22,7 @@ const JOB_META: Record<string, { label: string; intervalMin: number; desc: strin
   "losers-digest": { label: "Wekelijkse/maandelijkse losers-digest", intervalMin: 1440, desc: "Samenvatting van de slechtst-presterende tickers in je watchlist." },
   "scan-losers": { label: "TradingView: grootste dalers → ≥1× goud + ≥1× zilver", intervalMin: 1440, desc: "1×/dag (~23:00 UTC) de biggest losers per markt; medailles ≥1g+1s → toevoegen + melding." },
   "scan-bottoms": { label: "TradingView: bij 5y-bodem → ≥3× goud", intervalMin: 1440, desc: "1×/dag (~04:00 UTC), roterend door de Saxo-beurzen; binnen 10% van 5y-low + ≥3 goud → toevoegen + melding." },
+  "scan-fallen-phoenix": { label: "TradingView: gevallen feniksen", intervalMin: 1440, desc: "1×/dag (~02:00 UTC), roterend per markt; ooit ≥40× (piek ≥$1) en nu ≥90% gevallen → toevoegen + melding." },
 };
 
 type Status = "ok" | "warn" | "bad" | "stale";
