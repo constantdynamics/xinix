@@ -71,10 +71,22 @@ const SLEEP_MS = 210;
 const PROFILE_MAX_PRICE = 15;       // goedkoop genoeg voor "ruimte om te lopen"
 const LIVELY_BOUNCE_MULT = 1.30;    // ≥30% boven het 13-weeks-dieptepunt = bounce
 const LIVELY_VOL_MULT = 1.5;        // recente 8w-volume ≥1,5× het ~1j-gemiddelde
-// Geografie die voor jou meetelt als profielmatch — niet alleen VS, ook de
-// markten waar je 4-5★-picks zitten (Canada/UK/Australië).
-const PROFILE_REGIONS = new Set(["america", "canada", "australia", "uk"]);
-const REGION_LABEL: Record<string, string> = { america: "VS", canada: "Canada", australia: "Australië", uk: "UK" };
+// Geografie die meetelt als profielmatch — álle markten die de scanner sowieso
+// al fetcht. Dit kost geen extra Yahoo-calls (het is een label ná de fetch),
+// het laat de treffers uit die markten alleen óók als profielmatch pingen.
+const PROFILE_REGIONS = new Set([
+  "america", "canada", "australia", "uk",
+  "germany", "france", "netherlands", "belgium", "italy", "spain", "portugal", "poland",
+  "switzerland", "sweden", "norway", "denmark", "finland",
+  "hongkong", "japan", "singapore",
+]);
+const REGION_LABEL: Record<string, string> = {
+  america: "VS", canada: "Canada", australia: "Australië", uk: "UK",
+  germany: "Duitsland", france: "Frankrijk", netherlands: "Nederland", belgium: "België",
+  italy: "Italië", spain: "Spanje", portugal: "Portugal", poland: "Polen",
+  switzerland: "Zwitserland", sweden: "Zweden", norway: "Noorwegen", denmark: "Denemarken", finland: "Finland",
+  hongkong: "Hongkong", japan: "Japan", singapore: "Singapore",
+};
 
 // Markten die élke run worden gescand: jouw profiel-markten met de meeste
 // matches. UK telt ook als profielmatch maar roteert mee (zie MARKETS_BY_DAY).
