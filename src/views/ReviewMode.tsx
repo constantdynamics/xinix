@@ -358,7 +358,7 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
 // ── Typen ─────────────────────────────────────────────────────────────────────
 
-export type ReviewList = "favorieten" | "feniks" | "hikkertjes" | "zwitserleven" | "watchlist";
+export type ReviewList = "favorieten" | "feniks" | "hikkertjes" | "zwitserleven" | "medailles" | "watchlist";
 
 interface ReviewItem {
   ticker: string;
@@ -381,6 +381,7 @@ const LIST_OPTIONS: { key: ReviewList; icon: ReactNode; label: string; desc: str
   { key: "feniks", icon: <GradientTabIcon tab="feniks" />, label: "Feniks", desc: "Feniks-aandelen nog niet bekeken of favoriet" },
   { key: "hikkertjes", icon: <GradientTabIcon tab="hikkertjes" />, label: "Hikkertjes", desc: "Hikkertjes nog niet bekeken of favoriet" },
   { key: "zwitserleven", icon: <GradientTabIcon tab="zwitserleven" />, label: "Zwitserleven", desc: "Dividend-aandelen nog niet bekeken of favoriet" },
+  { key: "medailles", icon: <span>🏅</span>, label: "Medailles", desc: "≥2 goud/zilver-medailles (5j koers-runs), nog niet bekeken of favoriet" },
   { key: "watchlist", icon: <span>📋</span>, label: "Watchlist", desc: "Alle watchlist-aandelen nog niet bekeken of favoriet" },
 ];
 
@@ -463,6 +464,26 @@ function buildQueue(
           last_close: s.last_close,
           dividend_yield_pct: s.dividend_yield_pct,
         }));
+    case "medailles": {
+      // Aandelen met ≥2 medailles die goud en/of zilver zijn (gold+silver ≥ 2),
+      // ongeacht limiet-nabijheid. Sterkste eerst (goud telt dubbel).
+      return (data?.cards ?? [])
+        .filter((c) => notReviewed(c.ticker))
+        .filter((c) => ((c.medal_gold ?? 0) + (c.medal_silver ?? 0)) >= 2)
+        .sort((a, b) => ((b.medal_gold ?? 0) * 2 + (b.medal_silver ?? 0)) - ((a.medal_gold ?? 0) * 2 + (a.medal_silver ?? 0)))
+        .map((c) => ({
+          ticker: c.ticker,
+          company: c.company,
+          exchange: c.exchange ?? null,
+          sector: c.sector,
+          medal_gold: c.medal_gold,
+          medal_silver: c.medal_silver,
+          medal_bronze: c.medal_bronze,
+          buy_limit: c.buy_limit ?? null,
+          last_close: c.summary?.last_close ?? null,
+          dividend_yield_pct: c.dividend_yield ?? null,
+        }));
+    }
     case "watchlist": {
       return (data?.cards ?? [])
         .filter((c) => notReviewed(c.ticker))
