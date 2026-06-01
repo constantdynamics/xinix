@@ -6,7 +6,7 @@ import {
   type PoefieRankEntry,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Button, Pill, Stat } from "../components/ui";
+import { Card, Button, Pill, Stat, CollapsibleIntro } from "../components/ui";
 import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { EditableLimit } from "../components/EditableLimit";
 import { useMarks } from "../hooks/useMarks";
@@ -474,20 +474,14 @@ export function PoefiesView() {
 
   return (
     <div className="space-y-6">
-      {/* Uitlegkaart */}
-      <Card className="p-4 tab-accent-panel">
-        <div className="flex items-start gap-3">
-          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="poefies" /></span>
-          <div className="flex-1">
-            <div className="font-bold text-base tab-accent-text">Poefies</div>
-            <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
-              Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">125% (2,25×)</strong> zijn gegroeid binnen maximaal <strong className="text-neutral-200">7 dagen</strong>.
-              Een poefie is een explosieve, kortstondige sprong. De kolommen <em>6m / 1j / 2j / 5j</em> tonen hoe vaak het de afgelopen 6 maanden, 1, 2 en 5 jaar gebeurde.
-              Per incident wordt gecheckt op stock-splits in het venster en absurde single-bar jumps om <strong className="text-neutral-200">false poefies</strong> uit te sluiten.
-            </div>
-          </div>
+      {/* Uitlegkaart (standaard ingeklapt) */}
+      <CollapsibleIntro title="Poefies" icon={<GradientTabIcon tab="poefies" />}>
+        <div className="text-xs text-neutral-400 leading-relaxed">
+          Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">125% (2,25×)</strong> zijn gegroeid binnen maximaal <strong className="text-neutral-200">7 dagen</strong>.
+          Een poefie is een explosieve, kortstondige sprong. De kolommen <em>6m / 1j / 2j / 5j</em> tonen hoe vaak het de afgelopen 6 maanden, 1, 2 en 5 jaar gebeurde.
+          Per incident wordt gecheckt op stock-splits in het venster en absurde single-bar jumps om <strong className="text-neutral-200">false poefies</strong> uit te sluiten.
         </div>
-      </Card>
+      </CollapsibleIntro>
 
       {/* Stats + trigger */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">

@@ -6,7 +6,7 @@ import {
   type HikkertjeRankEntry,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Button, Pill, Stat } from "../components/ui";
+import { Card, Button, Pill, Stat, CollapsibleIntro } from "../components/ui";
 import { TickerSparkline } from "../components/TickerSparkline";
 import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { EditableLimit } from "../components/EditableLimit";
@@ -124,20 +124,14 @@ export function HikkertjesView() {
 
   return (
     <div className="space-y-6">
-      {/* Uitleg */}
-      <Card className="p-4 tab-accent-panel">
-        <div className="flex items-start gap-3">
-          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="hikkertjes" /></span>
-          <div className="flex-1">
-            <div className="font-semibold tab-accent-text mb-1">Hikkertjes</div>
-            <p className="text-sm text-neutral-300 leading-relaxed">
-              Aandelen die in het afgelopen jaar minimaal <strong>2×</strong> op één dag <strong>≥55%</strong> gestegen zijn
-              en die stijging minimaal <strong>3 handelsdagen</strong> vasthielden. Dit patroon duidt op extreme
-              volatiliteit en explosief koerspotentieel — maar ook hoog risico.
-            </p>
-          </div>
-        </div>
-      </Card>
+      {/* Uitleg (standaard ingeklapt) */}
+      <CollapsibleIntro title="Hikkertjes" icon={<GradientTabIcon tab="hikkertjes" />}>
+        <p className="text-sm text-neutral-300 leading-relaxed">
+          Aandelen die in het afgelopen jaar minimaal <strong>2×</strong> op één dag <strong>≥55%</strong> gestegen zijn
+          en die stijging minimaal <strong>3 handelsdagen</strong> vasthielden. Dit patroon duidt op extreme
+          volatiliteit en explosief koerspotentieel — maar ook hoog risico.
+        </p>
+      </CollapsibleIntro>
 
       {/* Stats + trigger */}
       <div className="flex flex-wrap items-center gap-4">

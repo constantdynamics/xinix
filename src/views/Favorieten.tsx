@@ -14,7 +14,7 @@ import {
 import type { Dashboard, Card as CardType, Sector } from "../types";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Button, Badge, Stat } from "../components/ui";
+import { Card, Button, Badge, Stat, CollapsibleIntro } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
@@ -583,19 +583,13 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
 
   return (
     <div className="space-y-4">
-      <Card className="p-4 tab-accent-panel">
-        <div className="flex items-start gap-3">
-          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="favorieten" /></span>
-          <div className="flex-1">
-            <div className="font-semibold tab-accent-text mb-1">Favorieten</div>
-            <p className="text-sm text-neutral-300 leading-relaxed">
-              Aandelen die je hebt aangemerkt met het hartje op een ander tabblad.
-              De badges tonen op welke lijst ze voorkomen (Feniks, Poefie, Hikkertje, Zwitserleven of alleen watchlist).
-              Sorteer of filter op bron of sector om snel te vinden wat je zoekt.
-            </p>
-          </div>
-        </div>
-      </Card>
+      <CollapsibleIntro title="Favorieten" icon={<GradientTabIcon tab="favorieten" />}>
+        <p className="text-sm text-neutral-300 leading-relaxed">
+          Aandelen die je hebt aangemerkt met het hartje op een ander tabblad.
+          De badges tonen op welke lijst ze voorkomen (Feniks, Poefie, Hikkertje, Zwitserleven of alleen watchlist).
+          Sorteer of filter op bron of sector om snel te vinden wat je zoekt.
+        </p>
+      </CollapsibleIntro>
 
       <div className="flex flex-wrap items-center gap-3">
         <Stat label="Favorieten" value={marks.favorites.size} />
