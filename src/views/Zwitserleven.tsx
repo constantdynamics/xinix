@@ -132,7 +132,7 @@ const COLUMNS_BASE: ColDef[] = [
   { key: "actions",      label: "Acties",         defaultVisible: true,  align: "center" },
 ];
 
-type ShowFilter = "all" | "meets" | "near";
+type ShowFilter = "all" | "meets" | "near" | "criteria_only";
 const AUTO_SCAN_TOTAL = 20;
 const AUTO_SCAN_INTERVAL_MS = 6_000; // 6s per scan-cycle (scan loopt async op de backend)
 
@@ -271,6 +271,7 @@ export function ZwitserlevenView() {
     let list = data.stocks.filter((s) => {
       if (!showSeen && marks.isSeen(s.ticker)) return false;
       if (hideFavorites && marks.isFavorite(s.ticker)) return false;
+      if (showFilter === "criteria_only") return s.meets_criteria === true; // exact de tile-telling, zonder handmatige
       if (showFilter === "meets") return s.meets_criteria === true || s.is_manual === true;
       if (showFilter === "near") {
         return (s.dividend_yield_pct ?? 0) >= 4 && (s.pct_under_5y_high ?? 0) >= 30;
@@ -575,8 +576,8 @@ export function ZwitserlevenView() {
           label="Voldoen aan criteria"
           value={data?.meets_criteria_count ?? 0}
           icon={TAB_ICONS.zwitserleven}
-          onClick={() => setShowFilter(showFilter === "meets" ? "all" : "meets")}
-          active={showFilter === "meets"}
+          onClick={() => setShowFilter(showFilter === "criteria_only" ? "meets" : "criteria_only")}
+          active={showFilter === "criteria_only"}
         />
         <Stat label="Handmatig toegevoegd" value={data?.manual_count ?? 0} />
         <Stat
@@ -635,7 +636,7 @@ export function ZwitserlevenView() {
       {/* Filter knoppen + kolompicker */}
       <div className="flex gap-2 flex-wrap items-center">
         {(["meets", "near", "all"] as ShowFilter[]).map((f) => {
-          const labels: Record<ShowFilter, string> = { meets: "Voldoet aan criteria + handmatig", near: "Bijna (yield ≥4% + val ≥30%)", all: "Alle gescand (met dividend)" };
+          const labels: Record<ShowFilter, string> = { meets: "Voldoet aan criteria + handmatig", near: "Bijna (yield ≥4% + val ≥30%)", all: "Alle gescand (met dividend)", criteria_only: "Alleen criteria" };
           return (
             <button
               key={f}

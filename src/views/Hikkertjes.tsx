@@ -140,10 +140,14 @@ export function HikkertjesView() {
           label="Op/onder limiet"
           value={ranking.filter((r) => r.above_limit_pct != null && r.above_limit_pct <= 0).length}
           tone="lime"
+          onClick={() => setLimitFilter(limitFilter === "below" ? "all" : "below")}
+          active={limitFilter === "below"}
         />
         <Stat
           label="≤10% boven limiet"
           value={ranking.filter((r) => r.above_limit_pct != null && r.above_limit_pct > 0 && r.above_limit_pct <= 10).length}
+          onClick={() => setLimitFilter(limitFilter === "near" ? "all" : "near")}
+          active={limitFilter === "near"}
         />
         <Stat label="Nog te scannen" value={unscanned} />
         {isAdmin && (
@@ -222,7 +226,7 @@ export function HikkertjesView() {
             if (!showSeen && marks.isSeen(h.ticker)) return false;
             if (hideFavorites && marks.isFavorite(h.ticker)) return false;
             if (limitFilter === "below") return h.above_limit_pct != null && h.above_limit_pct <= 0;
-            if (limitFilter === "near") return h.above_limit_pct != null && h.above_limit_pct <= 10;
+            if (limitFilter === "near") return h.above_limit_pct != null && h.above_limit_pct > 0 && h.above_limit_pct <= 10;
             return true;
           });
           const sorted = sortBy === "limit"
