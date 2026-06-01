@@ -87,17 +87,20 @@ Deno.serve(async (req) => {
         .select("*", { count: "exact", head: true })
         .is("is_hikkertje", null)
         .eq("active", true),
-      // Alle poefie-aandelen (voor ranking)
+      // Alle poefie-aandelen (voor ranking) — alleen met een medaille-track-record
+      // van >=2 brons (medaillespiegel), op verzoek van de owner.
       sb
         .from("signal_tickers")
         .select("ticker, company, sector, medal_gold, medal_silver, medal_bronze, buy_limit, exchange, poefie_last_date, poefie_incident_count, poefie_median_date, poefie_max_growth_pct, poefie_days_to_peak, poefie_count_6m, poefie_count_1y, poefie_count_2y, poefie_count_5y")
         .eq("is_poefie", true)
+        .gte("medal_bronze", 2)
         .eq("active", true),
-      // Totaal poefies
+      // Totaal poefies (zelfde >=2 brons-filter zodat de telling matcht)
       sb
         .from("signal_tickers")
         .select("*", { count: "exact", head: true })
         .eq("is_poefie", true)
+        .gte("medal_bronze", 2)
         .eq("active", true),
       // Nog te scannen (poefies)
       sb
