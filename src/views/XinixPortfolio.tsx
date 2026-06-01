@@ -31,6 +31,7 @@ import {
   Dot,
   Sparkline,
   Stat,
+  CollapsibleIntro,
 } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { EditableLimit } from "../components/EditableLimit";
@@ -2904,20 +2905,14 @@ export function PhoenixView() {
 
   return (
     <div className="space-y-6">
-      {/* Uitlegkaart */}
-      <Card className="p-4 tab-accent-panel">
-        <div className="flex items-start gap-3">
-          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="feniks" /></span>
-          <div className="flex-1">
-            <div className="font-bold text-base tab-accent-text">Feniks-aandelen</div>
-            <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
-              Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">50×</strong> zijn gegaan en nu laag staan.
-              Klik op een kolomkop om te sorteren. Vink kolommen aan/uit met de checkboxes,
-              of activeer een filter om alleen aandelen te tonen waarvan het criterium bekend is.
-            </div>
-          </div>
+      {/* Uitlegkaart (standaard ingeklapt) */}
+      <CollapsibleIntro title="Feniks-aandelen" icon={<GradientTabIcon tab="feniks" />}>
+        <div className="text-xs text-neutral-400 leading-relaxed">
+          Aandelen die ooit in de afgelopen 10 jaar minimaal <strong className="text-neutral-200">50×</strong> zijn gegaan en nu laag staan.
+          Klik op een kolomkop om te sorteren. Vink kolommen aan/uit met de checkboxes,
+          of activeer een filter om alleen aandelen te tonen waarvan het criterium bekend is.
         </div>
-      </Card>
+      </CollapsibleIntro>
 
       {/* Stats + trigger */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">

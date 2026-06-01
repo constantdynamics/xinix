@@ -878,6 +878,8 @@ export function Stat({
   hint,
   tone,
   icon,
+  onClick,
+  active,
 }: {
   label: string;
   value: ReactNode;
@@ -885,6 +887,8 @@ export function Stat({
   hint?: ReactNode;
   tone?: "pink" | "lime";
   icon?: ReactNode;
+  onClick?: () => void;
+  active?: boolean;
 }) {
   const deltaColor =
     delta && delta.value > 0
@@ -893,7 +897,22 @@ export function Stat({
       ? "text-fog-loss"
       : "text-neutral-500";
   return (
-    <Card className="p-4" glow={tone}>
+    <Card
+      className={cx(
+        "p-4 relative",
+        onClick && "cursor-pointer transition-colors hover:border-fog-pink/40",
+        active && "ring-2 ring-fog-pink bg-fog-pink/10 border-fog-pink/50"
+      )}
+      glow={tone}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      title={onClick ? (active ? "Filter aan — klik om uit te zetten" : "Klik om de tabel hierop te filteren") : undefined}
+    >
+      {onClick && (
+        <span className={cx("absolute top-2 right-2 text-[9px] font-bold uppercase tracking-wider", active ? "text-fog-pink" : "text-neutral-600")}>
+          {active ? "● filter aan" : "filter"}
+        </span>
+      )}
       <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
         {icon && <span className="text-sm text-fog-pink">{icon}</span>}
         {label}
@@ -909,6 +928,39 @@ export function Stat({
         )}
       </div>
       {hint && <div className="mt-1 text-xs text-neutral-500">{hint}</div>}
+    </Card>
+  );
+}
+
+// ─── Inklapbaar intro/uitleg-blok (standaard ingeklapt) ───────────────
+// Vervangt de vaste "tab-accent-panel"-introblokken bovenaan tabbladen:
+// toont alleen een compacte header met de titel; klik klapt de uitleg uit.
+export function CollapsibleIntro({
+  title,
+  icon,
+  children,
+  defaultOpen = false,
+}: {
+  title: ReactNode;
+  icon?: ReactNode;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className="tab-accent-panel overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left"
+        aria-expanded={open}
+      >
+        {icon && <span className="text-xl leading-none shrink-0">{icon}</span>}
+        <span className="font-semibold tab-accent-text flex-1 min-w-0 truncate">{title}</span>
+        <span className="text-[11px] text-neutral-400 shrink-0">{open ? "▾ verberg uitleg" : "▸ toon uitleg"}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 -mt-0.5 text-xs text-neutral-300 leading-relaxed">{children}</div>
+      )}
     </Card>
   );
 }

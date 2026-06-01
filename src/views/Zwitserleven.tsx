@@ -7,7 +7,7 @@ import {
   type ZwitserlevenStock,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Button, Pill, Stat } from "../components/ui";
+import { Card, Button, Pill, Stat, CollapsibleIntro } from "../components/ui";
 import { TickerSparkline } from "../components/TickerSparkline";
 import { TAB_ICONS, GradientTabIcon } from "../tabIcons";
 import { useMarks } from "../hooks/useMarks";
@@ -554,30 +554,30 @@ export function ZwitserlevenView() {
 
   return (
     <div className="space-y-6">
-      {/* Uitleg */}
-      <Card className="p-4 tab-accent-panel">
-        <div className="flex items-start gap-3">
-          <span className="text-3xl leading-none shrink-0"><GradientTabIcon tab="zwitserleven" /></span>
-          <div className="flex-1">
-            <div className="font-semibold tab-accent-text mb-1">Zwitserleven</div>
-            <p className="text-sm text-neutral-300 leading-relaxed">
-              Fallen angels met dividendzekerheid — aandelen met een <strong>TTM-dividend ≥6,5%</strong>,
-              die minstens <strong>50% onder hun 5-jaars-hoog</strong> noteren, én die in de afgelopen
-              5 jaar minstens <strong>eenmalig ≥25%</strong> stegen en in <strong>≥2 jaren ≥5%</strong> groeiden.
-              Geen dividend-traps: het gaat om echte kwaliteit die tijdelijk uit de gratie is.
-            </p>
-            <p className="text-xs text-neutral-500 mt-2">
-              Universum: <strong>NASDAQ-100 + DJIA + AEX + FTSE 100 + CAC 40 + SMI</strong> (large-caps)
-              + <strong>S&amp;P MidCap 400 + AMX + FTSE 250 + CAC Mid 60 + SMIM</strong> (midcaps)
-              {data?.universe_size ? ` — ${data.universe_size} aandelen` : ""} · Herscan elke 90 dagen per ticker · Handmatige toevoegingen mogen elke beurs zijn.
-            </p>
-          </div>
-        </div>
-      </Card>
+      {/* Uitleg (standaard ingeklapt) */}
+      <CollapsibleIntro title="Zwitserleven" icon={<GradientTabIcon tab="zwitserleven" />}>
+        <p className="text-sm text-neutral-300 leading-relaxed">
+          Fallen angels met dividendzekerheid — aandelen met een <strong>TTM-dividend ≥6,5%</strong>,
+          die minstens <strong>50% onder hun 5-jaars-hoog</strong> noteren, én die in de afgelopen
+          5 jaar minstens <strong>eenmalig ≥25%</strong> stegen en in <strong>≥2 jaren ≥5%</strong> groeiden.
+          Geen dividend-traps: het gaat om echte kwaliteit die tijdelijk uit de gratie is.
+        </p>
+        <p className="text-xs text-neutral-500 mt-2">
+          Universum: <strong>NASDAQ-100 + DJIA + AEX + FTSE 100 + CAC 40 + SMI</strong> (large-caps)
+          + <strong>S&amp;P MidCap 400 + AMX + FTSE 250 + CAC Mid 60 + SMIM</strong> (midcaps)
+          {data?.universe_size ? ` — ${data.universe_size} aandelen` : ""} · Herscan elke 90 dagen per ticker · Handmatige toevoegingen mogen elke beurs zijn.
+        </p>
+      </CollapsibleIntro>
 
       {/* Stats + scan-knoppen */}
       <div className="flex flex-wrap items-center gap-4">
-        <Stat label="Voldoen aan criteria" value={data?.meets_criteria_count ?? 0} icon={TAB_ICONS.zwitserleven} />
+        <Stat
+          label="Voldoen aan criteria"
+          value={data?.meets_criteria_count ?? 0}
+          icon={TAB_ICONS.zwitserleven}
+          onClick={() => setShowFilter(showFilter === "meets" ? "all" : "meets")}
+          active={showFilter === "meets"}
+        />
         <Stat label="Handmatig toegevoegd" value={data?.manual_count ?? 0} />
         <Stat
           label="Universum gescand"
