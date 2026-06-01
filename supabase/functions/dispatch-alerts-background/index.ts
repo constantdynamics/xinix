@@ -395,7 +395,38 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
   }
   let sentEmail = 0, sentNtfy = 0, suppressed = 0, nearLimitAlerts = 0;
   const errors: string[] = [];
+
+  // Onderdrukken: GEEN meldingen voor aandelen die de gebruiker al als 'gezien'
+  // of als favoriet heeft gemarkeerd (die kent hij al), en max 1 melding per
+  // ticker per dag (voorkomt bv. SNBR buy_limit_hit + buy_limit_close op 1 dag).
+  const suppressTickers = new Set<string>();
+  {
+    const [seenRes, favRes] = await Promise.all([
+      sb.from("xinix_seen").select("ticker").in("ticker", tickers),
+      sb.from("xinix_favorites").select("ticker").in("ticker", tickers),
+    ]);
+    for (const r of seenRes.data ?? []) suppressTickers.add(r.ticker as string);
+    for (const r of favRes.data ?? []) suppressTickers.add(r.ticker as string);
+  }
+  // Tickers die vandaag (UTC) al een geslaagde melding kregen → niet nogmaals.
+  const notifiedToday = new Set<string>();
+  {
+    const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
+    const { data: sentRows } = await sb.from("signal_alerts_sent").select("signal_id").eq("success", true).gte("sent_at", dayStart.toISOString());
+    const sentIds = Array.from(new Set((sentRows ?? []).map((r) => r.signal_id as number)));
+    for (let i = 0; i < sentIds.length; i += 200) {
+      const { data: evRows } = await sb.from("signal_events").select("ticker").in("id", sentIds.slice(i, i + 200));
+      for (const r of evRows ?? []) notifiedToday.add(r.ticker as string);
+    }
+  }
+
   for (const sig of signals) {
+    // Onderdruk favorieten/gezien + dubbele melding per dag (vóór alle andere logica).
+    if (suppressTickers.has(sig.ticker) || notifiedToday.has(sig.ticker)) {
+      await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
+      suppressed++;
+      continue;
+    }
     const score = scoreByTicker.get(sig.ticker) ?? null;
     const isLimit = LIMIT_EVENT_TYPES.has(sig.signal_type);
     const medals = medalsByTicker.get(sig.ticker) ?? null;
@@ -440,6 +471,9 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       await sb.from("signal_alerts_sent").insert({ signal_id: sig.id, channel: "ntfy", success: r.ok, error: r.error ?? null });
       if (r.ok) { sentNtfy++; anySent = true; } else errors.push(`ntfy ${sig.id}: ${r.error}`);
     }
+    // Eén geslaagde melding per ticker per dag: markeer 'm zodat volgende
+    // signalen voor dezelfde ticker (deze run én latere runs vandaag) wegvallen.
+    if (anySent) notifiedToday.add(sig.ticker);
     // Markeer alleen als 'verstuurd' wanneer minstens één kanaal slaagde, of
     // wanneer er geen kanaal is geconfigureerd. Bij totale mislukking blijft het
     // event open zodat de volgende run (binnen het 24u-venster) opnieuw probeert.
