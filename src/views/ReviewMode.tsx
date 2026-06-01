@@ -381,7 +381,7 @@ const LIST_OPTIONS: { key: ReviewList; icon: ReactNode; label: string; desc: str
   { key: "feniks", icon: <GradientTabIcon tab="feniks" />, label: "Feniks", desc: "Feniks-aandelen nog niet bekeken of favoriet" },
   { key: "hikkertjes", icon: <GradientTabIcon tab="hikkertjes" />, label: "Hikkertjes", desc: "Hikkertjes nog niet bekeken of favoriet" },
   { key: "zwitserleven", icon: <GradientTabIcon tab="zwitserleven" />, label: "Zwitserleven", desc: "Dividend-aandelen nog niet bekeken of favoriet" },
-  { key: "medailles", icon: <span>🏅</span>, label: "Medailles", desc: "≥2 goud/zilver-medailles (5j koers-runs), nog niet bekeken of favoriet" },
+  { key: "medailles", icon: <span>🏅</span>, label: "Medailles", desc: "≥2 goud/zilver — of ≥1 goud + ≥3 brons (5j koers-runs), nog niet bekeken of favoriet" },
   { key: "watchlist", icon: <span>📋</span>, label: "Watchlist", desc: "Alle watchlist-aandelen nog niet bekeken of favoriet" },
 ];
 
@@ -466,10 +466,13 @@ function buildQueue(
         }));
     case "medailles": {
       // Aandelen met ≥2 medailles die goud en/of zilver zijn (gold+silver ≥ 2),
-      // ongeacht limiet-nabijheid. Sterkste eerst (goud telt dubbel).
+      // OF ≥1 goud + ≥3 brons. Ongeacht limiet-nabijheid. Sterkste eerst.
       return (data?.cards ?? [])
         .filter((c) => notReviewed(c.ticker))
-        .filter((c) => ((c.medal_gold ?? 0) + (c.medal_silver ?? 0)) >= 2)
+        .filter((c) => {
+          const g = c.medal_gold ?? 0, s = c.medal_silver ?? 0, b = c.medal_bronze ?? 0;
+          return (g + s) >= 2 || (g >= 1 && b >= 3);
+        })
         .sort((a, b) => ((b.medal_gold ?? 0) * 2 + (b.medal_silver ?? 0)) - ((a.medal_gold ?? 0) * 2 + (a.medal_silver ?? 0)))
         .map((c) => ({
           ticker: c.ticker,
