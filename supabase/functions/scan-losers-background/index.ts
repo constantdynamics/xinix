@@ -190,6 +190,10 @@ function googleFinanceUrl(yahoo: string, gfBase: string, tvExch: string): string
   // gfBase = originele TradingView-base (bv. "PEZM.H" in plaats van "PEZM-H")
   return `https://www.google.com/finance/quote/${encodeURIComponent(gfBase)}:${gfExch}`;
 }
+// Deep-link naar het beoordeelscherm van precies deze ticker in de app.
+function reviewUrl(yahoo: string): string {
+  return `https://constantdynamics.github.io/xinix/?review=${encodeURIComponent(yahoo.trim().toUpperCase())}`;
+}
 
 interface Bar { date: string; close: number; }
 async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
@@ -411,11 +415,12 @@ Deno.serve(runBackground("scan-losers", async () => {
         const sorted = notifyGems.sort((a, b) => b.gold - a.gold || b.silver - a.silver);
         const lines = sorted.map((g) => {
           const url = googleFinanceUrl(g.yahoo, g.gfBase, g.tvExch);
-          return `🏆${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}\n${url}`;
+          return `🏆${g.gold} \u{1F948}${g.silver} ${g.yahoo} — ${g.name}${g.changePct != null ? ` (${g.changePct.toFixed(1)}%)` : ""}\n📲 ${reviewUrl(g.yahoo)}\n🔗 ${url}`;
         });
-        // Bij meerdere aandelen: open de ntfy-app ipv Google Finance (meer context)
+        // Bij één aandeel: tik = direct naar het beoordeelscherm. Bij meerdere:
+        // open de ntfy-app (meer context, alle review-links staan in de body).
         const clickUrl = sorted.length === 1
-          ? googleFinanceUrl(sorted[0].yahoo, sorted[0].gfBase, sorted[0].tvExch)
+          ? reviewUrl(sorted[0].yahoo)
           : `${server.replace(/\/$/, "")}/${topic}`;
         await sendNtfy(
           server,

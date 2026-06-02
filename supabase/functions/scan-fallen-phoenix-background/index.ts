@@ -149,6 +149,10 @@ function googleFinanceUrl(yahoo: string): string {
   if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
   return `https://www.google.com/finance/quote/${encodeURIComponent(base)}:${exch}`;
 }
+// Deep-link naar het beoordeelscherm van precies deze ticker in de app.
+function reviewUrl(yahoo: string): string {
+  return `https://constantdynamics.github.io/xinix/?review=${encodeURIComponent(yahoo.trim().toUpperCase())}`;
+}
 
 interface Cand { yahoo: string; name: string; exch: string; region: string; geoOk: boolean }
 // TradingView per markt × zoekvenster (Perf.5Y én Perf.Y), met all-time-high
@@ -386,7 +390,7 @@ Deno.serve(runBackground("scan-fallen-phoenix", async () => {
         const sorted = matches.sort((a, b) => b.drawdownPct - a.drawdownPct);
         const lines = sorted.map((g) => {
           const url = googleFinanceUrl(g.yahoo);
-          return `\u{1F985} ${g.yahoo} — ${g.name}\n   piek $${g.peak.toFixed(g.peak < 5 ? 3 : 2)} → nu ~${g.lastClose.toFixed(g.lastClose < 5 ? 3 : 2)} (-${g.drawdownPct.toFixed(0)}%)\n   ${g.profileReasons.join(" · ")}\n${url}`;
+          return `\u{1F985} ${g.yahoo} — ${g.name}\n   piek $${g.peak.toFixed(g.peak < 5 ? 3 : 2)} → nu ~${g.lastClose.toFixed(g.lastClose < 5 ? 3 : 2)} (-${g.drawdownPct.toFixed(0)}%)\n   ${g.profileReasons.join(" · ")}\n📲 ${reviewUrl(g.yahoo)}\n🔗 ${url}`;
         });
         await sendNtfy(
           (settings?.ntfy_server as string) ?? "https://ntfy.sh",
@@ -395,7 +399,7 @@ Deno.serve(runBackground("scan-fallen-phoenix", async () => {
           lines.join("\n\n") + `\n\nGevallen feniksen die matchen met je 4-5★-patroon (feniks + geschikte beurs + goedkoop + thema/leeft). Nu in je watchlist.`,
           5,
           ["star", "bird"],
-          sorted.length === 1 ? googleFinanceUrl(sorted[0].yahoo) : undefined,
+          sorted.length === 1 ? reviewUrl(sorted[0].yahoo) : undefined,
         );
       }
     }
