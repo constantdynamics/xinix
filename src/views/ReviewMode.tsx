@@ -704,6 +704,25 @@ function ReviewCard({
   );
 }
 
+// Bouwt één ReviewItem voor de deep-link modus (notificatie → beoordeelscherm).
+// Pakt wat bekend is uit de dashboard-cards; valt terug op alleen de ticker.
+function singleItemFor(ticker: string, data: Dashboard | null): ReviewItem {
+  const T = ticker.toUpperCase();
+  const card = data?.cards?.find((c) => c.ticker.toUpperCase() === T);
+  return {
+    ticker: card?.ticker ?? T,
+    company: card?.company ?? null,
+    exchange: card?.exchange ?? null,
+    sector: card?.sector ?? null,
+    medal_gold: card?.medal_gold ?? null,
+    medal_silver: card?.medal_silver ?? null,
+    medal_bronze: card?.medal_bronze ?? null,
+    buy_limit: card?.buy_limit ?? null,
+    last_close: card?.summary?.last_close ?? null,
+    dividend_yield_pct: card?.dividend_yield ?? null,
+  };
+}
+
 // ── ReviewModeModal ───────────────────────────────────────────────────────────
 
 function ReviewModeModal({
@@ -711,11 +730,13 @@ function ReviewModeModal({
   data,
   scans,
   zwit,
+  singleTicker,
 }: {
   onClose: () => void;
   data: Dashboard | null;
   scans: ScanResults | null;
   zwit: ZwitserlevenResults | null;
+  singleTicker?: string | null;
 }) {
   const marks = useMarks();
   const [selectedList, setSelectedList] = useState<ReviewList | null>(null);
@@ -724,6 +745,16 @@ function ReviewModeModal({
   // marks tussentijds veranderen, zodat de index stabiel blijft.
   const [queue, setQueue] = useState<ReviewItem[]>([]);
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  const isSingle = !!singleTicker;
+
+  // Deep-link modus (vanuit een notificatie): toon meteen het beoordeelscherm
+  // van die ene ticker, zonder lijstkeuze. Bouwt het item uit de dashboard-data
+  // (en herbouwt zodra die binnen is).
+  useEffect(() => {
+    if (!singleTicker) return;
+    setQueue([singleItemFor(singleTicker, data)]);
+    setQueueIdx(0);
+  }, [singleTicker, data]);
 
   // Sluit bij Escape
   useEffect(() => {
@@ -757,8 +788,8 @@ function ReviewModeModal({
   }
 
   const currentItem = queue[queueIdx] ?? null;
-  const isDone = selectedList && queue.length > 0 && queueIdx >= queue.length;
-  const isEmpty = selectedList && queue.length === 0;
+  const isDone = (selectedList || isSingle) && queue.length > 0 && queueIdx >= queue.length;
+  const isEmpty = (selectedList || isSingle) && queue.length === 0;
 
   return (
     <div
@@ -797,7 +828,7 @@ function ReviewModeModal({
 
         <div className="flex-1 overflow-auto p-3 min-h-0">
           {/* Stap 1: Lijstkeuze */}
-          {!selectedList && (
+          {!selectedList && !isSingle && (
             <div className="space-y-1.5">
               <div className="text-xs text-neutral-400 mb-2">
                 Kies welke aandelen je wilt beoordelen:
@@ -875,7 +906,7 @@ function ReviewModeModal({
           )}
 
           {/* Stap 2: Review card */}
-          {selectedList && currentItem && !isDone && (
+          {(selectedList || isSingle) && currentItem && !isDone && (
             <ReviewCard
               key={queueIdx}
               item={currentItem}
@@ -889,7 +920,7 @@ function ReviewModeModal({
         </div>
 
         {/* Footer: terug naar lijstkeuze */}
-        {selectedList && (
+        {selectedList && !isSingle && (
           <div className="px-4 py-2 border-t border-ink-5 shrink-0">
             <button
               onClick={() => { setSelectedList(null); setQueue([]); }}
@@ -917,12 +948,32 @@ export function ReviewModeButton({
   zwit: ZwitserlevenResults | null;
 }) {
   const [open, setOpen] = useState(false);
+  const [singleTicker, setSingleTicker] = useState<string | null>(null);
+
+  // Deep-link vanuit een notificatie: ?review=TICKER → open meteen het
+  // beoordeelscherm van die ticker. De parameter wordt daarna uit de URL
+  // gehaald zodat refresh/sluiten 'm niet opnieuw opent.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get("review");
+    if (!t) return;
+    setSingleTicker(t.toUpperCase());
+    setOpen(true);
+    params.delete("review");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
+  }, []);
+
+  function close() {
+    setOpen(false);
+    setSingleTicker(null);
+  }
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => { setSingleTicker(null); setOpen(true); }}
         title="Beoordeel aandelen: hartje, sterren of gezien"
         className="inline-flex items-center justify-center h-7 px-2.5 text-xs rounded-lg font-bold transition active:scale-95 select-none"
         style={{
@@ -944,10 +995,11 @@ export function ReviewModeButton({
 
       {open && (
         <ReviewModeModal
-          onClose={() => setOpen(false)}
+          onClose={close}
           data={data}
           scans={scans}
           zwit={zwit}
+          singleTicker={singleTicker}
         />
       )}
     </>

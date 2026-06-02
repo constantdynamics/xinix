@@ -152,6 +152,10 @@ function googleFinanceUrl(ticker: string, exchange?: string | null): string {
 function yahooFinanceUrl(ticker: string): string {
   return `https://finance.yahoo.com/quote/${encodeURIComponent(ticker.trim().toUpperCase())}`;
 }
+// Deep-link naar het beoordeelscherm van precies deze ticker in de app.
+function reviewUrl(ticker: string): string {
+  return `https://constantdynamics.github.io/xinix/?review=${encodeURIComponent(ticker.trim().toUpperCase())}`;
+}
 interface ScoreSnapshot { action: string; final_score: number; expected_outcome: { catalystLabel?: string; peakReturnEst?: number; t90ReturnEst?: number; hitRateBaseline?: number; expectedPeakPrice?: number | null; expectedT90Price?: number | null; exitWindowDays?: number; } | null; components: { nearest_catalyst?: { type?: string; daysUntil?: number | null; date?: string | null; } | null; } | null; trade_setup: { entry?: number; target?: number; stop?: number; rr?: number; } | null; }
 function pct(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `${x >= 0 ? "+" : ""}${(x * 100).toFixed(0)}%`; }
 function fmtPrice(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `$${x.toFixed(x < 5 ? 3 : 2)}`; }
@@ -225,6 +229,7 @@ function formatAlert(
   // SPACs/OTC/Aziatische tickers (zoals ATON onlangs). Yahoo Finance heeft per
   // definitie elke ticker uit onze DB. Beide links staan bovenaan voor preview.
   const yfUrl = yahooFinanceUrl(sig.ticker);
+  lines.push(`📲 Beoordeel: ${reviewUrl(sig.ticker)}`);
   lines.push(`🔗 ${gfUrl}`);
   lines.push(`🔁 ${yfUrl}`);
   lines.push(`${tickerDisp}${company ? ` (${company})` : ""}`);
@@ -467,7 +472,7 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     }
     if (s.ntfy_topic) {
       anyAttempted = true;
-      const r = await sendNtfy(s.ntfy_server, s.ntfy_topic, view.title, view.body, view.priority, view.tags, clickUrl);
+      const r = await sendNtfy(s.ntfy_server, s.ntfy_topic, view.title, view.body, view.priority, view.tags, reviewUrl(sig.ticker));
       await sb.from("signal_alerts_sent").insert({ signal_id: sig.id, channel: "ntfy", success: r.ok, error: r.error ?? null });
       if (r.ok) { sentNtfy++; anySent = true; } else errors.push(`ntfy ${sig.id}: ${r.error}`);
     }
