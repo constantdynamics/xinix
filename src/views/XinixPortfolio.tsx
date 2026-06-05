@@ -3186,7 +3186,7 @@ function FamiliesView() {
           </button>
           <span className="text-xs text-neutral-500 ml-2">
             {chartView === "ploegen"
-              ? `Gemiddelde return% per familie over ${dates.length} dagen (${dates.length > 0 ? `${dates[0]} → ${dates[dates.length - 1]}` : "—"})`
+              ? `Gemiddelde return% per familie over ${dates.length} handelsdagen (${dates.length > 0 ? `${dates[0]} → ${dates[dates.length - 1]}` : "—"})`
               : `${barStrategies.length} strategieën gesorteerd op return%`}
           </span>
         </div>
