@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   try {
     const sb = getServiceClient();
-    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, equityRes, tickerMetaRes] = await Promise.all([
+    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, famSeriesRes, posDaysRes, tickerMetaRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected, parent_id").eq("active", true),
       sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, last_run_at, started_at"),
       sb.from("xinix_strategy_positions").select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, closed_reason, qty, avg_price, partial_exits, entry_date, closed_at").not("closed_at","is",null),
@@ -47,11 +47,15 @@ Deno.serve(async (req) => {
         .not("closed_at", "is", null)
         .order("closed_at", { ascending: false })
         .limit(500),
-      // Equity-historie voor de Families-grafiek (alle dagelijkse snapshots).
-      // Met 220 strategieën × ~90d worden dat ~20k rows; goed te doen voor één call.
-      sb.from("xinix_strategy_equity")
-        .select("strategy_id, date, total_equity")
-        .order("date", { ascending: true }),
+      // Families-grafiek: per groep per handelsdag het gemiddelde rendement,
+      // server-side geaggregeerd + gefilterd op echte handelsdagen via RPC.
+      // NOOIT meer de volledige xinix_strategy_equity-tabel ophalen: dat liep
+      // over de 10.000-rijenlimiet van de Data API (553 strategieën × dagen),
+      // waardoor de laatste dag maar deels gevuld was en recente dagen wegvielen.
+      // Zie migratie 2026-06-05_xinix_family_series_rpc.sql.
+      sb.rpc("xinix_family_series", { p_max_days: 120 }),
+      // Positieve-dagen per strategie (ook server-side geaggregeerd, zelfde reden).
+      sb.rpc("xinix_strategy_positive_days"),
       // Datums waarop een ticker zijn feniks- of poefie-event had.
       // Gebruiken we voor date-overlap met de hold-periode van een
       // gesloten positie — eindelijk een accurate "capture"-teller.
@@ -255,20 +259,15 @@ Deno.serve(async (req) => {
     for (const s of (statesRes.data ?? [])) stateByStrat.set(s.strategy_id as number, s as Record<string, unknown>);
 
     // Positieve-dagen per strategie: aandeel equity-snapshots waar
-    // total_equity > initial_capital. Maatstaf voor hoe vaak de portefeuille
-    // in de plus stond gedurende de hele simulatie-reeks.
+    // total_equity > initial_capital. Server-side geaggregeerd via de RPC
+    // xinix_strategy_positive_days zodat de 10k-rijenlimiet niet meer bijt.
     type PosDays = { pos: number; total: number };
     const posDaysByStrat = new Map<number, PosDays>();
-    for (const r of (equityRes.data ?? [])) {
-      const sid = r.strategy_id as number;
-      const state = stateByStrat.get(sid);
-      const initial = state ? Number((state as Record<string, unknown>).initial_capital ?? 10000) : 10000;
-      const eq = Number(r.total_equity);
-      if (!Number.isFinite(eq) || initial <= 0) continue;
-      const cur = posDaysByStrat.get(sid) ?? { pos: 0, total: 0 };
-      cur.total++;
-      if (eq > initial) cur.pos++;
-      posDaysByStrat.set(sid, cur);
+    for (const r of (posDaysRes.data ?? [])) {
+      posDaysByStrat.set(r.strategy_id as number, {
+        pos: Number(r.pos_days ?? 0),
+        total: Number(r.total_days ?? 0),
+      });
     }
 
     interface ExitReason { reason: string; count: number; avg_return_pct: number; sum_usd: number }
@@ -509,33 +508,22 @@ Deno.serve(async (req) => {
     const lastRun = results.find((r) => r.last_run_at)?.last_run_at ?? null;
     const runCount = results.filter((r) => r.closed_count > 0).length;
 
-    // ── Families: per-groep gemiddelde return + equity-tijdreeks per dag ───
-    // initial_capital per strategie (default 10000) om return% per snapshot te bepalen.
-    const initialByStrat = new Map<number, number>();
-    for (const r of (statesRes.data ?? [])) {
-      initialByStrat.set(r.strategy_id as number, Number(r.initial_capital ?? 10000));
-    }
-    const grpByStrat = new Map<number, string>();
-    for (const r of (stratRes.data ?? [])) grpByStrat.set(r.id as number, (r.grp as string) ?? "?");
-
-    // dailySum[grp][date] = { sumRetPct, n }
-    const dailyMap: Map<string, Map<string, { sumRetPct: number; n: number }>> = new Map();
+    // ── Families: per-groep gemiddelde return-tijdreeks per handelsdag ─────
+    // Komt server-side geaggregeerd + handelsdag-gefilterd uit de RPC
+    // xinix_family_series: geen weekenden, geen dagen zonder koersbeweging
+    // (stale data), en geen 10k-rijenlimiet meer. De portefeuilles handelen
+    // internationaal (VS/CA/UK/DE/AU/HK), dus de RPC gebruikt bewust GEEN
+    // vaste VS-feestdagkalender maar werkelijke koersbeweging als maatstaf.
+    // seriesByGrp[grp][date] = { avg, n }.
+    const seriesByGrp = new Map<string, Map<string, { avg: number; n: number }>>();
     const dateSet = new Set<string>();
-    for (const r of (equityRes.data ?? [])) {
-      const sid = r.strategy_id as number;
-      const grp = grpByStrat.get(sid);
-      if (!grp) continue;
-      const date = r.date as string;
-      const initial = initialByStrat.get(sid) ?? 10000;
-      const eq = Number(r.total_equity);
-      if (!Number.isFinite(eq) || initial <= 0) continue;
-      const retPct = ((eq - initial) / initial) * 100;
+    for (const r of (famSeriesRes.data ?? [])) {
+      const grp = r.grp as string;
+      const date = r.d as string;
       dateSet.add(date);
-      let perGrp = dailyMap.get(grp);
-      if (!perGrp) { perGrp = new Map(); dailyMap.set(grp, perGrp); }
-      const cur = perGrp.get(date) ?? { sumRetPct: 0, n: 0 };
-      cur.sumRetPct += retPct; cur.n += 1;
-      perGrp.set(date, cur);
+      let perGrp = seriesByGrp.get(grp);
+      if (!perGrp) { perGrp = new Map(); seriesByGrp.set(grp, perGrp); }
+      perGrp.set(date, { avg: Number(r.avg_return_pct), n: Number(r.n ?? 0) });
     }
     const allDates = [...dateSet].sort();
 
@@ -553,10 +541,10 @@ Deno.serve(async (req) => {
     }
     const families = [...grpStats.entries()]
       .map(([grp, s]) => {
-        const series = dailyMap.get(grp);
+        const series = seriesByGrp.get(grp);
         const points = allDates.map((d) => {
           const cur = series?.get(d);
-          return cur && cur.n > 0 ? { date: d, avg_return_pct: cur.sumRetPct / cur.n, n: cur.n } : { date: d, avg_return_pct: null, n: 0 };
+          return cur ? { date: d, avg_return_pct: cur.avg, n: cur.n } : { date: d, avg_return_pct: null, n: 0 };
         });
         return {
           grp,
