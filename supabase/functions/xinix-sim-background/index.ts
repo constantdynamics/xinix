@@ -31,6 +31,25 @@ function getServiceClient() {
 function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r) return false; return (req.headers.get("authorization") ?? "") === `Bearer ${r}`; }
 function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
 
+// De Data API kapt elke request af op max-rows (hier 10k) — met 4000+ open
+// posities en 7000+ actieve signalen is dat een stille-truncatie-risico.
+// Daarom alles in pagina's van 1000 ophalen. `build` moet een query teruggeven
+// met dezelfde filters én een stabiele sortering (bv. .order("id")).
+async function fetchAllPages<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; from < 200_000; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return { data: out, error: null };
+}
+
 // ── Transactiekosten ──────────────────────────────────────────────────────────
 const TX_COST = 0.001;
 
@@ -782,7 +801,13 @@ Deno.serve(async (req) => {
     const result = await run();
     return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }), { status: 500, headers: { "content-type": "application/json" } });
+    const msg = e instanceof Error ? e.message : String(e);
+    // Mislukte runs ook in signal_runs loggen — anders blijft monitoring
+    // (status-tab + degraded_jobs) blind voor sim-fouten.
+    try {
+      await getServiceClient().from("signal_runs").insert({ job: "xinix-sim", finished_at: new Date().toISOString(), ok: false, message: msg });
+    } catch { /* logging mag de foutrespons niet blokkeren */ }
+    return new Response(JSON.stringify({ ok: false, error: msg }), { status: 500, headers: { "content-type": "application/json" } });
   }
 });
 
@@ -815,20 +840,37 @@ async function run() {
   const stateRows = STRATEGIES.map((s) => ({ strategy_id: idBySlug.get(s.slug)! })).filter((r) => r.strategy_id != null);
   await sb.from("xinix_strategy_state").upsert(stateRows, { onConflict: "strategy_id", ignoreDuplicates: true });
 
-  // 2. Gedeelde marktdata ophalen
+  // 2. Gedeelde marktdata ophalen — gepagineerd waar het >1000 rijen kan worden.
+  // Hard falen op query-fouten: doorrekenen met halve data corrumpeert cash en
+  // posities (de state-fallback verderop is $10.000 — een mislukte state-query
+  // zou elke portefeuille resetten).
   const [statesRes, openRes, tickersRes, summaryRes, signalsRes, regimeRes, zwitserlevenRes] = await Promise.all([
-    sb.from("xinix_strategy_state").select("strategy_id, cash, max_equity, max_drawdown_pct"),
-    sb.from("xinix_strategy_positions")
+    fetchAllPages((f, t) => sb.from("xinix_strategy_state")
+      .select("strategy_id, cash, max_equity, max_drawdown_pct").order("strategy_id").range(f, t)),
+    fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
       .select("id, strategy_id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, take_profit_price, entry_signal_types, partial_exits")
-      .is("closed_at", null),
-    sb.from("signal_tickers").select("ticker, sector, goud_score, buy_limit, medal_gold, is_hikkertje, is_poefie, dividend_yield, first_price_date").eq("active", true).eq("price_benched", false),
-    sb.from("signal_price_summary").select("ticker, last_close"),
-    sb.from("signal_events").select("ticker, signal_type, severity")
+      .is("closed_at", null).order("id").range(f, t)),
+    fetchAllPages((f, t) => sb.from("signal_tickers")
+      .select("ticker, sector, goud_score, buy_limit, medal_gold, is_hikkertje, is_poefie, dividend_yield, first_price_date")
+      .eq("active", true).eq("price_benched", false).order("id").range(f, t)),
+    fetchAllPages((f, t) => sb.from("signal_price_summary")
+      .select("ticker, last_close").order("ticker").range(f, t)),
+    // Alle actieve (niet-verlopen) signalen. Voorheen .limit(3000) terwijl er
+    // ~7000 actief zijn: oudere-maar-geldige signalen vielen stilletjes weg uit
+    // rankScore en uit de signaalverval-check.
+    fetchAllPages((f, t) => sb.from("signal_events")
+      .select("ticker, signal_type, severity")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
-      .order("detected_at", { ascending: false }).limit(3000),
+      .order("id").range(f, t)),
     sb.from("market_regime").select("is_bull, regime, updated_at").eq("id", 1).maybeSingle(),
     sb.from("zwitserleven_stocks").select("ticker").eq("meets_criteria", true),
   ]);
+  for (const [name, res] of [
+    ["strategy_state", statesRes], ["open posities", openRes], ["tickers", tickersRes],
+    ["koersen", summaryRes], ["signalen", signalsRes], ["zwitserleven", zwitserlevenRes],
+  ] as const) {
+    if (res.error) throw new Error(`query ${name} faalde: ${res.error.message}`);
+  }
 
   // Zwitserleven-set (tickers die aan alle 4 criteria voldoen)
   const zwitserlevenSet = new Set<string>();
@@ -1197,24 +1239,40 @@ async function run() {
     equityRows.push({ strategy_id: sid, date: today, cash, positions_value: posVal, total_equity: totalEquity, positions_count: stillOpenTickers.size, computed_at: now.toISOString() });
   }
 
-  // 4. Batch writes
-  for (const ex of exits) {
-    await sb.from("xinix_strategy_positions").update(ex.data).eq("id", ex.id);
-  }
-  for (const r of stopRatchets) {
-    await sb.from("xinix_strategy_positions").update({ stop_loss_price: r.stop_loss_price }).eq("id", r.id);
-  }
-  for (const u of partialSells) {
-    await sb.from("xinix_strategy_positions").update({ qty: u.new_qty, partial_exits: u.new_partial_exits }).eq("id", u.id);
-  }
-  if (buys.length > 0) {
-    for (let i = 0; i < buys.length; i += 500) {
-      await sb.from("xinix_strategy_positions").insert(buys.slice(i, i + 500));
+  // 4. Batch writes — mét foutcontrole. Voorheen werden schrijffouten genegeerd
+  // en logde de run alsnog "ok"; daardoor konden cash en posities stil uit de
+  // pas lopen. Bij een fout stoppen we vóór de state/equity-writes: posities
+  // zonder bijgewerkte state worden de volgende run opnieuw verwerkt, terwijl
+  // een bijgewerkte state zonder positie-writes cash dubbel zou tellen.
+  async function writeChunked<T>(
+    label: string, items: T[],
+    write: (item: T) => PromiseLike<{ error: { message: string } | null }>,
+  ) {
+    const CONC = 20;
+    for (let i = 0; i < items.length; i += CONC) {
+      const results = await Promise.all(items.slice(i, i + CONC).map(write));
+      const failed = results.filter((r) => r.error);
+      if (failed.length > 0) throw new Error(`${label}: ${failed.length} schrijffouten (eerste: ${failed[0].error!.message})`);
     }
   }
-  await sb.from("xinix_strategy_state").upsert(stateUpdates, { onConflict: "strategy_id" });
+
+  await writeChunked("exits", exits, (ex) =>
+    sb.from("xinix_strategy_positions").update(ex.data).eq("id", ex.id));
+  await writeChunked("stop-ratchets", stopRatchets, (r) =>
+    sb.from("xinix_strategy_positions").update({ stop_loss_price: r.stop_loss_price }).eq("id", r.id));
+  await writeChunked("deelverkopen", partialSells, (u) =>
+    sb.from("xinix_strategy_positions").update({ qty: u.new_qty, partial_exits: u.new_partial_exits }).eq("id", u.id));
+  if (buys.length > 0) {
+    for (let i = 0; i < buys.length; i += 500) {
+      const { error } = await sb.from("xinix_strategy_positions").insert(buys.slice(i, i + 500));
+      if (error) throw new Error(`buys: ${error.message}`);
+    }
+  }
+  const { error: stateErr } = await sb.from("xinix_strategy_state").upsert(stateUpdates, { onConflict: "strategy_id" });
+  if (stateErr) throw new Error(`state-upsert: ${stateErr.message}`);
   for (let i = 0; i < equityRows.length; i += 200) {
-    await sb.from("xinix_strategy_equity").upsert(equityRows.slice(i, i + 200), { onConflict: "strategy_id,date" });
+    const { error } = await sb.from("xinix_strategy_equity").upsert(equityRows.slice(i, i + 200), { onConflict: "strategy_id,date" });
+    if (error) throw new Error(`equity-upsert: ${error.message}`);
   }
 
   await sb.from("signal_runs").insert({

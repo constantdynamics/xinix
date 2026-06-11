@@ -305,9 +305,11 @@ export function LimitsView({
           return yb - ya || b.distance - a.distance || a.ticker.localeCompare(b.ticker);
         }
         case "price_asc":
-          return (a.current ?? Infinity) - (b.current ?? Infinity);
+          // ?? Infinity zet rijen zonder koers achteraan; de ticker-tiebreaker
+          // vangt ook het Infinity-Infinity=NaN-geval af (NaN is falsy).
+          return (a.current ?? Infinity) - (b.current ?? Infinity) || a.ticker.localeCompare(b.ticker);
         case "price_desc":
-          return (b.current ?? -Infinity) - (a.current ?? -Infinity);
+          return (b.current ?? -Infinity) - (a.current ?? -Infinity) || a.ticker.localeCompare(b.ticker);
         case "ticker":
           return a.ticker.localeCompare(b.ticker);
       }

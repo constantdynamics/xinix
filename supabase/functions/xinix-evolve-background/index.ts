@@ -158,6 +158,24 @@ function cfgHash(cfg: Cfg): string {
   return JSON.stringify(Object.fromEntries(Object.entries(cfg).sort()));
 }
 
+// De Data API kapt elke request af op max-rows (hier 10k). Open posities
+// (4000+) en gesloten posities (3500+, groeiend) moeten gepagineerd worden —
+// anders selecteert de evolutie op stilletjes afgekapte resultaten.
+async function fetchAllPages<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; from < 200_000; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return { data: out, error: null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
 
@@ -173,12 +191,15 @@ Deno.serve(async (req) => {
     const sb = getServiceClient();
 
     // ── Tijdcontrole ──────────────────────────────────────────────────────────
+    // NB: signal_runs heeft geen kolom `ran_at` — die stond hier eerder en liet
+    // deze query (en de run-insert onderaan) stilletjes falen, waardoor evoluties
+    // nooit gelogd werden en de cyclus-bewaking nooit werkte.
     const { data: lastEvolve } = await sb
-      .from("signal_runs").select("ran_at").eq("job", "xinix-evolve").eq("ok", true)
-      .order("ran_at", { ascending: false }).limit(1).maybeSingle();
+      .from("signal_runs").select("finished_at").eq("job", "xinix-evolve").eq("ok", true)
+      .order("finished_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
 
     let readyToEvolve = false;
-    if (!lastEvolve) {
+    if (!lastEvolve?.finished_at) {
       const { data: oldest } = await sb
         .from("xinix_strategy_state").select("started_at")
         .order("started_at", { ascending: true }).limit(1).maybeSingle();
@@ -186,12 +207,12 @@ Deno.serve(async (req) => {
         readyToEvolve = (Date.now() - new Date(oldest.started_at).getTime()) / 86400000 >= MIN_AGE_DAYS;
       }
     } else {
-      readyToEvolve = (Date.now() - new Date(lastEvolve.ran_at).getTime()) / 86400000 >= MIN_CYCLE_DAYS;
+      readyToEvolve = (Date.now() - new Date(lastEvolve.finished_at).getTime()) / 86400000 >= MIN_CYCLE_DAYS;
     }
 
     if (!readyToEvolve && !isForced) {
-      const msg = lastEvolve
-        ? `Vorige evolutie was ${((Date.now() - new Date(lastEvolve.ran_at).getTime()) / 86400000).toFixed(0)} dagen geleden — minimum is ${MIN_CYCLE_DAYS}`
+      const msg = lastEvolve?.finished_at
+        ? `Vorige evolutie was ${((Date.now() - new Date(lastEvolve.finished_at).getTime()) / 86400000).toFixed(0)} dagen geleden — minimum is ${MIN_CYCLE_DAYS}`
         : `Strategieën zijn nog geen ${MIN_AGE_DAYS} dagen actief`;
       return new Response(JSON.stringify({ skipped: true, reason: msg }), {
         status: 200, headers: { ...cors(req), "content-type": "application/json" },
@@ -201,14 +222,24 @@ Deno.serve(async (req) => {
     // ── Data ophalen ──────────────────────────────────────────────────────────
     const [stratRes, statesRes, openRes, summaryRes, closedRes, lastEvolveRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected").eq("active", true),
-      sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, max_drawdown_pct"),
-      sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price").is("closed_at", null),
-      sb.from("signal_price_summary").select("ticker, last_close"),
-      sb.from("xinix_strategy_positions").select("strategy_id, return_pct").not("closed_at", "is", null),
+      fetchAllPages((f, t) => sb.from("xinix_strategy_state")
+        .select("strategy_id, cash, initial_capital, max_drawdown_pct").order("strategy_id").range(f, t)),
+      fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
+        .select("strategy_id, ticker, qty, avg_price").is("closed_at", null).order("id").range(f, t)),
+      fetchAllPages((f, t) => sb.from("signal_price_summary")
+        .select("ticker, last_close").order("ticker").range(f, t)),
+      fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
+        .select("strategy_id, return_pct").not("closed_at", "is", null).order("id").range(f, t)),
       // Vorige evolve-run voor stagnatie-detectie (adaptieve mutatierate)
       sb.from("signal_runs").select("metrics").eq("job", "xinix-evolve").eq("ok", true)
-        .order("ran_at", { ascending: false }).limit(1).maybeSingle(),
+        .order("finished_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle(),
     ]);
+    for (const [name, res] of [
+      ["strategieën", stratRes], ["state", statesRes], ["open posities", openRes],
+      ["koersen", summaryRes], ["gesloten posities", closedRes],
+    ] as const) {
+      if (res.error) throw new Error(`query ${name} faalde: ${res.error.message}`);
+    }
 
     const strats = stratRes.data ?? [];
     if (!strats.length) {
@@ -439,8 +470,8 @@ Deno.serve(async (req) => {
       + `${offspringRows.length} nakomelingen gespawnd (${donors.length} donors${sharpeMsg}${nicheMsg}${stagMsg}). `
       + `Beschermd: ${protected_.length} + ${ELITE_COUNT} elites. Niches actief: ${nichesNow}. Top-fitness: ${avgTopFitness.toFixed(1)}pp.`;
 
-    await sb.from("signal_runs").insert({
-      job: "xinix-evolve", ok: true, message: logMsg, ran_at: retiredAt,
+    const { error: logErr } = await sb.from("signal_runs").insert({
+      job: "xinix-evolve", ok: true, message: logMsg, finished_at: retiredAt,
       metrics: {
         generation: nextGen, avg_top_fitness: +avgTopFitness.toFixed(2),
         is_stagnating: isStagnating, max_muts: maxMuts,
@@ -448,6 +479,7 @@ Deno.serve(async (req) => {
         niche_redirects: nicheRedirects, niches_active: nichesNow,
       },
     });
+    if (logErr) console.error("evolve: run-log insert faalde:", logErr.message);
 
     const nicheDistribution: Record<string, number> = {};
     for (const [nk, cnt] of nicheCounts.entries()) nicheDistribution[nk] = cnt;

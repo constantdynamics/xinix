@@ -25,21 +25,48 @@ function cors(req: Request) {
   };
 }
 
+// De Data API kapt elke request af op max-rows (hier 10k). Gesloten posities
+// groeien onbeperkt (3500+ en ~80/dag erbij) — zonder paginering zouden de
+// rankings/winrates stilletjes op een deel van de trades gebaseerd raken.
+async function fetchAllPages<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; from < 200_000; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return { data: out, error: null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   try {
     const sb = getServiceClient();
     const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, famSeriesRes, posDaysRes, tickerMetaRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected, parent_id").eq("active", true),
-      sb.from("xinix_strategy_state").select("strategy_id, cash, initial_capital, last_run_at, started_at"),
-      sb.from("xinix_strategy_positions").select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, closed_reason, qty, avg_price, partial_exits, entry_date, closed_at").not("closed_at","is",null),
-      sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price, entry_signal_types, entry_sector, entry_date, entry_reason").is("closed_at", null),
-      sb.from("signal_price_summary").select("ticker, last_close"),
+      fetchAllPages((f, t) => sb.from("xinix_strategy_state")
+        .select("strategy_id, cash, initial_capital, last_run_at, started_at").order("strategy_id").range(f, t)),
+      fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
+        .select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, closed_reason, qty, avg_price, partial_exits, entry_date, closed_at")
+        .not("closed_at","is",null).order("id").range(f, t)),
+      fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
+        .select("strategy_id, ticker, qty, avg_price, entry_signal_types, entry_sector, entry_date, entry_reason")
+        .is("closed_at", null).order("id").range(f, t)),
+      fetchAllPages((f, t) => sb.from("signal_price_summary")
+        .select("ticker, last_close").order("ticker").range(f, t)),
       sb.from("xinix_strategies").select("id, slug, name, grp, generation, retired_at, config")
         .eq("active", false).order("retired_at", { ascending: false }).limit(30),
-      sb.from("signal_runs").select("ran_at, message")
+      // NB: signal_runs heeft geen kolom `ran_at` — de oude query op die kolom
+      // faalde stilletjes, waardoor de evolutie-info in het dashboard altijd
+      // leeg bleef (0 cycli, geen run-log).
+      sb.from("signal_runs").select("finished_at, message")
         .eq("job", "xinix-evolve").eq("ok", true)
-        .order("ran_at", { ascending: false }).limit(10),
+        .order("finished_at", { ascending: false, nullsFirst: false }).limit(10),
       sb.from("xinix_strategy_state").select("started_at")
         .order("started_at", { ascending: true }).limit(1),
       sb.from("xinix_strategy_positions")
@@ -61,8 +88,8 @@ Deno.serve(async (req) => {
       // gesloten positie — eindelijk een accurate "capture"-teller.
       // Voor medailles en hikkertje-spikes hebben we geen earned-date;
       // die KPI's zijn vervangen door return-drempels.
-      sb.from("signal_tickers")
-        .select("ticker, phoenix_50x_date, poefie_last_date"),
+      fetchAllPages((f, t) => sb.from("signal_tickers")
+        .select("ticker, phoenix_50x_date, poefie_last_date").order("id").range(f, t)),
     ]);
 
     type TickerDates = { phoenixDate: number | null; poefieDate: number | null };
@@ -490,7 +517,7 @@ Deno.serve(async (req) => {
 
     // ── Evolutie-metadata ─────────────────────────────────────────────────────
     const evolveRuns = evolveRunRes.data ?? [];
-    const lastEvolveAt = evolveRuns[0]?.ran_at ?? null;
+    const lastEvolveAt = evolveRuns[0]?.finished_at ?? null;
     const oldestStartedAt = (oldestStateRes.data?.[0] as Record<string, unknown> | undefined)?.started_at as string | null ?? null;
 
     // Volgende evolutie: 180 dagen na laatste cyclus (of na startdatum als nog geen cyclus)
@@ -583,7 +610,7 @@ Deno.serve(async (req) => {
           holdDays:    (r.config as Record<string, unknown>).holdDays,
           sector:      (r.config as Record<string, unknown>).sector,
         })),
-        run_log: evolveRuns.map(r => ({ at: r.ran_at, message: r.message })),
+        run_log: evolveRuns.map(r => ({ at: r.finished_at, message: r.message })),
       },
     }), { status: 200, headers: { ...cors(req), "content-type": "application/json" } });
   } catch (e) {

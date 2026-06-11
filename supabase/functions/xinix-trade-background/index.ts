@@ -43,6 +43,24 @@ function checkAuth(req: Request) { const r = Deno.env.get("ADMIN_TOKEN"); if (!r
 function checkCron(req: Request) { const r = Deno.env.get("CRON_SECRET"); if (!r) return false; return (req.headers.get("x-cron-secret") ?? "") === r; }
 function checkAdminOrCron(req: Request) { return checkAuth(req) || checkCron(req); }
 
+// De Data API kapt elke request af op max-rows (hier 10k). Koersen (3600+),
+// tickers (2200+), strategieposities (4000+) en actieve signalen (7000+)
+// moeten daarom gepagineerd opgehaald worden — anders stille truncatie.
+async function fetchAllPages<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; from < 200_000; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return { data: out, error: null };
+}
+
 // TX_COST en RED_SEVERITY_QUALIFIES zijn niet instelbaar via de DB — zij blijven constant.
 const TX_COST = 0.001;
 const RED_SEVERITY_QUALIFIES = true;
@@ -106,23 +124,37 @@ async function run(): Promise<RunResult> {
   // met HOLD_DAYS zodat korte/lange holds dezelfde verhouding krijgen.
   const SIGNAL_DECAY_MIN_DAYS = Math.max(14, Math.round(HOLD_DAYS * 0.33));
 
-  // 1b) State + open posities + marktdata ophalen.
+  // 1b) State + open posities + marktdata ophalen (gepagineerd waar nodig).
   const [stateRes, posRes, summaryRes, tickersRes, signalsRes, regimeRes, stratPosRes] = await Promise.all([
     sb.from("xinix_paper_state").select("*").eq("id", 1).single(),
     sb.from("xinix_paper_positions")
       .select("id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, entry_signal_types, entry_sector, partial_exits")
       .is("closed_at", null),
-    sb.from("signal_price_summary").select("ticker, last_close"),
-    sb.from("signal_tickers").select("ticker, company, sector, goud_score, buy_limit, active, price_benched, first_price_date").eq("active", true).eq("price_benched", false),
-    sb.from("signal_events").select("ticker, signal_type, severity, detected_at")
+    fetchAllPages((f, t) => sb.from("signal_price_summary")
+      .select("ticker, last_close").order("ticker").range(f, t)),
+    fetchAllPages((f, t) => sb.from("signal_tickers")
+      .select("ticker, company, sector, goud_score, buy_limit, active, price_benched, first_price_date")
+      .eq("active", true).eq("price_benched", false).order("id").range(f, t)),
+    // Alle actieve (niet-verlopen) signalen. Voorheen .limit(2000) terwijl er
+    // ~7000 actief zijn: oudere-maar-geldige signalen vielen stilletjes weg uit
+    // rankScore en uit de signaalverval-check.
+    fetchAllPages((f, t) => sb.from("signal_events")
+      .select("ticker, signal_type, severity, detected_at")
       .or("expires_at.is.null,expires_at.gt." + now.toISOString())
-      .order("detected_at", { ascending: false }).limit(2000),
+      .order("id").range(f, t)),
     sb.from("market_regime").select("is_bull, regime, updated_at").eq("id", 1).maybeSingle(),
     // Hoeveel strategieën houden momenteel elk ticker? → consensus-signaal
-    sb.from("xinix_strategy_positions").select("ticker").is("closed_at", null),
+    fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
+      .select("ticker").is("closed_at", null).order("id").range(f, t)),
   ]);
 
   if (stateRes.error || !stateRes.data) throw new Error(`state: ${stateRes.error?.message ?? "no state"}`);
+  for (const [name, res] of [
+    ["open posities", posRes], ["koersen", summaryRes], ["tickers", tickersRes],
+    ["signalen", signalsRes], ["strategieposities", stratPosRes],
+  ] as const) {
+    if (res.error) throw new Error(`query ${name} faalde: ${res.error.message}`);
+  }
   let cash = Number(stateRes.data.cash);
 
   // Marktregime: 3 staten. Bij ontbrekende/verouderde data (>3d) → standaard strong_bull.

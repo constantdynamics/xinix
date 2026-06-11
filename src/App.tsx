@@ -26,6 +26,37 @@ import { useUiSettings } from "./hooks/useUiSettings";
 import { TAB_ICONS } from "./tabIcons";
 import { ReviewModeButton } from "./views/ReviewMode";
 
+// Vangt render-crashes van een view op zodat één kapotte tab niet de hele
+// app wit maakt. resetKey = actieve tab: van tab wisselen probeert opnieuw.
+class ViewErrorBoundary extends React.Component<
+  { resetKey: string; children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-xl border border-fog-loss/40 bg-fog-loss/10 p-4 text-sm space-y-2">
+          <div className="font-semibold text-fog-loss">Deze weergave is gecrasht.</div>
+          <div className="text-neutral-300 font-mono text-xs break-all">{this.state.error.message}</div>
+          <Button size="sm" variant="secondary" onClick={() => this.setState({ error: null })}>
+            Probeer opnieuw
+          </Button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
 const HELP_PAGE: Record<Tab, string> = {
   dashboard: "dashboard",
@@ -342,30 +373,32 @@ export function App() {
         {/* Initial loading skeleton — alleen tonen als er nog geen data is */}
         {loading && !data && !error && <DashboardSkeleton />}
 
-        {tab === "dashboard" && data && (
-          <DashboardView data={data} onRefresh={() => refresh(true)} onNavigate={setTab} />
-        )}
-        {tab === "settings" && <SettingsView data={data ?? undefined} />}
-        {tab === "tickers" && data && (
-          <TickersView data={data} onRefresh={() => refresh(true)} />
-        )}
-        {tab === "limits" && data && (
-          <LimitsView data={data} onRefresh={() => refresh(true)} />
-        )}
-        {tab === "backtest" && <BacktestView />}
-        {tab === "scores" && <ScoresView exchangeByTicker={data ? new Map(data.cards.map((c) => [c.ticker, c.exchange ?? null])) : undefined} />}
-        {tab === "track-record" && <TrackRecordView />}
-        {tab === "signal-log" && <SignalLogView />}
-        {tab === "scans" && <ScansView />}
-        {tab === "xinix" && <XinixPortfolioView />}
-        {tab === "feniks" && <PhoenixView />}
-        {tab === "poefies" && <PoefiesView />}
-        {tab === "hikkertjes" && <HikkertjesView />}
-        {tab === "zwitserleven" && <ZwitserlevenView />}
-        {tab === "favorieten" && <FavorietenView initialDashboard={data} initialScans={scans} />}
-        {tab === "status" && <HealthView />}
-        {tab === "encyclopedie" && <EncyclopedieView />}
-        <HelpPanel pageId={HELP_PAGE[tab]} />
+        <ViewErrorBoundary resetKey={tab}>
+          {tab === "dashboard" && data && (
+            <DashboardView data={data} onRefresh={() => refresh(true)} onNavigate={setTab} />
+          )}
+          {tab === "settings" && <SettingsView data={data ?? undefined} />}
+          {tab === "tickers" && data && (
+            <TickersView data={data} onRefresh={() => refresh(true)} />
+          )}
+          {tab === "limits" && data && (
+            <LimitsView data={data} onRefresh={() => refresh(true)} />
+          )}
+          {tab === "backtest" && <BacktestView />}
+          {tab === "scores" && <ScoresView exchangeByTicker={data ? new Map(data.cards.map((c) => [c.ticker, c.exchange ?? null])) : undefined} />}
+          {tab === "track-record" && <TrackRecordView />}
+          {tab === "signal-log" && <SignalLogView />}
+          {tab === "scans" && <ScansView />}
+          {tab === "xinix" && <XinixPortfolioView />}
+          {tab === "feniks" && <PhoenixView />}
+          {tab === "poefies" && <PoefiesView />}
+          {tab === "hikkertjes" && <HikkertjesView />}
+          {tab === "zwitserleven" && <ZwitserlevenView />}
+          {tab === "favorieten" && <FavorietenView initialDashboard={data} initialScans={scans} />}
+          {tab === "status" && <HealthView />}
+          {tab === "encyclopedie" && <EncyclopedieView />}
+          <HelpPanel pageId={HELP_PAGE[tab]} />
+        </ViewErrorBoundary>
       </main>
 
       <footer className="border-t border-ink-5 mt-8">

@@ -141,27 +141,40 @@ Deno.serve(
     ).toISOString();
     const since7Ms = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-    const [
-      { data: tickers },
-      { data: catalysts },
-      { data: prices },
-      { data: macroRaw },
-      { data: events },
-    ] = await Promise.all([
-      supabase.from("signal_tickers").select("*").eq("active", true),
-      supabase.from("signal_catalysts").select("*").eq("status", "pending"),
-      supabase.from("signal_price_summary").select("*"),
-      supabase
-        .from("signal_macro")
-        .select(
-          "symbol, date, pct_change_30d, pct_change_90d, pct_change_365d"
-        )
-        .order("date", { ascending: false }),
-      supabase
-        .from("signal_events")
-        .select("ticker, signal_type, detected_at")
-        .gt("detected_at", since30),
-    ]);
+    const [tickersRes, catalystsRes, pricesRes, macroRes, eventsRes] =
+      await Promise.all([
+        supabase.from("signal_tickers").select("*").eq("active", true),
+        supabase.from("signal_catalysts").select("*").eq("status", "pending"),
+        supabase.from("signal_price_summary").select("*"),
+        supabase
+          .from("signal_macro")
+          .select(
+            "symbol, date, pct_change_30d, pct_change_90d, pct_change_365d"
+          )
+          .order("date", { ascending: false }),
+        supabase
+          .from("signal_events")
+          .select("ticker, signal_type, detected_at")
+          .gt("detected_at", since30),
+      ]);
+
+    // Een mislukte tickers- of prijzenquery is een mislukte run. Voorheen werd
+    // dit als "no active tickers" / lege prijzen behandeld: de run logde ok
+    // terwijl er niets (of met foute timing-scores) gescoord werd.
+    if (tickersRes.error) {
+      return { ok: false, message: `signal_tickers query faalde: ${tickersRes.error.message}` };
+    }
+    if (pricesRes.error) {
+      return { ok: false, message: `signal_price_summary query faalde: ${pricesRes.error.message}` };
+    }
+    for (const [name, res] of ([["signal_catalysts", catalystsRes], ["signal_macro", macroRes], ["signal_events", eventsRes]] as const)) {
+      if (res.error) console.error(`compute-scores: query ${name} faalde:`, res.error.message);
+    }
+    const tickers = tickersRes.data;
+    const catalysts = catalystsRes.data;
+    const prices = pricesRes.data;
+    const macroRaw = macroRes.data;
+    const events = eventsRes.data;
 
     const latestMacro = new Map<string, MacroRow>();
     for (const m of (macroRaw ?? []) as (MacroRow & { date: string })[]) {
