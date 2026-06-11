@@ -374,6 +374,36 @@ function dimensionInsight(
   return { dimension: dim, best_value: best.value, worst_value: worst.value, diff_pct: +diff.toFixed(2) };
 }
 
+// ── Paginering ────────────────────────────────────────────────────────────────
+// De Data API kapt elke request af op max-rows (hier 10k). Gesloten posities
+// groeien onbeperkt en de watchlist telt 3700+ tickers — zonder paginering
+// raakt de export stilletjes onvolledig.
+async function fetchAllPages<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; from < 200_000; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return { data: out, error: null };
+}
+
+// POST muteert (DB-insert, paper-config-update, GitHub-push) en vereist daarom
+// admin-token of cron-secret — net als de andere schrijvende functies. GET
+// (lijst/download) blijft open voor het dashboard.
+function checkAdminOrCron(req: Request): boolean {
+  const adminToken = Deno.env.get("ADMIN_TOKEN") ?? "";
+  const cronSecret = Deno.env.get("CRON_SECRET") ?? "";
+  const isAdmin = adminToken !== "" && (req.headers.get("authorization") ?? "") === `Bearer ${adminToken}`;
+  const isCron  = cronSecret !== "" && (req.headers.get("x-cron-secret") ?? "") === cronSecret;
+  return isAdmin || isCron;
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -413,6 +443,9 @@ Deno.serve(async (req) => {
 
     // POST: maak nieuwe export
     if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+    if (!checkAdminOrCron(req)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...cors(req), "content-type": "application/json" } });
+    }
 
     // Mini-modus: alleen config + CLAUDE.md bijwerken, geen volledige DB snapshot
     let isMini = false;
@@ -431,28 +464,32 @@ Deno.serve(async (req) => {
       db.from("xinix_strategies")
         .select("id, slug, name, grp, config, generation, protected, parent_id, active")
         .eq("active", true),
-      db.from("xinix_strategy_state")
-        .select("strategy_id, cash, initial_capital, started_at, last_run_at"),
-      db.from("xinix_strategy_positions")
+      fetchAllPages((f, t) => db.from("xinix_strategy_state")
+        .select("strategy_id, cash, initial_capital, started_at, last_run_at")
+        .order("strategy_id").range(f, t)),
+      fetchAllPages((f, t) => db.from("xinix_strategy_positions")
         .select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, entry_date, closed_at, entry_reason, closed_reason")
         .not("closed_at", "is", null)
-        .order("closed_at", { ascending: false }),
-      db.from("xinix_strategy_positions")
+        .order("closed_at", { ascending: false }).order("id").range(f, t)),
+      fetchAllPages((f, t) => db.from("xinix_strategy_positions")
         .select("strategy_id, ticker, qty, avg_price, entry_date, entry_signal_types, entry_sector")
-        .is("closed_at", null),
+        .is("closed_at", null).order("id").range(f, t)),
       db.from("xinix_strategies")
         .select("id, name, grp, generation, retired_at, config")
         .eq("active", false)
         .order("retired_at", { ascending: false })
         .limit(100),
+      // NB: signal_runs heeft geen kolom `ran_at` — de oude query daarop faalde
+      // stilletjes, waardoor de evolutie-sectie in elke export leeg bleef.
       db.from("signal_runs")
-        .select("ran_at, message")
+        .select("finished_at, message")
         .eq("job", "xinix-evolve").eq("ok", true)
-        .order("ran_at", { ascending: false }).limit(20),
-      db.from("signal_tickers")
-        .select("ticker, company, sector, buy_limit, medal_gold, medal_silver, medal_bronze, goud_score, active, price_benched, notes, exchange, goud_type, trigger_event, trigger_date, market_cap_bucket, phase, disease_area, modality, commodity, jurisdiction"),
-      db.from("signal_price_summary")
-        .select("ticker, last_close"),
+        .order("finished_at", { ascending: false, nullsFirst: false }).limit(20),
+      fetchAllPages((f, t) => db.from("signal_tickers")
+        .select("ticker, company, sector, buy_limit, medal_gold, medal_silver, medal_bronze, goud_score, active, price_benched, notes, exchange, goud_type, trigger_event, trigger_date, market_cap_bucket, phase, disease_area, modality, commodity, jurisdiction")
+        .order("id").range(f, t)),
+      fetchAllPages((f, t) => db.from("signal_price_summary")
+        .select("ticker, last_close").order("ticker").range(f, t)),
     ]);
 
     // ── Price map ────────────────────────────────────────────────────────────────
@@ -677,8 +714,8 @@ Deno.serve(async (req) => {
           cycles: evolveRuns.length,
           max_generation: maxGen,
           protected_count: protectedCount,
-          last_evolved_at: evolveRuns[0]?.ran_at ?? null,
-          run_log: evolveRuns.map(r => ({ at: r.ran_at, message: r.message })),
+          last_evolved_at: evolveRuns[0]?.finished_at ?? null,
+          run_log: evolveRuns.map(r => ({ at: r.finished_at, message: r.message })),
         },
       },
       positions: {
@@ -784,7 +821,7 @@ Deno.serve(async (req) => {
         }
       } catch { /* non-fatal */ }
 
-      await db.from("signal_runs").insert({ job: "xinix-knowledge-export", ok: true, message: `Mini-export: ${activeStrategies.length} strategieën, ${configUpdateLog}` });
+      await db.from("signal_runs").insert({ job: "xinix-knowledge-export", ok: true, finished_at: now.toISOString(), message: `Mini-export: ${activeStrategies.length} strategieën, ${configUpdateLog}` });
       return new Response(JSON.stringify({ ok: true, mini: true, config_update: configUpdateLog, strategy_count: activeStrategies.length }), { status: 200, headers: { ...cors(req), "content-type": "application/json" } });
     }
 
@@ -809,12 +846,23 @@ Deno.serve(async (req) => {
       summary: summaryText,
     }).select("id").single();
 
-    if (saveErr) console.error("save error:", saveErr.message);
+    // Mislukte opslag is een mislukte export: log ok:false en stop — anders
+    // meldt de run "ok" terwijl de maandsnapshot ontbreekt en niemand het merkt.
+    if (saveErr) {
+      console.error("save error:", saveErr.message);
+      await db.from("signal_runs").insert({
+        job: "xinix-knowledge-export", ok: false,
+        finished_at: now.toISOString(),
+        message: `Export-opslag faalde: ${saveErr.message}`,
+      });
+      return new Response(JSON.stringify({ ok: false, error: `opslag faalde: ${saveErr.message}` }), { status: 500, headers: { ...cors(req), "content-type": "application/json" } });
+    }
     const savedId = (savedRow as Record<string,unknown> | null)?.id as number | null;
 
     // ── Log in signal_runs ────────────────────────────────────────────────────────
     await db.from("signal_runs").insert({
       job: "xinix-knowledge-export", ok: true,
+      finished_at: now.toISOString(),
       message: `Export #${savedId ?? "?"}: ${activeStrategies.length} strategieën, ${totalClosed} gesloten trades, ${tickers.length} tickers`,
     });
 

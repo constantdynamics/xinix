@@ -79,7 +79,7 @@ Er zijn twee gesimuleerde portefeuilles:
 
 | Portefeuille | Functie | Schema |
 |---|---|---|
-| **200-strategie simulatie** | 200 parallelle papieren portefeuilles á $10.000 elk, elke strategie test andere parameters | `xinix_strategies`, `xinix_strategy_positions`, `xinix_strategy_state` |
+| **200-strategie simulatie** | 553 actieve strategieën (begonnen als 200) met elk een eigen papieren portefeuille á $10.000, elke strategie test andere parameters | `xinix_strategies`, `xinix_strategy_positions`, `xinix_strategy_state` |
 | **Single paper portfolio** | Eén gecureerde papieren portefeuille die het beste leert beleggen | `xinix_paper_positions` |
 
 ---
@@ -93,8 +93,8 @@ Er zijn twee gesimuleerde portefeuilles:
 xinix-trade-background     → beheert single paper portfolio
 xinix-sim-background       → beheert 200 strategieën parallel
         │
-        ▼ wekelijks (evolutie)
-xinix-evolve               → pensioneer onderste 5% → muteer top 5% → nieuwe Gen
+        ▼ halfjaarlijks (1 jan & 1 jul — evolutie)
+xinix-evolve               → pensioneer onderste 10% → nakomelingen uit top-25% donors → nieuwe Gen
         │
         ▼ 1e dag van de maand 06:00 UTC
 xinix-knowledge-export     → snapshot van alle kennis → DB + docs/kennisbasis.md
@@ -171,7 +171,7 @@ totaal = sum(partial_exits.net_proceeds) + netProceeds_huidig - origCost
 
 ---
 
-## 5. De 200 strategieën (200-strategie simulatie)
+## 5. De 553 strategieën (200-strategie simulatie)
 
 Elke strategie beheert een eigen papieren portefeuille van **$10.000**.
 Basisprofiel (`B`): Score≥65, geen rood vereist, alle sectoren, max 8 posities, $1200/positie, 60d, stop -15%, geen TP, limiet-buffer +10%, geen goud-eis, geen trailing.
@@ -194,7 +194,17 @@ Basisprofiel (`B`): Score≥65, geen rood vereist, alle sectoren, max 8 posities
 | **N-Trailing** | 6 | Trailing stops (-10%, -15%, -20%), combinaties, kans-rotatie |
 | **O–W** | 94 | Extra groepen: OppReplace, Trailing2, ScoreHold, StopScore, TPVariant, SectorRich, ConsProfiel, AggProfiel, MultiCombo |
 
-**Evolutie**: wekelijks worden de onderste 5% gepensioneerd, de top 5% gemuteerd.
+De tabel hierboven beschrijft de oorspronkelijke 200. Inmiddels telt de simulatie
+**553 actieve strategieën** in 25 groepen (A–Y): extra varianten plus de
+hikkertjes- (X), zwitserleven- (Y), poefie- en hot/warm-families, gedefinieerd in
+`STRATEGIES`/`EXTRA_STRATEGIES` in `xinix-sim-background/index.ts`.
+
+**Evolutie**: halfjaarlijks (pg_cron `xinix-evolve-biannual`: 1 jan & 1 jul, minimaal
+75 dagen tussen cycli, eerste cyclus pas als de oudste strategie ≥90 dagen draait).
+Per cyclus wordt de onderste 10% op composite fitness (rendement + Sharpe-bonus −
+drawdown-penalty) gepensioneerd; nakomelingen ontstaan uit mutatie/crossover van de
+top-25% donors. Top-2 op rauw rendement overleven altijd (elitisme); strategieën met
+≥30 trades en hitrate <30% gaan vervroegd met pensioen.
 Gepensioneerde strategieën blijven zichtbaar in het dashboard.
 
 ---
@@ -218,7 +228,7 @@ Eén gecureerde portefeuille die altijd:
 |---|---|
 | `signal_tickers` | 3700+ tickers: score, rood, sector, medal, buy_limit, notes |
 | `signal_price_summary` | Laatste sluitkoers per ticker |
-| `xinix_strategies` | Config van alle 200 strategieën |
+| `xinix_strategies` | Config van alle strategieën (553 actief) |
 | `xinix_strategy_state` | Cash + initieel kapitaal + last_run per strategie |
 | `xinix_strategy_positions` | Open + gesloten posities sim, incl. `partial_exits` JSONB |
 | `xinix_paper_positions` | Open + gesloten posities single portfolio, incl. `partial_exits` |
@@ -231,6 +241,7 @@ Eén gecureerde portefeuille die altijd:
 
 | Datum | Wijziging |
 |---|---|
+| 2026-06-11 | **Onderhoudsronde**: gepagineerde fetches tegen de 10k-rijencap (sim/trade/evolve/sim-results/knowledge-export/equity-backfill), `ran_at`→`finished_at`-fix (evolutieruns werden nooit gelogd en nergens getoond), schrijffout-detectie + failure-logging in xinix-sim, álle actieve signalen meegenomen i.p.v. max 2000/3000, auth op kennisexport-POST, ErrorBoundary in de frontend |
 | 2026-05-14 | **Slimme exits + transactiekosten**: TX_COST 0,1%, trailing stop ratchet, partial TP, signal decay exit, kansrotatie, nieuwe N-Trailing groep |
 | 2026-05-14 | **200 strategieën**: uitgebreid van 106 naar 200 (groepen O–W toegevoegd) |
 | 2026-05-14 | **Kenniscumulatie**: `xinix-knowledge-export` edge function, `xinix_knowledge_exports` tabel, maandelijkse pg_cron job, dashboard-sectie, `docs/kennisbasis.md` auto-update |

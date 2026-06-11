@@ -154,6 +154,24 @@ interface EquityRow {
   computed_at: string;
 }
 
+// De Data API kapt elke request af op max-rows (hier 10k). Deze functie leest
+// ALLE posities (open + gesloten, nu ~7600 en groeiend) — zonder paginering
+// zou de reconstructie stilletjes op een deel van de trades gebaseerd raken.
+async function fetchAllPages<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; from < 200_000; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) return { data: out, error };
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return { data: out, error: null };
+}
+
 function computeEquityRows(
   positions: ParsedPosition[],
   initialCapital: number,
@@ -219,15 +237,21 @@ async function logic(): Promise<RunResult> {
   // 1) Strategieën + state + posities (alles, open én gesloten)
   const [stratRes, stateRes, posRes, paperStateRes, paperPosRes] = await Promise.all([
     sb.from("xinix_strategies").select("id, grp").eq("active", true),
-    sb.from("xinix_strategy_state").select("strategy_id, initial_capital, started_at"),
-    sb.from("xinix_strategy_positions").select("strategy_id, ticker, qty, avg_price, entry_date, closed_at, closed_price, return_usd, partial_exits"),
+    fetchAllPages((f, t) => sb.from("xinix_strategy_state")
+      .select("strategy_id, initial_capital, started_at").order("strategy_id").range(f, t)),
+    fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
+      .select("strategy_id, ticker, qty, avg_price, entry_date, closed_at, closed_price, return_usd, partial_exits")
+      .order("id").range(f, t)),
     sb.from("xinix_paper_state").select("*").eq("id", 1).maybeSingle(),
-    sb.from("xinix_paper_positions").select("ticker, qty, avg_price, entry_date, closed_at, closed_price, return_usd, partial_exits"),
+    fetchAllPages((f, t) => sb.from("xinix_paper_positions")
+      .select("ticker, qty, avg_price, entry_date, closed_at, closed_price, return_usd, partial_exits")
+      .order("id").range(f, t)),
   ]);
 
   if (stratRes.error) throw new Error(`strategies: ${stratRes.error.message}`);
   if (stateRes.error) throw new Error(`state: ${stateRes.error.message}`);
   if (posRes.error)   throw new Error(`positions: ${posRes.error.message}`);
+  if (paperPosRes.error) throw new Error(`paper positions: ${paperPosRes.error.message}`);
 
   const activeStratIds = new Set<number>((stratRes.data ?? []).map((r) => r.id as number));
 
