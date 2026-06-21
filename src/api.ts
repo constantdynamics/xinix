@@ -695,11 +695,35 @@ export interface SimFamily {
   worst_slug: string | null;
   series: SimFamilyPoint[];
 }
+export interface SimTopTrade {
+  ticker: string;
+  company: string | null;
+  sector: string | null;
+  grp: string;
+  strategy_name: string;
+  slug: string;
+  return_pct: number;
+  return_usd: number;
+  hold_days: number;
+  entry_date: string | null;
+  closed_at: string | null;
+  entry_score: number | null;
+  entry_signal_types: string[];
+  entry_reason: string | null;
+  closed_reason: string | null;
+  goud_score: number | null;
+  medal_gold: number;
+  medal_silver: number;
+  medal_bronze: number;
+  times_traded?: number;
+}
 export interface SimResults {
   strategies: SimStrategy[];
   insights: SimInsight[];
   recommendations: string[];
   signal_type_stats?: SimSignalTypeStat[];
+  // Optioneel — oude edge functions sturen dit nog niet; frontend valt terug.
+  best_trades?: { overall: SimTopTrade[]; by_family: Record<string, SimTopTrade[]> };
   families?: { groups: SimFamily[]; dates: string[] };
   meta: {
     total: number;

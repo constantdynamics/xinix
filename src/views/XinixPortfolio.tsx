@@ -14,6 +14,7 @@ import {
   type XinixClosedPosition,
   type SimResults,
   type SimSignalTypeStat,
+  type SimTopTrade,
   type SimStrategy,
   type SimEvolution,
   type SimPosDetail,
@@ -1853,6 +1854,162 @@ function WatWerktCard({
   );
 }
 
+// ── Toppers: beste trades (overall + per best-scorende familie) ──────────────
+function ToppersTradeTable({ trades, showFamily }: { trades: SimTopTrade[]; showFamily: boolean }) {
+  if (trades.length === 0) {
+    return <Card className="p-3 text-[11px] text-neutral-500">Nog geen gesloten trades.</Card>;
+  }
+  return (
+    <Card className="p-0 overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="text-[10px] uppercase tracking-wider text-neutral-500 bg-ink-3/40">
+          <tr>
+            <th className="text-left p-2.5 font-semibold">Aandeel</th>
+            <th className="text-right p-2.5 font-semibold">Rendement</th>
+            <th className="text-right p-2.5 font-semibold">Hold</th>
+            <th className="text-left p-2.5 font-semibold">Waarom het kwalificeerde</th>
+            <th className="text-left p-2.5 font-semibold">Exit</th>
+            <th className="text-left p-2.5 font-semibold">{showFamily ? "Familie / strategie" : "Strategie"}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trades.map((t, idx) => {
+            const tone = t.return_pct > 0 ? "text-fog-lime" : t.return_pct < 0 ? "text-fog-loss" : "text-neutral-300";
+            return (
+              <tr key={`${t.grp}-${t.ticker}-${idx}`} className="border-t border-ink-5 hover:bg-ink-3/40 align-top">
+                <td className="p-2.5 whitespace-nowrap">
+                  <a href={googleFinanceUrl(t.ticker)} target="_blank" rel="noreferrer" className="font-bold tab-accent-text hover:underline">{t.ticker}</a>
+                  {t.company && <div className="text-[10px] font-normal text-neutral-500 truncate max-w-[150px]" title={t.company}>{t.company}</div>}
+                  <div className="flex gap-1.5 mt-0.5 text-[10px] text-neutral-500">
+                    {t.medal_gold > 0 && <span title="goud-medailles">🏆{t.medal_gold}</span>}
+                    {t.medal_silver > 0 && <span title="zilver-medailles">🥈{t.medal_silver}</span>}
+                    {t.medal_bronze > 0 && <span title="brons-medailles">🥉{t.medal_bronze}</span>}
+                    {t.sector && <span className="text-neutral-600">{t.sector}</span>}
+                  </div>
+                </td>
+                <td className={`p-2.5 text-right tabular ${tone}`}>
+                  <div className="font-bold text-[13px]">{fmtPct(t.return_pct)}</div>
+                  <div className="text-[10px]">{fmtUsd(t.return_usd)}</div>
+                  {(t.times_traded ?? 0) > 1 && (
+                    <div className="text-[9px] text-neutral-500 mt-0.5" title="Aantal strategieën dat dit aandeel verhandelde">{t.times_traded}× gevangen</div>
+                  )}
+                </td>
+                <td className="p-2.5 text-right tabular text-[11px] text-neutral-400">{t.hold_days}d</td>
+                <td className="p-2.5 max-w-[280px]">
+                  <div className="flex flex-wrap items-center gap-1">
+                    {t.entry_score != null && t.entry_score > 0 && (
+                      <Badge tone="lime" title="Score op het moment van aankoop">score {t.entry_score}</Badge>
+                    )}
+                    {t.entry_signal_types.map((s, i) => (
+                      <Badge key={`${s}-${i}`} tone={signalTone(s)} title={signalTitle(s)}>{signalLabel(s)}</Badge>
+                    ))}
+                    {t.entry_score == null && t.entry_signal_types.length === 0 && (
+                      <span className="text-[10px] text-neutral-600">—</span>
+                    )}
+                  </div>
+                  {t.entry_reason && (
+                    <div className="text-[10px] text-neutral-500 mt-1 line-clamp-2" title={t.entry_reason}>{t.entry_reason}</div>
+                  )}
+                </td>
+                <td className="p-2.5 text-[10px] text-neutral-400 max-w-[150px]">
+                  <div className="line-clamp-2" title={t.closed_reason ?? ""}>{t.closed_reason ?? "—"}</div>
+                  {t.entry_date && t.closed_at && (
+                    <div className="text-[9px] text-neutral-600 mt-0.5">{fmtDate(t.entry_date)} → {fmtDate(t.closed_at)}</div>
+                  )}
+                </td>
+                <td className="p-2.5 text-[10px] max-w-[160px]">
+                  {showFamily && <div className="text-neutral-300">{t.grp}</div>}
+                  <div className="line-clamp-1 text-neutral-500" title={t.strategy_name}>{t.strategy_name}</div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+function SimToppersSection({ sim }: { sim: SimResults }) {
+  const [familyCount, setFamilyCount] = useState(6);
+  const bt = sim.best_trades;
+
+  // Families op volgorde van gemiddeld rendement (best scorend eerst), maar
+  // alleen die met daadwerkelijke trades om te tonen.
+  const familyOrder = useMemo(() => {
+    if (!bt) return [];
+    const fromGroups = (sim.families?.groups ?? [])
+      .filter((g) => (bt.by_family[g.grp]?.length ?? 0) > 0)
+      .map((g) => ({ grp: g.grp, avg: g.avg_return_pct, n: g.n }));
+    if (fromGroups.length > 0) return fromGroups;
+    // Fallback als families-RPC niets gaf: sorteer op de beste trade per familie.
+    return Object.entries(bt.by_family)
+      .map(([grp, trades]) => ({ grp, avg: trades[0]?.return_pct ?? 0, n: trades.length }))
+      .sort((a, b) => b.avg - a.avg);
+  }, [bt, sim.families]);
+
+  if (!bt || (bt.overall.length === 0 && familyOrder.length === 0)) {
+    return (
+      <Card className="p-4 text-xs text-neutral-400">
+        Nog geen gesloten trades om toppers van te tonen. Dit blok vult zich naarmate de strategieën posities sluiten.
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <CollapsibleIntro title="💎 Over deze tab">
+        <p>
+          Hier zie je <strong className="text-neutral-200">wélke aandelen</strong> de grootste winsten opleverden en
+          <strong className="text-neutral-200"> waaróm ze kwalificeerden</strong> bij aankoop: de score op dat moment,
+          de actieve signalen en de entry-reden. De lijst is ontdubbeld per aandeel — als tientallen strategieën
+          dezelfde winnaar kochten, toont "× gevangen" hoe vaak.
+        </p>
+      </CollapsibleIntro>
+
+      {/* Beste trades aller tijden — los van familie/portefeuille */}
+      <section className="space-y-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="text-sm font-semibold text-neutral-100">🏆 Beste trades aller tijden</h3>
+          <span className="text-[10px] text-neutral-500">over alle strategieën + de single portefeuille</span>
+        </div>
+        <ToppersTradeTable trades={bt.overall} showFamily />
+      </section>
+
+      {/* Per best-scorende familie */}
+      {familyOrder.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold text-neutral-100">🧬 Beste aandelen per best-scorende familie</h3>
+            <span className="text-[10px] text-neutral-500">families gesorteerd op gem. rendement</span>
+          </div>
+          {familyOrder.slice(0, familyCount).map((f, i) => (
+            <div key={f.grp} className="space-y-1.5">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-neutral-500 tabular w-5 text-right">{i + 1}.</span>
+                <span className="font-semibold text-neutral-100">{f.grp}</span>
+                <span className={`tabular font-bold ${f.avg >= 0 ? "text-fog-lime" : "text-fog-loss"}`}>{fmtPct(f.avg)}</span>
+                <span className="text-[10px] text-neutral-500">gem. · {f.n} strateg{f.n === 1 ? "ie" : "ieën"}</span>
+              </div>
+              <ToppersTradeTable trades={bt.by_family[f.grp] ?? []} showFamily={false} />
+            </div>
+          ))}
+          {familyCount < familyOrder.length && (
+            <div className="text-center">
+              <button
+                onClick={() => setFamilyCount((c) => c + 6)}
+                className="text-xs text-neutral-400 hover:text-neutral-100 border border-ink-5 hover:border-ink-6 rounded-lg px-4 py-2 transition-colors"
+              >
+                Meer families ({familyOrder.length - familyCount} resterend)
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
 function SimInsightsSection({ sim }: { sim: SimResults }) {
   const { insights, recommendations, meta, signal_type_stats } = sim;
 
@@ -2329,7 +2486,7 @@ export function SimulationView() {
   const [sim, setSim] = useState<SimResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"ranking" | "insights" | "evolutie">("ranking");
+  const [activeTab, setActiveTab] = useState<"ranking" | "toppers" | "insights" | "evolutie">("ranking");
 
   useEffect(() => {
     fetchSimResults()
@@ -2418,7 +2575,7 @@ export function SimulationView() {
 
       {/* Tab switcher */}
       <div className="flex gap-0 border-b border-ink-5">
-        {(["ranking", "insights", "evolutie"] as const).map((t) => (
+        {(["ranking", "toppers", "insights", "evolutie"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setActiveTab(t)}
@@ -2428,7 +2585,7 @@ export function SimulationView() {
                 : "border-transparent text-neutral-400 hover:text-neutral-200"
             }`}
           >
-            {t === "ranking" ? "Ranglijst" : t === "insights" ? "Inzichten" : `Evolutie${evolution.cycles > 0 ? ` (${evolution.cycles})` : ""}`}
+            {t === "ranking" ? "Ranglijst" : t === "toppers" ? "💎 Toppers" : t === "insights" ? "Inzichten" : `Evolutie${evolution.cycles > 0 ? ` (${evolution.cycles})` : ""}`}
           </button>
         ))}
       </div>
@@ -2439,6 +2596,7 @@ export function SimulationView() {
           <PotjeLegend />
         </>
       )}
+      {activeTab === "toppers" && <SimToppersSection sim={sim} />}
       {activeTab === "insights" && <SimInsightsSection sim={sim} />}
       {activeTab === "evolutie" && (
         <div className="space-y-4">

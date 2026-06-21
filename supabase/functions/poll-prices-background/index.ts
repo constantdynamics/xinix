@@ -124,10 +124,14 @@ Deno.serve(runBackground("poll-prices", async () => {
   // favorieten altijd als eerste in de batch kunnen plaatsen (dagelijks vers).
   const [{ data: favData }, { data: extremes }] = await Promise.all([
     sb.from("xinix_favorites").select("ticker"),
-    sb.from("signal_price_summary").select("ticker, high_1y"),
+    sb.from("signal_price_summary").select("ticker, high_1y, last_close"),
   ]);
   const high1yByTicker = new Map<string, number | null>();
-  for (const r of extremes ?? []) high1yByTicker.set(r.ticker as string, ((r as { high_1y?: number | null }).high_1y) ?? null);
+  const prevCloseByTicker = new Map<string, number | null>();
+  for (const r of extremes ?? []) {
+    high1yByTicker.set(r.ticker as string, ((r as { high_1y?: number | null }).high_1y) ?? null);
+    prevCloseByTicker.set(r.ticker as string, ((r as { last_close?: number | null }).last_close) ?? null);
+  }
   const favSet = new Set<string>((favData ?? []).map((f) => f.ticker as string));
   const favTickers = Array.from(favSet);
 
@@ -166,7 +170,7 @@ Deno.serve(runBackground("poll-prices", async () => {
   }
   if (queue.length === 0) return { ok: true, message: "queue leeg (open markten: " + openExchanges.length + ")" };
 
-  let scanned = 0, ok = 0, failed = 0, benched = 0, signalsInserted = 0;
+  let scanned = 0, ok = 0, failed = 0, benched = 0, signalsInserted = 0, glitchSkipped = 0;
   const errSamples: string[] = [];
   const now = Date.now();
   for (const tk of queue) {
@@ -184,6 +188,22 @@ Deno.serve(runBackground("poll-prices", async () => {
       if (valid.length === 0) throw new Error("no valid bars");
       const last = valid[valid.length - 1];
       const prev = valid[valid.length - 2];
+      // Glitch-guard: een koers die >=8x of <=1/8 t.o.v. de vorige dag (zelfde
+      // reeks) of de laatst opgeslagen koers springt, is vrijwel zeker een
+      // foute print of niet-aangepaste split. Niet wegschrijven — anders koopt/
+      // waardeert de sim op een onmogelijke koers (bv. VOX.L pence/pond 100x).
+      const refClose = prev?.close ?? prevCloseByTicker.get(ticker) ?? null;
+      if (refClose && refClose > 0 && last.close > 0) {
+        const jump = last.close / refClose;
+        if (jump >= 8 || jump <= 0.125) {
+          glitchSkipped++;
+          await sb.from("signal_tickers").update({
+            price_polled_at: new Date().toISOString(),
+            price_last_error: `koers-glitch geweerd: ${last.close} vs ref ${refClose} (${jump.toFixed(1)}x)`,
+          }).eq("ticker", ticker);
+          continue;
+        }
+      }
       const fiveAgo = valid[valid.length - 6];
       const twentyTwoAgo = valid.length >= 23 ? valid[valid.length - 23] : null;
       const window90 = valid.slice(-90);
@@ -263,5 +283,5 @@ Deno.serve(runBackground("poll-prices", async () => {
   }
   const { count: queueLeft } = await sb.from("signal_tickers").select("ticker", { count: "exact", head: true }).eq("active", true).eq("price_benched", false);
   const { count: benchedTotal } = await sb.from("signal_tickers").select("ticker", { count: "exact", head: true }).eq("active", true).eq("price_benched", true);
-  return { ok: failed < scanned / 2, message: `${scanned} gescand, ${ok} ok, ${failed} fout, ${benched} nieuw op bank, ${signalsInserted} signals` + (errSamples.length ? `; bv: ${errSamples.slice(0, 3).join("; ")}` : ""), metrics: { scanned, ok, failed, benched_new: benched, signals: signalsInserted, queue_size: queueLeft ?? null, benched_total: benchedTotal ?? null } };
+  return { ok: failed < scanned / 2, message: `${scanned} gescand, ${ok} ok, ${failed} fout, ${benched} nieuw op bank, ${signalsInserted} signals${glitchSkipped ? `, ${glitchSkipped} koers-glitch geweerd` : ""}` + (errSamples.length ? `; bv: ${errSamples.slice(0, 3).join("; ")}` : ""), metrics: { scanned, ok, failed, benched_new: benched, signals: signalsInserted, glitch_skipped: glitchSkipped, queue_size: queueLeft ?? null, benched_total: benchedTotal ?? null } };
 }));

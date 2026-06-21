@@ -916,6 +916,28 @@ async function run() {
     if (r.last_close != null) priceMap.set(r.ticker as string, Number(r.last_close));
   }
 
+  // ── Koers-artefact-guard ─────────────────────────────────────────────────────
+  // Een positie waarvan de huidige koers >=8× of <=1/8 de aankoopprijs is, is
+  // vrijwel zeker een artefact (stock split of glitch-print, bv. VOX.L pence/pond
+  // 100×). De sim zou die als enorme winst/verlies boeken en het klassement
+  // vervuilen. We waarderen zulke posities tegen de aankoopprijs (break-even) en
+  // vlaggen de ticker. Drempel 8× ligt ruim boven de hoogste echte TP (+500% = 6×)
+  // en stop (-50% = 0,5×), dus legitieme uitkomsten worden nooit geraakt.
+  const flagged = new Map<string, { avg: number; close: number; factor: number; n: number }>();
+  function effPrice(ticker: string, avgPrice: number): number | undefined {
+    const raw = priceMap.get(ticker);
+    if (raw == null) return undefined;
+    if (avgPrice > 0) {
+      const factor = raw / avgPrice;
+      if (factor >= 8 || factor <= 0.125) {
+        const cur = flagged.get(ticker);
+        flagged.set(ticker, { avg: avgPrice, close: raw, factor, n: (cur?.n ?? 0) + 1 });
+        return avgPrice; // break-even i.p.v. de glitch-koers
+      }
+    }
+    return raw;
+  }
+
   const tickers = (tickersRes.data ?? []) as TickerRow[];
   const sigsByTicker = new Map<string, SigRow[]>();
   for (const s of (signalsRes.data ?? []) as SigRow[]) {
@@ -948,7 +970,7 @@ async function run() {
     const exitedIds = new Set<number>();
 
     for (const p of openPositions) {
-      const price = priceMap.get(p.ticker);
+      const price = effPrice(p.ticker, Number(p.avg_price));
       if (price == null) { stillOpenTickers.add(p.ticker); continue; }
 
       // Vaste stop check (met de stop_loss_price uit DB — kan al eerder zijn geratchet)
@@ -1084,13 +1106,13 @@ async function run() {
         let worstRet = -5.0; // drempel: alleen vervangen bij ≥ -5% verlies
         for (const p of openPositions) {
           if (exitedIds.has(p.id)) continue;
-          const price = priceMap.get(p.ticker);
+          const price = effPrice(p.ticker, Number(p.avg_price));
           if (!price) continue;
           const curRet = (price - Number(p.avg_price)) / Number(p.avg_price) * 100;
           if (curRet < worstRet) { worstRet = curRet; worstPos = p; }
         }
         if (worstPos) {
-          const price = priceMap.get(worstPos.ticker)!;
+          const price = effPrice(worstPos.ticker, Number(worstPos.avg_price)) ?? Number(worstPos.avg_price);
           const prevPartials = worstPos.partial_exits ?? [];
           let retUsd: number, retPct: number, netProceeds: number;
           const holdDays = Math.max(0, Math.round((now.getTime() - new Date(worstPos.entry_date).getTime()) / 86_400_000));
@@ -1222,7 +1244,7 @@ async function run() {
       if (exitedIds.has(p.id)) continue;
       const partialUpdate = partialSells.find(u => u.id === p.id);
       const qty = partialUpdate ? partialUpdate.new_qty : Number(p.qty);
-      posVal += qty * (priceMap.get(p.ticker) ?? Number(p.avg_price));
+      posVal += qty * (effPrice(p.ticker, Number(p.avg_price)) ?? Number(p.avg_price));
     }
     for (const b of buys.filter((b) => b.strategy_id === sid)) {
       posVal += Number(b.qty as number) * Number(b.avg_price as number);
@@ -1275,10 +1297,22 @@ async function run() {
     if (error) throw new Error(`equity-upsert: ${error.message}`);
   }
 
+  // Koers-artefacten (split/glitch) loggen — tegen break-even gewaardeerd, hier
+  // zichtbaar gemaakt zodat ze handmatig of door de monitor opgevolgd worden.
+  if (flagged.size > 0) {
+    const flagRows = [...flagged.entries()].map(([ticker, v]) => ({
+      ticker, avg_price: +v.avg.toFixed(6), last_close: +v.close.toFixed(6),
+      factor: +v.factor.toFixed(2), n_positions: v.n, last_flagged_at: now.toISOString(), resolved: false,
+    }));
+    const { error } = await sb.from("xinix_price_flags").upsert(flagRows, { onConflict: "ticker" });
+    if (error) console.error("price-flags upsert:", error.message);
+  }
+
+  const flagMsg = flagged.size > 0 ? `, ⚠ ${flagged.size} koers-artefact(en) geneutraliseerd: ${[...flagged.keys()].slice(0, 5).join(", ")}` : "";
   await sb.from("signal_runs").insert({
     job: "xinix-sim", finished_at: now.toISOString(), ok: true,
-    message: `${STRATEGIES.length} strategieën: ${exits.length} exits (incl. ${partialSells.length} deelwinst), ${buys.length} aankopen, ${stopRatchets.length} stop-ratchets [regime: ${regime}]`,
-    metrics: { strategies: STRATEGIES.length, exits: exits.length, partial_sells: partialSells.length, buys: buys.length, stop_ratchets: stopRatchets.length, equity_rows: equityRows.length, regime },
+    message: `${STRATEGIES.length} strategieën: ${exits.length} exits (incl. ${partialSells.length} deelwinst), ${buys.length} aankopen, ${stopRatchets.length} stop-ratchets [regime: ${regime}]${flagMsg}`,
+    metrics: { strategies: STRATEGIES.length, exits: exits.length, partial_sells: partialSells.length, buys: buys.length, stop_ratchets: stopRatchets.length, equity_rows: equityRows.length, regime, price_flags: flagged.size },
   });
 
   return { ok: true, strategies: STRATEGIES.length, exits: exits.length, partial_sells: partialSells.length, buys: buys.length, stop_ratchets: stopRatchets.length };

@@ -47,12 +47,14 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
   try {
     const sb = getServiceClient();
-    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, famSeriesRes, posDaysRes, tickerMetaRes] = await Promise.all([
+    const [stratRes, statesRes, closedRes, openRes, summaryRes, retiredRes, evolveRunRes, oldestStateRes, posDetailRes, famSeriesRes, posDaysRes, tickerMetaRes, paperClosedRes] = await Promise.all([
       sb.from("xinix_strategies").select("id, slug, name, grp, config, generation, protected, parent_id").eq("active", true),
       fetchAllPages((f, t) => sb.from("xinix_strategy_state")
         .select("strategy_id, cash, initial_capital, last_run_at, started_at").order("strategy_id").range(f, t)),
+      // entry_score + entry_reason worden ook gebruikt voor de "beste trades"-tab
+      // (waarom scoorde dit aandeel zo hoog bij entry?).
       fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
-        .select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, closed_reason, qty, avg_price, partial_exits, entry_date, closed_at")
+        .select("strategy_id, ticker, return_usd, return_pct, entry_signal_types, entry_sector, entry_score, entry_reason, closed_reason, qty, avg_price, partial_exits, entry_date, closed_at")
         .not("closed_at","is",null).order("id").range(f, t)),
       fetchAllPages((f, t) => sb.from("xinix_strategy_positions")
         .select("strategy_id, ticker, qty, avg_price, entry_signal_types, entry_sector, entry_date, entry_reason")
@@ -88,8 +90,14 @@ Deno.serve(async (req) => {
       // gesloten positie — eindelijk een accurate "capture"-teller.
       // Voor medailles en hikkertje-spikes hebben we geen earned-date;
       // die KPI's zijn vervangen door return-drempels.
+      // company/sector/score/medailles verrijken de trades op de "beste trades"-tab.
       fetchAllPages((f, t) => sb.from("signal_tickers")
-        .select("ticker, phoenix_50x_date, poefie_last_date").order("id").range(f, t)),
+        .select("ticker, company, sector, goud_score, medal_gold, medal_silver, medal_bronze, phoenix_50x_date, poefie_last_date").order("id").range(f, t)),
+      // Gesloten trades van de single paper portefeuille — meegenomen in de
+      // "beste trades aller tijden"-lijst, los van de strategie-families.
+      fetchAllPages((f, t) => sb.from("xinix_paper_positions")
+        .select("ticker, return_usd, return_pct, entry_signal_types, entry_sector, entry_score, entry_reason, closed_reason, entry_date, closed_at, hold_days")
+        .not("closed_at", "is", null).order("id").range(f, t)),
     ]);
 
     type TickerDates = { phoenixDate: number | null; poefieDate: number | null };
@@ -99,10 +107,20 @@ Deno.serve(async (req) => {
       const t = new Date(d).getTime();
       return Number.isFinite(t) ? t : null;
     }
+    type TickerMeta = { company: string | null; sector: string | null; goudScore: number | null; gold: number; silver: number; bronze: number };
+    const tickerMeta = new Map<string, TickerMeta>();
     for (const r of (tickerMetaRes.data ?? [])) {
       tickerDates.set(r.ticker as string, {
         phoenixDate: parseDate(r.phoenix_50x_date),
         poefieDate:  parseDate(r.poefie_last_date),
+      });
+      tickerMeta.set(r.ticker as string, {
+        company: (r.company as string) ?? null,
+        sector: (r.sector as string) ?? null,
+        goudScore: r.goud_score != null ? Number(r.goud_score) : null,
+        gold: Number(r.medal_gold ?? 0),
+        silver: Number(r.medal_silver ?? 0),
+        bronze: Number(r.medal_bronze ?? 0),
       });
     }
 
@@ -586,11 +604,101 @@ Deno.serve(async (req) => {
       })
       .sort((a, b) => b.avg_return_pct - a.avg_return_pct);
 
+    // ── Beste trades ──────────────────────────────────────────────────────────
+    // Twee weergaven voor de "Toppers"-tab:
+    //  - overall: de beste gesloten trades over álle strategieën + de single
+    //    paper portefeuille, ongeacht of hun familie/portefeuille hoog staat.
+    //  - byFamily: per familie (grp) de eigen beste trades, zodat je bij een
+    //    sterk scorende familie ziet wélke aandelen het deden + waaróm ze
+    //    kwalificeerden (entry-score, signalen, entry-reden).
+    interface TopTrade {
+      ticker: string; company: string | null; sector: string | null;
+      grp: string; strategy_name: string; slug: string;
+      return_pct: number; return_usd: number; hold_days: number;
+      entry_date: string | null; closed_at: string | null;
+      entry_score: number | null; entry_signal_types: string[];
+      entry_reason: string | null; closed_reason: string | null;
+      goud_score: number | null; medal_gold: number; medal_silver: number; medal_bronze: number;
+      times_traded?: number; // hoe vaak dit aandeel als (winnende) trade is gevangen
+    }
+    const stratById = new Map<number, { grp: string; name: string; slug: string }>();
+    for (const r of results) stratById.set(r.id, { grp: r.grp, name: r.name, slug: r.slug });
+
+    function holdDaysOf(entry: unknown, closed: unknown): number {
+      const e = parseDate(entry), c = parseDate(closed);
+      return e != null && c != null ? Math.max(0, Math.round((c - e) / 86_400_000)) : 0;
+    }
+    function buildTrade(p: Record<string, unknown>, grp: string, name: string, slug: string): TopTrade {
+      const tk = (p.ticker as string) ?? "";
+      const m = tickerMeta.get(tk);
+      return {
+        ticker: tk, company: m?.company ?? null, sector: m?.sector ?? (p.entry_sector as string) ?? null,
+        grp, strategy_name: name, slug,
+        return_pct: Number(p.return_pct ?? 0), return_usd: Number(p.return_usd ?? 0),
+        hold_days: p.hold_days != null ? Number(p.hold_days) : holdDaysOf(p.entry_date, p.closed_at),
+        entry_date: (p.entry_date as string) ?? null, closed_at: (p.closed_at as string) ?? null,
+        entry_score: p.entry_score != null ? Number(p.entry_score) : null,
+        entry_signal_types: ((p.entry_signal_types as string[]) ?? []).slice(0, 6),
+        entry_reason: (p.entry_reason as string) ?? null, closed_reason: (p.closed_reason as string) ?? null,
+        goud_score: m?.goudScore ?? null, medal_gold: m?.gold ?? 0, medal_silver: m?.silver ?? 0, medal_bronze: m?.bronze ?? 0,
+      };
+    }
+
+    // Dedupliceren op ticker: in de sim kopen tientallen strategieën hetzelfde
+    // aandeel, dus zonder dedup zou de lijst 40× dezelfde winnaar tonen. We
+    // houden per ticker de béste trade + tellen hoe vaak hij gevangen is.
+    const overallByTicker = new Map<string, { best: TopTrade; count: number }>();
+    const grpByTicker = new Map<string, Map<string, TopTrade>>();
+    // Vangnet: rendementen >=800% zijn vrijwel zeker koers-artefacten (split/
+    // glitch) — hoger dan de hoogste echte take-profit (+500%). Weren uit de
+    // Toppers-lijst zodat een eventuele nieuwe glitch nooit bovenaan komt.
+    const ARTIFACT_RET_PCT = 800;
+    for (const p of (closedRes.data ?? [])) {
+      const ret = Number(p.return_pct ?? 0);
+      if (!Number.isFinite(ret) || ret >= ARTIFACT_RET_PCT) continue;
+      const tk = (p.ticker as string) ?? "";
+      if (!tk) continue;
+      const strat = stratById.get(p.strategy_id as number);
+      const grp = strat?.grp ?? "Gepensioneerd";
+      const t = buildTrade(p as Record<string, unknown>, grp, strat?.name ?? "(gepensioneerde strategie)", strat?.slug ?? "");
+      const cur = overallByTicker.get(tk);
+      if (!cur) overallByTicker.set(tk, { best: t, count: 1 });
+      else { cur.count++; if (t.return_pct > cur.best.return_pct) cur.best = t; }
+      // Alleen actieve families groeperen — die staan in de leaderboard/families-tab.
+      if (strat) {
+        let m = grpByTicker.get(grp);
+        if (!m) { m = new Map(); grpByTicker.set(grp, m); }
+        const e = m.get(tk);
+        if (!e || t.return_pct > e.return_pct) m.set(tk, t);
+      }
+    }
+    // Single paper portefeuille meenemen in de overall-lijst (geen familie).
+    for (const p of (paperClosedRes.data ?? [])) {
+      const ret = Number(p.return_pct ?? 0);
+      if (!Number.isFinite(ret) || ret >= ARTIFACT_RET_PCT) continue;
+      const tk = (p.ticker as string) ?? "";
+      if (!tk) continue;
+      const t = buildTrade(p as Record<string, unknown>, "Portefeuille", "Single paper portefeuille", "paper");
+      const cur = overallByTicker.get(tk);
+      if (!cur) overallByTicker.set(tk, { best: t, count: 1 });
+      else { cur.count++; if (t.return_pct > cur.best.return_pct) cur.best = t; }
+    }
+
+    const bestOverall = [...overallByTicker.values()]
+      .map((v) => ({ ...v.best, times_traded: v.count }))
+      .sort((a, b) => b.return_pct - a.return_pct)
+      .slice(0, 40);
+    const bestByFamily: Record<string, TopTrade[]> = {};
+    for (const [grp, m] of grpByTicker) {
+      bestByFamily[grp] = [...m.values()].sort((a, b) => b.return_pct - a.return_pct).slice(0, 6);
+    }
+
     return new Response(JSON.stringify({
       strategies: results,
       insights: insights.filter(Boolean),
       recommendations,
       signal_type_stats,
+      best_trades: { overall: bestOverall, by_family: bestByFamily },
       families: { groups: families, dates: allDates },
       meta: { total: results.length, last_run_at: lastRun, strategies_with_closed_positions: runCount },
       evolution: {
