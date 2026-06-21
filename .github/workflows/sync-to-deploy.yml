@@ -13,6 +13,13 @@ on:
   push:
     branches:
       - claude/poll-fundamentals-background-5TjhG
+    # Docs-only pushes (kennisexport schrijft docs/kennisbasis.md + CLAUDE.md)
+    # hoeven geen site-rebuild+deploy te triggeren — dat zijn pure verspilde
+    # runs (en logs die de Actions-opslag opvullen). De gebouwde site bevat
+    # geen markdown/docs, dus alleen code-wijzigingen hoeven te deployen.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
 
 permissions:
   contents: write
