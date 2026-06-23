@@ -1,0 +1,13 @@
+-- Zet RLS aan op xinix_price_artifact_fix_log.
+--
+-- Aanleiding: Supabase database-linter (0013_rls_disabled_in_public) gaf een
+-- ERROR omdat deze tabel via PostgREST publiek bereikbaar is zonder RLS.
+-- De tabel was ad-hoc aangemaakt (log van koers-artefact-correcties, vgl.
+-- xinix_price_flags uit 2026-06-16) en stond daardoor niet in een migratie.
+--
+-- RLS aan zonder policy = standaard "deny all" voor de anon/authenticated
+-- rollen. Edge functions blijven werken want die gebruiken de service_role key
+-- die RLS automatisch bypasst. De frontend praat nergens direct met de DB —
+-- alle toegang loopt via edge functions. Dit is exact hetzelfde patroon als
+-- alle andere xinix-tabellen (zie 2026-05-19_enable_rls_public_tables.sql).
+ALTER TABLE public.xinix_price_artifact_fix_log ENABLE ROW LEVEL SECURITY;
