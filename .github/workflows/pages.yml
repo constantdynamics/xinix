@@ -13,6 +13,11 @@ on:
       - main
       - claude/biotech-signal-detector-3ajql
   workflow_dispatch:
+    inputs:
+      sha:
+        description: "Exacte commit-SHA om te bouwen (optioneel; leeg = branch-HEAD)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -27,7 +32,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Bouw exact de meegegeven commit (via workflow_dispatch input) i.p.v. de
+      # branch-HEAD. Voorkomt de race waarbij een net-geforcepushte deploy-branch
+      # nog niet is gepropageerd en GitHub de vórige commit zou uitchecken.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.sha || github.ref }}
 
       - uses: actions/setup-node@v4
         with:
