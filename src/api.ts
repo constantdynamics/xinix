@@ -395,6 +395,33 @@ export async function triggerDoublingResearch(): Promise<{ ok: boolean; message?
   return (await res.json()) as { ok: boolean; message?: string };
 }
 
+// Bevestigde katalysator handmatig toevoegen (admin) — voor o.a. mining-favorieten
+// waarvoor geen gestructureerde feed bestaat. Eén per ticker (vervangt bestaande).
+export async function addDoublingCatalyst(
+  ticker: string,
+  expected_date: string,
+  catalyst_type: string,
+  note?: string,
+): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(apiUrl("/api/xinix-doubling-research-background"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ action: "add_catalyst", ticker, expected_date, catalyst_type, note }),
+  });
+  if (!res.ok) throw new Error(`add catalyst ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; message?: string };
+}
+
+export async function removeDoublingCatalyst(ticker: string): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(apiUrl("/api/xinix-doubling-research-background"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ action: "remove_catalyst", ticker }),
+  });
+  if (!res.ok) throw new Error(`remove catalyst ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; message?: string };
+}
+
 export interface ZwitserlevenStock {
   ticker: string;
   company: string | null;
