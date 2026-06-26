@@ -67,6 +67,7 @@ interface Input {
   latest_filing_at: string | null;
   next_catalyst_date: string | null;
   next_catalyst_type: string | null;
+  next_catalyst_source: string | null;
   next_trial_date: string | null;
   next_trial_title: string | null;
   events_120d: number;
@@ -150,6 +151,7 @@ function buildOverlay(r: Input) {
     data: {
       next_catalyst_date: r.next_catalyst_date,
       next_catalyst_type: r.next_catalyst_type,
+      next_catalyst_source: r.next_catalyst_source,
       next_trial_date: r.next_trial_date,
       next_trial_title: r.next_trial_title,
       material_news_90d: r.material_news_90d,
@@ -225,6 +227,42 @@ Deno.serve(async (req) => {
   if (!isAuthed(req)) return json(req, { error: "unauthorized" }, { status: 401 });
 
   const supabase = sb();
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const action = typeof body.action === "string" ? body.action : null;
+
+  // Handmatig bevestigde katalysator toevoegen (admin) → betrouwbare bron voor
+  // o.a. mining-favorieten waarvoor geen gestructureerde feed bestaat.
+  if (action === "add_catalyst") {
+    const ticker = String(body.ticker ?? "").toUpperCase().trim();
+    const date = String(body.expected_date ?? "").trim();
+    const type = String(body.catalyst_type ?? "katalysator").trim().slice(0, 40) || "katalysator";
+    const note = body.note ? String(body.note).slice(0, 200) : null;
+    if (!/^[A-Z0-9.\-]{1,15}$/.test(ticker)) return json(req, { error: "ongeldige ticker" }, { status: 400 });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z")))
+      return json(req, { error: "ongeldige datum (YYYY-MM-DD)" }, { status: 400 });
+    const today = new Date().toISOString().slice(0, 10);
+    if (date < today) return json(req, { error: "datum ligt in het verleden" }, { status: 400 });
+    const { data: tk } = await supabase.from("signal_tickers").select("sector").eq("ticker", ticker).maybeSingle();
+    // Eén handmatige toekomstige katalysator per ticker: vervang de bestaande.
+    await supabase.from("signal_catalysts").delete().eq("ticker", ticker).eq("source", "manual").gte("expected_date", today);
+    const { error: insErr } = await supabase.from("signal_catalysts").insert({
+      ticker, sector: (tk as { sector?: string } | null)?.sector ?? null,
+      catalyst_type: type, description: note, expected_date: date, source: "manual", status: "pending",
+    });
+    if (insErr) return json(req, { ok: false, message: insErr.message }, { status: 500 });
+    await recompute();
+    return json(req, { ok: true, message: `katalysator (${type}, ${date}) toegevoegd voor ${ticker}` });
+  }
+
+  if (action === "remove_catalyst") {
+    const ticker = String(body.ticker ?? "").toUpperCase().trim();
+    if (!/^[A-Z0-9.\-]{1,15}$/.test(ticker)) return json(req, { error: "ongeldige ticker" }, { status: 400 });
+    const { error: delErr } = await supabase.from("signal_catalysts").delete().eq("ticker", ticker).eq("source", "manual");
+    if (delErr) return json(req, { ok: false, message: delErr.message }, { status: 500 });
+    await recompute();
+    return json(req, { ok: true, message: `handmatige katalysator verwijderd voor ${ticker}` });
+  }
+
   const { data: runRow } = await supabase.from("signal_runs").insert({ job: "xinix-doubling-research" }).select("id").single();
   const runId = runRow?.id as number | undefined;
   try {

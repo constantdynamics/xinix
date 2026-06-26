@@ -1,5 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { fetchPriceHistory, fetchDoublingResearch, triggerDoublingResearch, getToken, type DoublingResearchItem } from "../api";
+import {
+  fetchPriceHistory,
+  fetchDoublingResearch,
+  triggerDoublingResearch,
+  addDoublingCatalyst,
+  removeDoublingCatalyst,
+  getToken,
+  type DoublingResearchItem,
+} from "../api";
 import type { Dashboard, Card as CardType, Sector } from "../types";
 import type { ScanResults } from "../api";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
@@ -217,18 +225,19 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
   const [enriching, setEnriching] = useState(false);
   const isAdmin = !!getToken();
 
+  async function refreshResearch() {
+    const r = await fetchDoublingResearch();
+    const m = new Map<string, DoublingResearchItem>();
+    for (const it of r.items) m.set(it.ticker.toUpperCase(), it);
+    setResearch(m);
+    setResearchAt(r.computed_at);
+  }
+
   useEffect(() => {
     let cancelled = false;
-    fetchDoublingResearch()
-      .then((r) => {
-        if (cancelled) return;
-        const m = new Map<string, DoublingResearchItem>();
-        for (const it of r.items) m.set(it.ticker.toUpperCase(), it);
-        setResearch(m);
-        setResearchAt(r.computed_at);
-      })
-      .catch(() => {/* overlay optioneel — val terug op alleen de prijs-kern */});
+    refreshResearch().catch(() => {/* overlay optioneel — val terug op alleen de prijs-kern */});
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function enrichNow() {
@@ -236,11 +245,7 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
     setEnriching(true);
     try {
       const res = await triggerDoublingResearch();
-      const r = await fetchDoublingResearch();
-      const m = new Map<string, DoublingResearchItem>();
-      for (const it of r.items) m.set(it.ticker.toUpperCase(), it);
-      setResearch(m);
-      setResearchAt(r.computed_at);
+      await refreshResearch();
       toast(res.message ?? "Research verrijkt");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Verrijken mislukt", "error");
@@ -745,7 +750,12 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
                             <tr className="bg-ink-2/40">
                               <td />
                               <td colSpan={11} className="px-4 py-3">
-                                <DoublingDetail result={r} />
+                                <DoublingDetail
+                                  result={r}
+                                  researchItem={research.get(r.ticker) ?? null}
+                                  isAdmin={isAdmin}
+                                  onCatalystChanged={refreshResearch}
+                                />
                               </td>
                             </tr>
                           )}
@@ -789,7 +799,17 @@ function toneActive(tone: "lime" | "cyan" | "watch" | "loss"): string {
 }
 
 // Uitklapbare onderbouwing onder een tabelrij.
-function DoublingDetail({ result }: { result: DoublingResult }) {
+function DoublingDetail({
+  result,
+  researchItem,
+  isAdmin,
+  onCatalystChanged,
+}: {
+  result: DoublingResult;
+  researchItem: DoublingResearchItem | null;
+  isAdmin: boolean;
+  onCatalystChanged: () => Promise<void> | void;
+}) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-neutral-300 leading-relaxed">{result.narrative}</p>
@@ -874,6 +894,120 @@ function DoublingDetail({ result }: { result: DoublingResult }) {
           Ontbrekende data (drukt de betrouwbaarheid): {result.missing.join(" · ")}
         </div>
       )}
+
+      {isAdmin && (
+        <ManualCatalystEditor ticker={result.ticker} researchItem={researchItem} onChanged={onCatalystChanged} />
+      )}
+    </div>
+  );
+}
+
+const CATALYST_TYPES = [
+  "Phase3_readout",
+  "Phase2_readout",
+  "PDUFA",
+  "resource_update",
+  "PEA",
+  "PFS",
+  "DFS",
+  "permit",
+  "drill_results",
+  "feasibility",
+  "earnings",
+  "anders",
+];
+
+// Admin: bevestigde katalysator handmatig toevoegen/verwijderen. Voor o.a.
+// mining-favorieten waarvoor geen betrouwbare gestructureerde feed bestaat.
+function ManualCatalystEditor({
+  ticker,
+  researchItem,
+  onChanged,
+}: {
+  ticker: string;
+  researchItem: DoublingResearchItem | null;
+  onChanged: () => Promise<void> | void;
+}) {
+  const data = researchItem?.data ?? {};
+  const existingDate = typeof data.next_catalyst_date === "string" ? data.next_catalyst_date : null;
+  const existingType = typeof data.next_catalyst_type === "string" ? data.next_catalyst_type : null;
+  const hasManual = data.next_catalyst_source === "manual" && !!existingDate;
+
+  const [date, setDate] = useState("");
+  const [type, setType] = useState(CATALYST_TYPES[0]);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    if (!date) {
+      toast("Kies een datum", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await addDoublingCatalyst(ticker, date, type);
+      await onChanged();
+      toast(r.message ?? "Katalysator toegevoegd");
+      setDate("");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Toevoegen mislukt", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove() {
+    setBusy(true);
+    try {
+      const r = await removeDoublingCatalyst(ticker);
+      await onChanged();
+      toast(r.message ?? "Verwijderd");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Verwijderen mislukt", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-ink-5 bg-ink-3/20 p-2.5 space-y-2">
+      <div className="text-[10px] uppercase tracking-wider font-bold text-fog-info">
+        🧪 Bevestigde katalysator (handmatig)
+      </div>
+      {hasManual && (
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-neutral-300">
+            Huidig: <span className="font-semibold">{existingType}</span> op {existingDate}
+          </span>
+          <button onClick={remove} disabled={busy} className="text-fog-loss hover:underline disabled:opacity-50">
+            verwijderen
+          </button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-end gap-2">
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="h-8 px-2 text-xs rounded bg-ink-2 border border-ink-5 text-neutral-100"
+        />
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          className="h-8 px-2 text-xs rounded bg-ink-2 border border-ink-5 text-neutral-100"
+        >
+          {CATALYST_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+        <Button size="sm" onClick={save} disabled={busy || !date}>
+          {busy ? "…" : "Opslaan"}
+        </Button>
+      </div>
+      <p className="text-[10px] text-neutral-600 leading-relaxed">
+        Voeg een bevestigde toekomstige gebeurtenis toe (FDA-besluit, trial-readout, PEA/PFS/DFS, vergunning,
+        drill-results). Wordt direct in de score en het 🧪-label meegewogen.
+      </p>
     </div>
   );
 }

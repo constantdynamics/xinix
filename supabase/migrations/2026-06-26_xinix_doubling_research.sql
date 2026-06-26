@@ -32,7 +32,7 @@ RETURNS TABLE (
   material_news_90d int, material_news_30d int, jv_recent boolean,
   last_material_title text, last_material_at timestamptz,
   filings_120d int, latest_filing_form text, latest_filing_at timestamptz,
-  next_catalyst_date date, next_catalyst_type text,
+  next_catalyst_date date, next_catalyst_type text, next_catalyst_source text,
   next_trial_date date, next_trial_title text,
   events_120d int
 )
@@ -65,10 +65,14 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     from signal_filings where upper(ticker) in (select tk from fav)
     order by upper(ticker), filed_at desc
   ),
+  -- Alleen betrouwbare, écht gedateerde katalysatoren: ClinicalTrials.gov +
+  -- handmatig bevestigd. De 'vandaag'-gestempelde nieuws-detecties
+  -- (google-news/yahoo-news) zijn geen geplande datums en worden uitgesloten.
   cat as (
-    select distinct on (upper(ticker)) upper(ticker) tk, expected_date, catalyst_type
+    select distinct on (upper(ticker)) upper(ticker) tk, expected_date, catalyst_type, source
     from signal_catalysts
     where upper(ticker) in (select tk from fav) and expected_date >= current_date and occurred_at is null
+      and coalesce(source,'') not in ('google-news','yahoo-news')
     order by upper(ticker), expected_date asc
   ),
   tr as (
@@ -84,7 +88,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     coalesce(ev.mat90,0), coalesce(ev.mat30,0), coalesce(ev.jv,false),
     lm.title, lm.detected_at,
     coalesce(fil.f120,0), lf.form, lf.filed_at,
-    cat.expected_date, cat.catalyst_type,
+    cat.expected_date, cat.catalyst_type, cat.source,
     tr.primary_completion_date, tr.brief_title,
     coalesce(ev.ev120,0)
   from fav f
