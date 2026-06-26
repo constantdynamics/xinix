@@ -41,11 +41,15 @@ jobs:
 
       - name: Trigger Pages deploy via workflow_dispatch
         run: |
+          # Geef GitHub even om de force-push + nieuwe workflow-definitie te
+          # registreren, en geef de EXACTE commit-SHA mee zodat pages.yml die
+          # commit uitcheckt (i.p.v. een mogelijk nog-niet-gepropageerde HEAD).
+          sleep 10
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/pages.yml/dispatches" \
-            -d '{"ref":"claude/biotech-signal-detector-3ajql"}')
+            -d '{"ref":"claude/biotech-signal-detector-3ajql","inputs":{"sha":"${{ github.sha }}"}}')
           echo "workflow_dispatch HTTP status: $HTTP_STATUS"
           if [ "$HTTP_STATUS" != "204" ]; then
             echo "::warning::workflow_dispatch mislukt (HTTP $HTTP_STATUS) — controleer actions-permissies"
