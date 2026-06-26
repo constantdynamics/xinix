@@ -96,6 +96,21 @@ export interface DoublingFactor {
   weight: number;
 }
 
+/**
+ * Research-overlay uit de backend (xinix-doubling-research-background): per
+ * favoriet samengevatte fundamentele/nieuws-research die elke ~15 dagen ververst.
+ * Wordt over de prijs-gedreven kern heen gelegd.
+ */
+export interface ResearchOverlay {
+  research_multiplier: number; // ×-factor op de kans
+  conf_bonus: number; // opgeteld bij de confidence-score
+  factors: DoublingFactor[];
+  bull: string[];
+  bear: string[];
+  summary: string | null;
+  computed_at: string;
+}
+
 export interface DoublingResult {
   ticker: string;
   company: string;
@@ -123,6 +138,12 @@ export interface DoublingResult {
   adviesSource: "limiet" | "model" | null;
   /** Huidige koers t.o.v. advies-koers in % (positief = boven advies). */
   adviesDistancePct: number | null;
+  /** Research-overlay (backend, ~15-daags). hasResearch=false → alleen prijs-kern. */
+  hasResearch: boolean;
+  bull: string[];
+  bear: string[];
+  researchSummary: string | null;
+  researchAt: string | null;
 }
 
 // ── Wiskundige helpers ───────────────────────────────────────────────────────
@@ -340,7 +361,11 @@ const NEUTRAL_DRIFT = 0.08; // neutrale jaardrift voor de vol-baseline (geen aan
  * met koershistorie wordt het model sterk onderbouwd; zonder valt het terug op
  * range-volatiliteit + poefie-tellers (lagere confidence).
  */
-export function scoreDoubling(c: DoublingCardInput, stats: PriceStats | null): DoublingResult {
+export function scoreDoubling(
+  c: DoublingCardInput,
+  stats: PriceStats | null,
+  overlay?: ResearchOverlay | null,
+): DoublingResult {
   const factors: DoublingFactor[] = [];
   const missing: string[] = [];
 
@@ -518,8 +543,9 @@ export function scoreDoubling(c: DoublingCardInput, stats: PriceStats | null): D
     });
   }
 
-  // Katalysator op korte termijn.
-  if (c.daysToNextCatalyst != null && c.daysToNextCatalyst >= 0 && c.daysToNextCatalyst <= 90) {
+  // Katalysator op korte termijn — alleen als terugval wanneer er geen
+  // research-overlay is; anders bezit de overlay de (rijkere) katalysator-data.
+  if (!overlay && c.daysToNextCatalyst != null && c.daysToNextCatalyst >= 0 && c.daysToNextCatalyst <= 90) {
     const f = c.daysToNextCatalyst <= 30 ? 1.16 : 1.08;
     M *= f;
     factors.push({
@@ -551,7 +577,13 @@ export function scoreDoubling(c: DoublingCardInput, stats: PriceStats | null): D
     });
   }
 
-  M = clamp(M, 0.45, 2.1);
+  // Research-overlay (backend): katalysatoren, materieel nieuws, verwatering.
+  if (overlay) {
+    M *= overlay.research_multiplier;
+    for (const f of overlay.factors) factors.push(f);
+  }
+
+  M = clamp(M, 0.4, 2.4);
 
   // 5) Eindkans + score ------------------------------------------------------
   const probability = clamp(pBase * M, 0.005, 0.85);
@@ -571,7 +603,8 @@ export function scoreDoubling(c: DoublingCardInput, stats: PriceStats | null): D
   if (c.goudScore != null) conf += 1;
   if (cap != null) conf += 1;
   if (c.medalGold + c.medalSilver + c.medalBronze > 0) conf += 0.5;
-  // Vier niveaus: zeer-hoog = lange gemeten historie + fundamentals.
+  if (overlay) conf += overlay.conf_bonus; // harde research → hogere betrouwbaarheid
+  // Vier niveaus: zeer-hoog = lange gemeten historie + fundamentals + research.
   const confidence: Confidence =
     conf >= 5 ? "zeer-hoog" : conf >= 3 ? "hoog" : conf >= 1.5 ? "middel" : "laag";
 
@@ -600,6 +633,11 @@ export function scoreDoubling(c: DoublingCardInput, stats: PriceStats | null): D
     adviesPrice: advies.price,
     adviesSource: advies.source,
     adviesDistancePct: advies.distancePct,
+    hasResearch: !!overlay,
+    bull: overlay?.bull ?? [],
+    bear: overlay?.bear ?? [],
+    researchSummary: overlay?.summary ?? null,
+    researchAt: overlay?.computed_at ?? null,
   };
 }
 
