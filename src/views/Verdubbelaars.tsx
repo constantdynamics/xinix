@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { fetchPriceHistory } from "../api";
-import type { Dashboard, Card as CardType } from "../types";
+import type { Dashboard, Card as CardType, Sector } from "../types";
 import type { ScanResults } from "../api";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import { googleFinanceUrl } from "../tickerLinks";
@@ -35,16 +35,26 @@ function toSector(s: string | null | undefined): DoublingCardInput["sector"] {
   return s === "biotech" || s === "mining" || s === "other" ? s : null;
 }
 
-const CONF_TONE: Record<Confidence, "lime" | "watch" | "loss"> = {
-  hoog: "lime",
+const CONF_TONE: Record<Confidence, "lime" | "cyan" | "watch" | "loss"> = {
+  "zeer-hoog": "lime",
+  hoog: "cyan",
   middel: "watch",
   laag: "loss",
 };
 const CONF_LABEL: Record<Confidence, string> = {
+  "zeer-hoog": "Zeer betrouwbaar",
   hoog: "Betrouwbaar",
   middel: "Redelijk",
   laag: "Indicatief",
 };
+const CONF_SHORT: Record<Confidence, string> = {
+  "zeer-hoog": "Zeer betr.",
+  hoog: "Betrouwbaar",
+  middel: "Redelijk",
+  laag: "Indicatief",
+};
+const CONF_RANK: Record<Confidence, number> = { "zeer-hoog": 3, hoog: 2, middel: 1, laag: 0 };
+const ALL_CONF: Confidence[] = ["zeer-hoog", "hoog", "middel", "laag"];
 
 // Score → kleur. Hoger = heter (lime → geel → oranje → pink).
 function scoreColor(score: number): string {
@@ -53,6 +63,13 @@ function scoreColor(score: number): string {
   if (score >= 22) return "#ffa800"; // oranje
   if (score >= 12) return "#ffd400"; // geel
   return "#8aa0a8"; // gedempt blauwgrijs
+}
+
+function fmtPrice(v: number | null): string {
+  if (v == null) return "—";
+  if (v < 1) return v.toFixed(4);
+  if (v < 10) return v.toFixed(3);
+  return v.toFixed(2);
 }
 
 function buildInputs(dashboard: Dashboard | null, scans: ScanResults | null, favSet: Set<string>): DoublingCardInput[] {
@@ -119,12 +136,35 @@ function buildInputs(dashboard: Dashboard | null, scans: ScanResults | null, fav
   return out;
 }
 
+type SortKey = "score" | "confidence" | "vol" | "doublings" | "price" | "advies_dist" | "ticker";
+type SortDir = "asc" | "desc";
+
+function sortValue(r: DoublingResult, key: SortKey): number | string | null {
+  switch (key) {
+    case "score": return r.score;
+    case "confidence": return CONF_RANK[r.confidence];
+    case "vol": return r.annualVolPct;
+    case "doublings": return r.historicalDoublings;
+    case "price": return r.lastClose;
+    case "advies_dist": return r.adviesDistancePct;
+    case "ticker": return r.ticker;
+  }
+}
+
 export function VerdubbelaarsView({ dashboard, scans }: Props) {
   const marks = useMarks();
   const [statsVersion, setStatsVersion] = useState(0); // bump zodra een ticker klaar is
   const [reloadKey, setReloadKey] = useState(0); // bump om de fetch-effect te herstarten (Herbereken)
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
+
+  // Filters + sortering (boven de tabel, net als de Lijst-tab).
+  const [sortKey, setSortKey] = useState<SortKey>("score");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sectorFilter, setSectorFilter] = useState<Set<Sector>>(new Set());
+  const [confFilter, setConfFilter] = useState<Set<Confidence>>(new Set());
+  const [minScore, setMinScore] = useState(0);
+  const [onlyBuyZone, setOnlyBuyZone] = useState(false);
 
   const inputs = useMemo(
     () => buildInputs(dashboard, scans, marks.favorites),
@@ -178,14 +218,34 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputs, statsVersion]);
 
+  const filtered = useMemo<DoublingResult[]>(() => {
+    let list = results;
+    if (sectorFilter.size > 0) list = list.filter((r) => r.sector != null && sectorFilter.has(r.sector));
+    if (confFilter.size > 0) list = list.filter((r) => confFilter.has(r.confidence));
+    if (minScore > 0) list = list.filter((r) => r.score >= minScore);
+    if (onlyBuyZone) list = list.filter((r) => r.adviesDistancePct != null && r.adviesDistancePct <= 0);
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...list].sort((a, b) => {
+      const av = sortValue(a, sortKey);
+      const bv = sortValue(b, sortKey);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1; // nulls altijd onderaan
+      if (bv == null) return -1;
+      if (typeof av === "string" && typeof bv === "string") {
+        return dir * av.localeCompare(bv);
+      }
+      return dir * ((av as number) - (bv as number));
+    });
+  }, [results, sectorFilter, confFilter, minScore, onlyBuyZone, sortKey, sortDir]);
+
   const summary = useMemo(() => {
     if (results.length === 0) return null;
     const scores = results.map((r) => r.score);
     const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-    const top = results[0];
-    const highConf = results.filter((r) => r.confidence === "hoog").length;
+    const top = results.reduce((m, r) => (r.score > m.score ? r : m), results[0]);
     const strong = results.filter((r) => r.score >= 30).length;
-    return { avg, top, highConf, strong };
+    const trusted = results.filter((r) => r.confidence === "zeer-hoog" || r.confidence === "hoog").length;
+    return { avg, top, strong, trusted };
   }, [results]);
 
   function toggleExpand(t: string) {
@@ -204,6 +264,31 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
     setReloadKey((k) => k + 1); // herstart de fetch-effect zodat de cache opnieuw vult
   }
 
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      // Sensibele standaardrichting per kolom.
+      setSortDir(key === "ticker" || key === "advies_dist" || key === "price" ? "asc" : "desc");
+    }
+  }
+  function toggleSector(s: Sector) {
+    setSectorFilter((prev) => {
+      const n = new Set(prev);
+      if (n.has(s)) n.delete(s);
+      else n.add(s);
+      return n;
+    });
+  }
+  function toggleConf(c: Confidence) {
+    setConfFilter((prev) => {
+      const n = new Set(prev);
+      if (n.has(c)) n.delete(c);
+      else n.add(c);
+      return n;
+    });
+  }
+
   const exchangeByTicker = useMemo(() => {
     const m = new Map<string, string | null>();
     for (const c of dashboard?.cards ?? []) m.set(c.ticker.toUpperCase(), c.exchange ?? null);
@@ -220,6 +305,12 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
   const remaining = total - analysed;
   const loadingHistory = remaining > 0;
 
+  const sortArrow = (key: SortKey) => (sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "");
+  const sectorCounts: Record<Sector, number> = { biotech: 0, mining: 0, other: 0 };
+  for (const r of results) if (r.sector) sectorCounts[r.sector]++;
+  const confCounts: Record<Confidence, number> = { "zeer-hoog": 0, hoog: 0, middel: 0, laag: 0 };
+  for (const r of results) confCounts[r.confidence]++;
+
   return (
     <div className="space-y-4">
       <CollapsibleIntro title="Verdubbelaars — kans op +100% binnen 12 maanden" icon={<GradientTabIcon tab="favorieten" />}>
@@ -234,8 +325,7 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
           <ul className="list-disc pl-5 space-y-1">
             <li>
               <strong>Volatiliteit (theorie)</strong> — uit 5 jaar koershistorie wordt de jaarvolatiliteit σ berekend.
-              Onder een lognormaal koersmodel volgt daaruit een kans op +100%. Beweeglijke aandelen hebben een dikkere
-              kans-staart omhoog (maar ook omlaag — dat houdt het eerlijk).
+              Onder een lognormaal koersmodel volgt daaruit een kans dat de koers 2× aantikt binnen een jaar.
             </li>
             <li>
               <strong>Eigen historie (empirisch)</strong> — vanaf hoeveel willekeurige startpunten in de afgelopen 5 jaar
@@ -247,9 +337,10 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
             </li>
           </ul>
           <p className="text-neutral-400">
-            De <strong>betrouwbaarheidsbadge</strong> zegt hoe hard de onderbouwing is (afhankelijk van beschikbare data).
-            Klik een kaart open voor de volledige onderbouwing. Geen voorspelling of advies — een transparante,
-            data-gedreven schatting.
+            De <strong>betrouwbaarheid</strong> (Zeer betrouwbaar → Indicatief) zegt hoe hard de onderbouwing is. De
+            <strong> advies-koers</strong> is de aankooplimiet (indien ingesteld) of anders een model-afleiding: koop op
+            een terugval, niet op kracht. <strong>vs advies</strong> toont hoe ver de koers nu boven dat instapniveau
+            zit. Klik een rij open voor de volledige onderbouwing. Geen advies — een transparante schatting.
           </p>
         </div>
       </CollapsibleIntro>
@@ -267,8 +358,9 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
         <>
           <div className="flex flex-wrap items-center gap-3">
             <Stat label="Geanalyseerd" value={`${analysed}/${total}`} />
+            {summary && <Stat label="Getoond" value={filtered.length} />}
             {summary && <Stat label="Gem. score" value={summary.avg.toFixed(0)} />}
-            {summary && <Stat label="Sterke kandidaten (≥30)" value={summary.strong} />}
+            {summary && <Stat label="Betrouwbaar+" value={summary.trusted} />}
             {summary && summary.top && (
               <Stat label="Hoogste" value={`${summary.top.ticker} · ${summary.top.score}`} tone="pink" />
             )}
@@ -284,30 +376,255 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
             </div>
           </div>
 
-          <div className="space-y-2">
-            {results.map((r, i) => {
-              const isOpen = expanded.has(r.ticker);
-              const exch = exchangeByTicker.get(r.ticker) ?? null;
-              const pending = !statsCache.has(r.ticker) && loadingHistory;
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold mr-1">Betrouwbaarheid:</span>
+            {ALL_CONF.map((cf) => {
+              const active = confFilter.has(cf);
+              const count = confCounts[cf];
+              const tone = CONF_TONE[cf];
+              const cls = active
+                ? toneActive(tone)
+                : "border-ink-5 text-neutral-400 hover:text-neutral-200";
               return (
-                <DoublingCard
-                  key={r.ticker}
-                  rank={i + 1}
-                  result={r}
-                  exchange={exch}
-                  open={isOpen}
-                  pending={pending}
-                  onToggle={() => toggleExpand(r.ticker)}
-                  onChart={() => setChartFor({ ticker: r.ticker, company: r.company, exchange: exch })}
-                />
+                <button
+                  key={cf}
+                  onClick={() => toggleConf(cf)}
+                  disabled={count === 0 && !active}
+                  className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors disabled:opacity-40 ${cls}`}
+                >
+                  {CONF_SHORT[cf]} <span className="opacity-70">{count}</span>
+                </button>
               );
             })}
+            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold ml-3 mr-1">Sector:</span>
+            {(["biotech", "mining", "other"] as Sector[]).map((s) => {
+              const active = sectorFilter.has(s);
+              return (
+                <button
+                  key={s}
+                  onClick={() => toggleSector(s)}
+                  disabled={sectorCounts[s] === 0 && !active}
+                  className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors disabled:opacity-40 ${
+                    active ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                  }`}
+                >
+                  {SECTOR_LABEL[s]} <span className="opacity-70">{sectorCounts[s]}</span>
+                </button>
+              );
+            })}
+            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold ml-3 mr-1">Min. score:</span>
+            {[0, 10, 20, 30, 50].map((n) => (
+              <button
+                key={n}
+                onClick={() => setMinScore(n)}
+                className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                  minScore === n ? "border-fog-pink/50 text-fog-pink bg-fog-pink/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                {n === 0 ? "alle" : `${n}+`}
+              </button>
+            ))}
+            <button
+              onClick={() => setOnlyBuyZone((v) => !v)}
+              title="Alleen aandelen die op of onder de advies-koers staan"
+              className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ml-3 ${
+                onlyBuyZone ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              🎯 In koopzone
+            </button>
           </div>
+
+          {/* Sortering */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold mr-1">Sorteer:</span>
+            {([
+              ["score", "Score"],
+              ["confidence", "Betrouwbaarheid"],
+              ["advies_dist", "vs advies"],
+              ["vol", "Volatiliteit"],
+              ["doublings", "Verdubbeld"],
+              ["price", "Koers"],
+              ["ticker", "Ticker"],
+            ] as Array<[SortKey, string]>).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => toggleSort(key)}
+                className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                  sortKey === key ? "border-fog-lime/50 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                {label} {sortArrow(key)}
+              </button>
+            ))}
+          </div>
+
+          {filtered.length === 0 ? (
+            <Card className="p-8 text-center text-sm text-neutral-500">Geen aandelen voldoen aan de filters.</Card>
+          ) : (
+            <Card className="p-0 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                    <tr>
+                      <th className="px-2 py-2 w-6" />
+                      <th className="px-2 py-2 text-right">#</th>
+                      <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("ticker")}>
+                        Ticker <span className="text-fog-lime text-[9px]">{sortArrow("ticker")}</span>
+                      </th>
+                      <th className="px-3 py-2 text-left">Bedrijf</th>
+                      <th className="px-3 py-2 text-left">Sector</th>
+                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("score")}>
+                        Score <span className="text-fog-lime text-[9px]">{sortArrow("score")}</span>
+                      </th>
+                      <th className="px-3 py-2 text-left cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("confidence")}>
+                        Betrouwbaarheid <span className="text-fog-lime text-[9px]">{sortArrow("confidence")}</span>
+                      </th>
+                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("vol")}>
+                        σ <span className="text-fog-lime text-[9px]">{sortArrow("vol")}</span>
+                      </th>
+                      <th className="px-3 py-2 text-center cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("doublings")}>
+                        Verdubbeld <span className="text-fog-lime text-[9px]">{sortArrow("doublings")}</span>
+                      </th>
+                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("price")}>
+                        Koers <span className="text-fog-lime text-[9px]">{sortArrow("price")}</span>
+                      </th>
+                      <th className="px-3 py-2 text-right" title="Geadviseerde maximale instapkoers">Advies-koers</th>
+                      <th className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none" onClick={() => toggleSort("advies_dist")} title="Hoe ver de huidige koers boven het advies zit">
+                        vs advies <span className="text-fog-lime text-[9px]">{sortArrow("advies_dist")}</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-5/40">
+                    {filtered.map((r, i) => {
+                      const isOpen = expanded.has(r.ticker);
+                      const exch = exchangeByTicker.get(r.ticker) ?? null;
+                      const pending = !statsCache.has(r.ticker) && loadingHistory;
+                      const color = scoreColor(r.score);
+                      const dist = r.adviesDistancePct;
+                      const distCls =
+                        dist == null
+                          ? "text-neutral-600"
+                          : dist <= 0
+                            ? "text-fog-lime font-semibold"
+                            : dist <= 10
+                              ? "text-fog-warn"
+                              : "text-neutral-300";
+                      return (
+                        <Fragment key={r.ticker}>
+                          <tr
+                            className="hover:bg-ink-3/30 cursor-pointer"
+                            onClick={() => toggleExpand(r.ticker)}
+                          >
+                            <td className="px-2 py-2 text-neutral-500 text-center">{isOpen ? "▾" : "▸"}</td>
+                            <td className="px-2 py-2 text-right text-[10px] text-neutral-500 tabular-nums">{i + 1}</td>
+                            <td className="px-3 py-2">
+                              <a
+                                href={googleFinanceUrl(r.ticker, exch)}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="font-mono font-semibold tab-accent-text hover:underline"
+                              >
+                                {r.ticker}
+                              </a>
+                            </td>
+                            <td className="px-3 py-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setChartFor({ ticker: r.ticker, company: r.company, exchange: exch });
+                                }}
+                                className="text-left text-neutral-200 hover:text-fog-pink hover:underline transition-colors max-w-[160px] truncate block"
+                                title={`Bekijk koersgrafiek van ${r.company}`}
+                              >
+                                {r.company}
+                              </button>
+                            </td>
+                            <td className="px-3 py-2">
+                              {r.sector ? (
+                                <Badge tone={SECTOR_TONE[r.sector]}>{SECTOR_LABEL[r.sector]}</Badge>
+                              ) : (
+                                <span className="text-neutral-600">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center justify-end gap-2">
+                                <span className="font-bold tabular-nums text-base" style={{ color }}>
+                                  {r.score}
+                                </span>
+                                <span className="w-10 h-1.5 hidden sm:block">
+                                  <BlockBar fill={r.score / 100} orientation="horizontal" count={10} />
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2">
+                              <Badge tone={CONF_TONE[r.confidence]} title={`${CONF_LABEL[r.confidence]} — hoe hard de onderbouwing is, op basis van beschikbare data`}>
+                                {CONF_SHORT[r.confidence]}
+                              </Badge>
+                              {pending && <span className="ml-1 text-[10px] text-neutral-500 animate-pulse">…</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-300">
+                              {r.annualVolPct != null ? `${r.annualVolPct.toFixed(0)}%` : <span className="text-neutral-600">—</span>}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {r.historicalDoublings != null ? (
+                                <span className={r.historicalDoublings > 0 ? "text-fog-lime font-semibold" : "text-neutral-400"}>
+                                  {r.historicalDoublings}×
+                                </span>
+                              ) : (
+                                <span className="text-neutral-600">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">
+                              {r.lastClose != null ? `$${fmtPrice(r.lastClose)}` : <span className="text-neutral-600">—</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono tabular-nums">
+                              {r.adviesPrice != null ? (
+                                <span
+                                  className="text-neutral-100"
+                                  title={r.adviesSource === "limiet" ? "Aankooplimiet" : "Model-afleiding (terugval richting steun)"}
+                                >
+                                  ${fmtPrice(r.adviesPrice)}
+                                  <span className="ml-1 text-[9px] text-neutral-500">{r.adviesSource === "limiet" ? "lim" : "mdl"}</span>
+                                </span>
+                              ) : (
+                                <span className="text-neutral-600">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono tabular-nums">
+                              {dist != null ? (
+                                <span className={distCls}>
+                                  {dist <= 0 ? `${dist.toFixed(1)}%` : `+${dist.toFixed(1)}%`}
+                                </span>
+                              ) : (
+                                <span className="text-neutral-600">—</span>
+                              )}
+                            </td>
+                          </tr>
+                          {isOpen && (
+                            <tr className="bg-ink-2/40">
+                              <td />
+                              <td colSpan={11} className="px-4 py-3">
+                                <DoublingDetail result={r} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
 
           <p className="text-[11px] text-neutral-600 leading-relaxed">
             ⚠️ Geen beleggingsadvies. Het verdubbelen van een koers binnen een jaar is fundamenteel onzeker; deze scores
-            zijn modelmatige schattingen op basis van historische data en kunnen er flink naast zitten. Koersdata via
-            Yahoo Finance.
+            en advies-koersen zijn modelmatige schattingen op basis van historische data en kunnen er flink naast zitten.
+            Koersdata via Yahoo Finance.
           </p>
         </>
       )}
@@ -324,173 +641,73 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
   );
 }
 
-function DoublingCard({
-  rank,
-  result,
-  exchange,
-  open,
-  pending,
-  onToggle,
-  onChart,
-}: {
-  rank: number;
-  result: DoublingResult;
-  exchange: string | null;
-  open: boolean;
-  pending: boolean;
-  onToggle: () => void;
-  onChart: () => void;
-}) {
-  const color = scoreColor(result.score);
-  const confTone = CONF_TONE[result.confidence];
+// Helper: actieve-pill-stijl per tone (voor de betrouwbaarheids-filterknoppen).
+function toneActive(tone: "lime" | "cyan" | "watch" | "loss"): string {
+  switch (tone) {
+    case "lime": return "border-fog-lime/50 text-fog-lime bg-fog-lime/10";
+    case "cyan": return "border-fog-info/50 text-fog-info bg-fog-info/10";
+    case "watch": return "border-fog-watch/50 text-fog-watch bg-fog-watch/10";
+    case "loss": return "border-fog-loss/50 text-fog-loss bg-fog-loss/10";
+  }
+}
+
+// Uitklapbare onderbouwing onder een tabelrij.
+function DoublingDetail({ result }: { result: DoublingResult }) {
   return (
-    <Card className="overflow-hidden">
-      <div className="flex items-stretch gap-0">
-        {/* Score-blok */}
-        <div
-          className="flex flex-col items-center justify-center px-4 py-3 shrink-0 w-[92px] border-r border-ink-5"
-          style={{ background: `color-mix(in srgb, ${color} 12%, transparent)` }}
-        >
-          <div className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">#{rank}</div>
-          <div className="text-3xl font-bold tabular-nums leading-none mt-0.5" style={{ color }}>
-            {result.score}
-          </div>
-          <div className="text-[9px] text-neutral-500 mt-0.5">/ 100</div>
-          <div className="w-full h-1.5 mt-1.5">
-            <BlockBar fill={result.score / 100} orientation="horizontal" count={10} />
-          </div>
+    <div className="space-y-3">
+      <p className="text-xs text-neutral-300 leading-relaxed">{result.narrative}</p>
+
+      {result.adviesPrice != null && result.lastClose != null && (
+        <div className="text-[11px] text-neutral-400">
+          <span className="text-neutral-200 font-semibold">Advies-koers:</span> $
+          {fmtPrice(result.adviesPrice)}{" "}
+          {result.adviesSource === "limiet" ? "(je aankooplimiet)" : "(model: terugval richting steun)"} — de koers staat
+          nu{" "}
+          {result.adviesDistancePct != null && result.adviesDistancePct > 0
+            ? `+${result.adviesDistancePct.toFixed(1)}% bóven het advies (wachten op een dip kan)`
+            : `op of onder het advies — in de koopzone`}
+          .
         </div>
+      )}
 
-        {/* Hoofdinhoud */}
-        <div className="flex-1 min-w-0 p-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <a
-                  href={googleFinanceUrl(result.ticker, exchange)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono font-bold tab-accent-text hover:underline"
-                >
-                  {result.ticker}
-                </a>
-                {result.sector && (
-                  <Badge tone={SECTOR_TONE[result.sector]}>{SECTOR_LABEL[result.sector]}</Badge>
-                )}
-                <Badge tone={confTone} title="Hoe hard de onderbouwing is, op basis van beschikbare data">
-                  {CONF_LABEL[result.confidence]}
-                </Badge>
-                {pending && <span className="text-[10px] text-neutral-500 animate-pulse">historie laden…</span>}
-              </div>
-              <button
-                type="button"
-                onClick={onChart}
-                className="block text-left text-xs text-neutral-400 truncate mt-0.5 hover:text-fog-pink transition-colors max-w-full"
-                title={`Bekijk koersgrafiek van ${result.company}`}
-              >
-                {result.company}
-              </button>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-[10px] text-neutral-500">kans op +100%</div>
-              <div className="text-sm font-bold tabular-nums" style={{ color }}>
-                ~{result.score}%
-              </div>
-            </div>
-          </div>
-
-          {/* Kerncijfers */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-neutral-400">
-            {result.annualVolPct != null && (
-              <span title="Geannualiseerde volatiliteit">
-                σ <span className="text-neutral-200 font-semibold tabular-nums">{result.annualVolPct.toFixed(0)}%</span>
-              </span>
-            )}
-            {result.historicalDoublings != null && result.stats && (
-              <span title="Niet-overlappende verdubbelingen in de gemeten koershistorie">
-                verdubbelde{" "}
-                <span className={result.historicalDoublings > 0 ? "text-fog-lime font-semibold" : "text-neutral-300"}>
-                  {result.historicalDoublings}×
-                </span>{" "}
-                in {result.stats.yearsCovered.toFixed(1)}j
-              </span>
-            )}
-            {result.stats && (
-              <span title="Beste stijging binnen een 12-maands venster in de gemeten koershistorie">
-                beste run{" "}
-                <span className="text-neutral-200 font-semibold tabular-nums">
-                  +{(result.stats.maxWindowGain * 100).toFixed(0)}%
-                </span>
-              </span>
-            )}
-            {result.stats?.posInRange != null && (
-              <span title="Positie in de koers-range van de gemeten historie (0% = bodem, 100% = top)">
-                positie{" "}
-                <span className="text-neutral-200 font-semibold tabular-nums">
-                  {Math.round(result.stats.posInRange * 100)}%
-                </span>
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={onToggle}
-              className="ml-auto text-[11px] text-neutral-400 hover:text-neutral-100 underline-offset-2 hover:underline"
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+        {result.factors.map((f, k) => (
+          <div key={k} className="flex items-start gap-2 text-[11px]">
+            <span
+              className={
+                "mt-0.5 shrink-0 w-4 text-center font-bold " +
+                (f.impact === "up" ? "text-fog-lime" : f.impact === "down" ? "text-fog-loss" : "text-neutral-500")
+              }
             >
-              {open ? "▾ verberg onderbouwing" : "▸ toon onderbouwing"}
-            </button>
-          </div>
-
-          {/* Onderbouwing */}
-          {open && (
-            <div className="mt-3 pt-3 border-t border-ink-5/60 space-y-3">
-              <p className="text-xs text-neutral-300 leading-relaxed">{result.narrative}</p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                {result.factors.map((f, k) => (
-                  <div key={k} className="flex items-start gap-2 text-[11px]">
-                    <span
-                      className={
-                        "mt-0.5 shrink-0 w-4 text-center font-bold " +
-                        (f.impact === "up" ? "text-fog-lime" : f.impact === "down" ? "text-fog-loss" : "text-neutral-500")
-                      }
-                    >
-                      {f.impact === "up" ? "▲" : f.impact === "down" ? "▼" : "•"}
-                    </span>
-                    <div className="min-w-0">
-                      <span className="text-neutral-200 font-semibold">{f.label}</span>
-                      <span className="text-neutral-500"> — {f.detail}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Schatter-uitsplitsing */}
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-neutral-500 pt-1">
-                <span>
-                  Volatiliteit-baseline:{" "}
-                  <span className="text-neutral-300 tabular-nums">{(result.pVol * 100).toFixed(1)}%</span>
-                </span>
-                {result.pEmp != null && (
-                  <span>
-                    Empirisch:{" "}
-                    <span className="text-neutral-300 tabular-nums">{(result.pEmp * 100).toFixed(1)}%</span>
-                  </span>
-                )}
-                <span>
-                  Structurele factor:{" "}
-                  <span className="text-neutral-300 tabular-nums">×{result.structuralMultiplier.toFixed(2)}</span>
-                </span>
-              </div>
-
-              {result.missing.length > 0 && (
-                <div className="text-[10px] text-fog-warn/80">
-                  Ontbrekende data (drukt de betrouwbaarheid): {result.missing.join(" · ")}
-                </div>
-              )}
+              {f.impact === "up" ? "▲" : f.impact === "down" ? "▼" : "•"}
+            </span>
+            <div className="min-w-0">
+              <span className="text-neutral-200 font-semibold">{f.label}</span>
+              <span className="text-neutral-500"> — {f.detail}</span>
             </div>
-          )}
-        </div>
+          </div>
+        ))}
       </div>
-    </Card>
+
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-neutral-500 pt-1">
+        <span>
+          Volatiliteit-baseline: <span className="text-neutral-300 tabular-nums">{(result.pVol * 100).toFixed(1)}%</span>
+        </span>
+        {result.pEmp != null && (
+          <span>
+            Empirisch: <span className="text-neutral-300 tabular-nums">{(result.pEmp * 100).toFixed(1)}%</span>
+          </span>
+        )}
+        <span>
+          Structurele factor: <span className="text-neutral-300 tabular-nums">×{result.structuralMultiplier.toFixed(2)}</span>
+        </span>
+      </div>
+
+      {result.missing.length > 0 && (
+        <div className="text-[10px] text-fog-warn/80">
+          Ontbrekende data (drukt de betrouwbaarheid): {result.missing.join(" · ")}
+        </div>
+      )}
+    </div>
   );
 }

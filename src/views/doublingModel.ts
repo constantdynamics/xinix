@@ -86,7 +86,7 @@ export interface PriceStats {
   points: number; // aantal koerspunten gebruikt
 }
 
-export type Confidence = "hoog" | "middel" | "laag";
+export type Confidence = "zeer-hoog" | "hoog" | "middel" | "laag";
 
 export interface DoublingFactor {
   label: string;
@@ -117,6 +117,12 @@ export interface DoublingResult {
   /** Kerngetallen voor de tabel. */
   annualVolPct: number | null;
   historicalDoublings: number | null;
+  lastClose: number | null;
+  /** Geadviseerde maximale instapkoers (aankooplimiet of model-afleiding). */
+  adviesPrice: number | null;
+  adviesSource: "limiet" | "model" | null;
+  /** Huidige koers t.o.v. advies-koers in % (positief = boven advies). */
+  adviesDistancePct: number | null;
 }
 
 // ── Wiskundige helpers ───────────────────────────────────────────────────────
@@ -554,15 +560,23 @@ export function scoreDoubling(c: DoublingCardInput, stats: PriceStats | null): D
   // 6) Confidence (betrouwbaarheid van de onderbouwing) ----------------------
   // Alleen volwaardig vertrouwen op de historie als de empirische verdubbel-
   // pijler écht een vol jaar vooruit kon meten (empMeasured).
+  // De koershistorie is de zwaarst wegende, meest betrouwbare bron; fundamentals
+  // (goud-score, marktkap) tellen daarbovenop. Confidence = data-volledigheid,
+  // niet signaalsterkte.
   let conf = 0;
-  if (stats && stats.empMeasured && stats.yearsCovered >= 3) conf += 2.5;
-  else if (stats && stats.empMeasured && stats.yearsCovered >= 1.3) conf += 1.5;
-  else if (stats) conf += 0.5; // historie aanwezig maar te kort voor empirische meting
-  if (pEmpPoefie != null) conf += 1;
+  if (stats && stats.empMeasured && stats.yearsCovered >= 3) conf += 3;
+  else if (stats && stats.empMeasured && stats.yearsCovered >= 1.3) conf += 1.8;
+  else if (stats) conf += 0.6; // historie aanwezig maar te kort voor empirische meting
+  if (pEmpPoefie != null) conf += 0.8;
   if (c.goudScore != null) conf += 1;
   if (cap != null) conf += 1;
   if (c.medalGold + c.medalSilver + c.medalBronze > 0) conf += 0.5;
-  const confidence: Confidence = conf >= 4 ? "hoog" : conf >= 2.5 ? "middel" : "laag";
+  // Vier niveaus: zeer-hoog = lange gemeten historie + fundamentals.
+  const confidence: Confidence =
+    conf >= 5 ? "zeer-hoog" : conf >= 3 ? "hoog" : conf >= 1.5 ? "middel" : "laag";
+
+  // Advies-instapkoers + afstand huidige koers daartoe.
+  const advies = computeAdvies(c, pos);
 
   const narrative = buildNarrative(c, stats, { pVol, pEmp, pBase, M, probability, score, confidence });
 
@@ -582,7 +596,41 @@ export function scoreDoubling(c: DoublingCardInput, stats: PriceStats | null): D
     stats,
     annualVolPct: sigma != null ? sigma * 100 : null,
     historicalDoublings: stats ? stats.episodes : null,
+    lastClose: c.lastClose,
+    adviesPrice: advies.price,
+    adviesSource: advies.source,
+    adviesDistancePct: advies.distancePct,
   };
+}
+
+/**
+ * Geadviseerde maximale instapkoers + afstand van de huidige koers daartoe.
+ * - Is er een aankooplimiet (curated/scan), dan is dát het advies (consistent
+ *   met de Lijst-tab).
+ * - Anders een model-afleiding: koop op een terugval richting de 1j-bodem
+ *   (40% van de weg terug), begrensd op 3–30% korting; zonder bodem een
+ *   korting o.b.v. de koerspositie. Nooit een advies bóven de huidige koers.
+ */
+function computeAdvies(
+  c: DoublingCardInput,
+  pos: number | null,
+): { price: number | null; source: "limiet" | "model" | null; distancePct: number | null } {
+  const current = c.lastClose;
+  if (current == null || !(current > 0)) return { price: null, source: null, distancePct: null };
+
+  if (c.buyLimit != null && c.buyLimit > 0) {
+    return { price: c.buyLimit, source: "limiet", distancePct: ((current - c.buyLimit) / c.buyLimit) * 100 };
+  }
+
+  let target: number;
+  if (c.low1y != null && c.low1y > 0 && c.low1y < current) {
+    target = current - 0.4 * (current - c.low1y);
+  } else {
+    const disc = pos == null ? 0.1 : pos < 0.3 ? 0.05 : pos < 0.6 ? 0.1 : pos < 0.85 ? 0.16 : 0.22;
+    target = current * (1 - disc);
+  }
+  const price = clamp(target, current * 0.7, current * 0.97);
+  return { price, source: "model", distancePct: ((current - price) / price) * 100 };
 }
 
 /** Koerspositie 0..1 uit de card (fallback wanneer er geen historie is). */
