@@ -20,6 +20,7 @@ import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRatin
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
+import { VerdubbelaarsView } from "./Verdubbelaars";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
 
@@ -64,6 +65,9 @@ type SortDir = "asc" | "desc";
 type ViewMode = "table" | "tiles";
 
 const VIEW_KEY = "xinix_favorieten_view";
+const SUBTAB_KEY = "xinix_favorieten_subtab";
+
+type FavSubTab = "lijst" | "verdubbelaars";
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
@@ -132,6 +136,13 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
   function pickView(v: ViewMode) {
     setViewMode(v);
     localStorage.setItem(VIEW_KEY, v);
+  }
+  const [subTab, setSubTab] = useState<FavSubTab>(
+    () => (localStorage.getItem(SUBTAB_KEY) === "verdubbelaars" ? "verdubbelaars" : "lijst"),
+  );
+  function pickSubTab(v: FavSubTab) {
+    setSubTab(v);
+    localStorage.setItem(SUBTAB_KEY, v);
   }
 
   // Inline buy_limit editing: track welke ticker bewerkt wordt + de tekstwaarde.
@@ -583,6 +594,30 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
 
   return (
     <div className="space-y-4">
+      {/* Sub-tabs binnen Favorieten: de lijst zelf + de verdubbel-analyse */}
+      <div className="flex items-center gap-1 border-b border-ink-5">
+        {([
+          ["lijst", "♥ Lijst"],
+          ["verdubbelaars", "🚀 Verdubbelaars"],
+        ] as Array<[FavSubTab, string]>).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => pickSubTab(key)}
+            className={`px-4 py-2 text-sm font-bold border-b-2 -mb-px transition-colors ${
+              subTab === key
+                ? "border-fog-pink text-neutral-50"
+                : "border-transparent text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {subTab === "verdubbelaars" ? (
+        <VerdubbelaarsView dashboard={dashboard} scans={scans} />
+      ) : (
+        <>
       <CollapsibleIntro title="Favorieten" icon={<GradientTabIcon tab="favorieten" />}>
         <p className="text-sm text-neutral-300 leading-relaxed">
           Aandelen die je hebt aangemerkt met het hartje op een ander tabblad.
@@ -801,6 +836,8 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           exchange={chartFor.exchange}
           onClose={() => setChartFor(null)}
         />
+      )}
+        </>
       )}
     </div>
   );
