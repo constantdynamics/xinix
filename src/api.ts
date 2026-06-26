@@ -350,6 +350,51 @@ export async function fetchScanResults(): Promise<ScanResults> {
   return (await res.json()) as ScanResults;
 }
 
+// ── Verdubbelaars research-overlay ───────────────────────────────────────────
+// Per favoriet samengevatte research (katalysatoren, materiële SEC-meldingen,
+// cash runway, …), elke ~15 dagen ververst door xinix-doubling-research-background.
+export interface DoublingResearchFactor {
+  label: string;
+  detail: string;
+  impact: "up" | "down" | "neutral";
+  weight: number;
+}
+export interface DoublingResearchItem {
+  ticker: string;
+  company: string | null;
+  sector: string | null;
+  research_multiplier: number;
+  conf_bonus: number;
+  factors: DoublingResearchFactor[];
+  bull: string[];
+  bear: string[];
+  summary: string | null;
+  data: Record<string, unknown>;
+  computed_at: string;
+}
+export interface DoublingResearchResponse {
+  items: DoublingResearchItem[];
+  computed_at: string | null;
+  count: number;
+}
+
+export async function fetchDoublingResearch(): Promise<DoublingResearchResponse> {
+  const res = await fetch(apiUrl("/api/xinix-doubling-research-background"));
+  if (!res.ok) throw new Error(`doubling-research ${res.status}`);
+  return (await res.json()) as DoublingResearchResponse;
+}
+
+// Handmatig verrijken (admin) — draait dezelfde research-aggregatie als de cron.
+export async function triggerDoublingResearch(): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(apiUrl("/api/xinix-doubling-research-background"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`doubling-research POST ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; message?: string };
+}
+
 export interface ZwitserlevenStock {
   ticker: string;
   company: string | null;

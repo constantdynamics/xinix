@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { fetchPriceHistory } from "../api";
+import { fetchPriceHistory, fetchDoublingResearch, triggerDoublingResearch, getToken, type DoublingResearchItem } from "../api";
 import type { Dashboard, Card as CardType, Sector } from "../types";
 import type { ScanResults } from "../api";
 import { SECTOR_LABEL, SECTOR_TONE } from "../types";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Button, Badge, Stat, CollapsibleIntro, BlockBar } from "../components/ui";
+import { Card, Button, Badge, Stat, CollapsibleIntro, BlockBar, toast } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
@@ -15,6 +15,7 @@ import {
   type DoublingResult,
   type PriceStats,
   type Confidence,
+  type ResearchOverlay,
 } from "./doublingModel";
 
 interface Props {
@@ -33,6 +34,59 @@ const inflight = new Set<string>();
 
 function toSector(s: string | null | undefined): DoublingCardInput["sector"] {
   return s === "biotech" || s === "mining" || s === "other" ? s : null;
+}
+
+function startOfUtcDay(ms: number): number {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+// Live katalysator uit de opgeslagen research-datums (next_catalyst_date /
+// next_trial_date). Wordt live berekend i.p.v. een bevroren dag-teller, zodat
+// een verlopen katalysator nooit meer als "over Nd" verschijnt of de score
+// blijft opblazen tot de volgende 15-daagse run.
+function liveCatalyst(item: DoublingResearchItem, today0: number): { days: number; label: string } | null {
+  const d = item.data || {};
+  const cands: Array<[unknown, string]> = [
+    [d.next_catalyst_date, (typeof d.next_catalyst_type === "string" && d.next_catalyst_type) || "katalysator"],
+    [d.next_trial_date, "trial-readout"],
+  ];
+  let best: { days: number; label: string } | null = null;
+  for (const [ds, label] of cands) {
+    if (typeof ds !== "string" || !ds) continue;
+    const t = Date.parse(ds + "T00:00:00Z");
+    if (!Number.isFinite(t)) continue;
+    const days = Math.round((t - today0) / 86400000);
+    if (days >= 0 && days <= 365 && (best == null || days < best.days)) best = { days, label };
+  }
+  return best;
+}
+
+// Vouw de live katalysator in de opgeslagen overlay (de backend slaat alleen
+// nieuws/verwatering + de datums op; katalysator-tijd is tijdgevoelig).
+function liveOverlay(item: DoublingResearchItem | null, today0: number): ResearchOverlay | null {
+  if (!item) return null;
+  let mult = item.research_multiplier;
+  let conf = item.conf_bonus;
+  const factors = [...item.factors];
+  const bull = [...item.bull];
+  const cat = liveCatalyst(item, today0);
+  if (cat) {
+    const f = cat.days <= 60 ? 1.25 : cat.days <= 120 ? 1.18 : cat.days <= 240 ? 1.1 : 1.05;
+    mult *= f;
+    conf += 0.8;
+    factors.unshift({ label: "Katalysator", detail: `${cat.label} over ${cat.days} dagen`, impact: "up", weight: (f - 1) * 4 });
+    bull.unshift(`Geplande katalysator over ${cat.days} dagen (${cat.label})`);
+  }
+  return {
+    research_multiplier: mult,
+    conf_bonus: conf,
+    factors,
+    bull,
+    bear: item.bear,
+    summary: item.summary,
+    computed_at: item.computed_at,
+  };
 }
 
 const CONF_TONE: Record<Confidence, "lime" | "cyan" | "watch" | "loss"> = {
@@ -157,6 +211,43 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
   const [reloadKey, setReloadKey] = useState(0); // bump om de fetch-effect te herstarten (Herbereken)
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
+  // Research-overlay (backend, ~15-daags): per ticker.
+  const [research, setResearch] = useState<Map<string, DoublingResearchItem>>(new Map());
+  const [researchAt, setResearchAt] = useState<string | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const isAdmin = !!getToken();
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchDoublingResearch()
+      .then((r) => {
+        if (cancelled) return;
+        const m = new Map<string, DoublingResearchItem>();
+        for (const it of r.items) m.set(it.ticker.toUpperCase(), it);
+        setResearch(m);
+        setResearchAt(r.computed_at);
+      })
+      .catch(() => {/* overlay optioneel — val terug op alleen de prijs-kern */});
+    return () => { cancelled = true; };
+  }, []);
+
+  async function enrichNow() {
+    if (enriching) return;
+    setEnriching(true);
+    try {
+      const res = await triggerDoublingResearch();
+      const r = await fetchDoublingResearch();
+      const m = new Map<string, DoublingResearchItem>();
+      for (const it of r.items) m.set(it.ticker.toUpperCase(), it);
+      setResearch(m);
+      setResearchAt(r.computed_at);
+      toast(res.message ?? "Research verrijkt");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Verrijken mislukt", "error");
+    } finally {
+      setEnriching(false);
+    }
+  }
 
   // Filters + sortering (boven de tabel, net als de Lijst-tab).
   const [sortKey, setSortKey] = useState<SortKey>("score");
@@ -165,6 +256,7 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
   const [confFilter, setConfFilter] = useState<Set<Confidence>>(new Set());
   const [minScore, setMinScore] = useState(0);
   const [onlyBuyZone, setOnlyBuyZone] = useState(false);
+  const [onlyCatalyst, setOnlyCatalyst] = useState(false);
 
   const inputs = useMemo(
     () => buildInputs(dashboard, scans, marks.favorites),
@@ -211,12 +303,20 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
   }, [inputs, reloadKey]);
 
   const results = useMemo<DoublingResult[]>(() => {
-    const out = inputs.map((c) => scoreDoubling(c, statsCache.get(c.ticker) ?? null));
+    const today0 = startOfUtcDay(Date.now());
+    const out = inputs.map((c) =>
+      scoreDoubling(c, statsCache.get(c.ticker) ?? null, liveOverlay(research.get(c.ticker) ?? null, today0)),
+    );
     out.sort((a, b) => b.score - a.score || a.ticker.localeCompare(b.ticker));
     return out;
     // statsVersion forceert herberekening zodra nieuwe historie binnen is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputs, statsVersion]);
+  }, [inputs, statsVersion, research]);
+
+  const catalystDays = (t: string): number | null => {
+    const item = research.get(t);
+    return item ? (liveCatalyst(item, startOfUtcDay(Date.now()))?.days ?? null) : null;
+  };
 
   const filtered = useMemo<DoublingResult[]>(() => {
     let list = results;
@@ -224,6 +324,7 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
     if (confFilter.size > 0) list = list.filter((r) => confFilter.has(r.confidence));
     if (minScore > 0) list = list.filter((r) => r.score >= minScore);
     if (onlyBuyZone) list = list.filter((r) => r.adviesDistancePct != null && r.adviesDistancePct <= 0);
+    if (onlyCatalyst) list = list.filter((r) => catalystDays(r.ticker) != null);
     const dir = sortDir === "asc" ? 1 : -1;
     return [...list].sort((a, b) => {
       const av = sortValue(a, sortKey);
@@ -236,7 +337,8 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
       }
       return dir * ((av as number) - (bv as number));
     });
-  }, [results, sectorFilter, confFilter, minScore, onlyBuyZone, sortKey, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, sectorFilter, confFilter, minScore, onlyBuyZone, onlyCatalyst, research, sortKey, sortDir]);
 
   const summary = useMemo(() => {
     if (results.length === 0) return null;
@@ -332,8 +434,15 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
               verdubbelde dít aandeel daadwerkelijk binnen een jaar? De meest directe maatstaf.
             </li>
             <li>
-              <strong>Structurele factoren</strong> — kwaliteitsscore, medailles, marktomvang, koerspositie, dividend,
-              katalysator en signaalkleur stellen de kans bescheiden bij.
+              <strong>Structurele factoren</strong> — kwaliteitsscore, medailles, marktomvang, koerspositie, dividend
+              en signaalkleur stellen de kans bescheiden bij.
+            </li>
+            <li>
+              <strong>Research-verrijking</strong> — een achtergrond-job kijkt elke ~15 dagen naar de verste
+              research-data: geplande katalysatoren (FDA-besluiten, trial-readouts), materiële SEC-8K-meldingen,
+              strategische deals, EDGAR-filings en cash runway / verwateringsrisico. Dit verfijnt de kans én de
+              betrouwbaarheid, en verbetert mee met nieuwe informatie. Het 🧪-label markeert een katalysator binnen 12
+              maanden; klik een rij open voor de bull/bear-these.
             </li>
           </ul>
           <p className="text-neutral-400">
@@ -369,6 +478,16 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
                 <span className="text-xs text-neutral-500 animate-pulse">
                   koershistorie laden… ({remaining} resterend)
                 </span>
+              )}
+              {researchAt && (
+                <span className="text-[11px] text-neutral-500" title="Laatste research-verrijking (elke ~15 dagen automatisch)">
+                  research: {new Date(researchAt).toLocaleDateString("nl-NL", { day: "2-digit", month: "short" })}
+                </span>
+              )}
+              {isAdmin && (
+                <Button size="sm" variant="secondary" onClick={enrichNow} disabled={enriching} title="Voer nu de research-verrijking uit (anders elke ~15 dagen automatisch)">
+                  {enriching ? "Verrijken…" : "🔬 Verrijk nu"}
+                </Button>
               )}
               <Button size="sm" variant="secondary" onClick={recompute} disabled={loadingHistory}>
                 ↻ Herbereken
@@ -433,6 +552,15 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
               }`}
             >
               🎯 In koopzone
+            </button>
+            <button
+              onClick={() => setOnlyCatalyst((v) => !v)}
+              title="Alleen aandelen met een geplande katalysator binnen 12 maanden (FDA-besluit, trial-readout, …)"
+              className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                onlyCatalyst ? "border-fog-pink/50 text-fog-pink bg-fog-pink/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              🧪 Met katalysator
             </button>
           </div>
 
@@ -501,6 +629,7 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
                       const isOpen = expanded.has(r.ticker);
                       const exch = exchangeByTicker.get(r.ticker) ?? null;
                       const pending = !statsCache.has(r.ticker) && loadingHistory;
+                      const catDays = catalystDays(r.ticker);
                       const color = scoreColor(r.score);
                       const dist = r.adviesDistancePct;
                       const distCls =
@@ -560,10 +689,18 @@ export function VerdubbelaarsView({ dashboard, scans }: Props) {
                                 </span>
                               </div>
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-3 py-2 whitespace-nowrap">
                               <Badge tone={CONF_TONE[r.confidence]} title={`${CONF_LABEL[r.confidence]} — hoe hard de onderbouwing is, op basis van beschikbare data`}>
                                 {CONF_SHORT[r.confidence]}
                               </Badge>
+                              {catDays != null && (
+                                <span
+                                  className="ml-1 px-1 py-0.5 rounded text-[9px] font-bold border border-fog-pink/40 text-fog-pink bg-fog-pink/10"
+                                  title="Geplande katalysator (FDA-besluit / trial-readout) binnen 12 maanden"
+                                >
+                                  🧪 {catDays}d
+                                </span>
+                              )}
                               {pending && <span className="ml-1 text-[10px] text-neutral-500 animate-pulse">…</span>}
                             </td>
                             <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-300">
@@ -656,6 +793,35 @@ function DoublingDetail({ result }: { result: DoublingResult }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-neutral-300 leading-relaxed">{result.narrative}</p>
+
+      {/* Research-these uit de backend-verrijking */}
+      {(result.hasResearch && (result.bull.length > 0 || result.bear.length > 0 || result.researchSummary)) && (
+        <div className="rounded-lg border border-ink-5 bg-ink-3/30 p-2.5 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wider font-bold text-fog-pink">🔬 Research</span>
+            {result.researchAt && (
+              <span className="text-[10px] text-neutral-500">
+                bijgewerkt {new Date(result.researchAt).toLocaleDateString("nl-NL", { day: "2-digit", month: "short", year: "numeric" })}
+              </span>
+            )}
+          </div>
+          {result.researchSummary && <p className="text-[11px] text-neutral-300 leading-relaxed">{result.researchSummary}</p>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
+            {result.bull.map((b, k) => (
+              <div key={`bull-${k}`} className="flex items-start gap-1.5 text-[11px]">
+                <span className="text-fog-lime font-bold shrink-0">▲</span>
+                <span className="text-neutral-300">{b}</span>
+              </div>
+            ))}
+            {result.bear.map((b, k) => (
+              <div key={`bear-${k}`} className="flex items-start gap-1.5 text-[11px]">
+                <span className="text-fog-loss font-bold shrink-0">▼</span>
+                <span className="text-neutral-300">{b}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {result.adviesPrice != null && result.lastClose != null && (
         <div className="text-[11px] text-neutral-400">
