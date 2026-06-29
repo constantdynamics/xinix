@@ -627,7 +627,7 @@ const EXTRA_STRATEGIES: Cfg[] = [
   c({slug:"tp15_h60",        name:"TP+15% + 60d",                              grp:"S-TPVariant", tp:0.15, holdDays:60}),
   c({slug:"tp20_h45",        name:"TP+20% + 45d",                              grp:"S-TPVariant", tp:0.20, holdDays:45}),
   c({slug:"tp30_s60",        name:"TP+30% + Score≥60",                         grp:"S-TPVariant", tp:0.30, minScore:60}),
-  c({slug:"tp35_s70",        name:"TP+35% + Score≥70",                         grp:"S-TPVariant", tp:0.35, minScore:70}),
+  c({slug:"tp35_s70b",       name:"TP+35% + Score≥70",                         grp:"S-TPVariant", tp:0.35, minScore:70}),
   c({slug:"tp40_h60",        name:"TP+40% + 60d",                              grp:"S-TPVariant", tp:0.40, holdDays:60}),
   c({slug:"tp60_s65",        name:"TP+60% + Score≥65",                         grp:"S-TPVariant", tp:0.60}),
   c({slug:"tp75_s70",        name:"TP+75% + Score≥70",                         grp:"S-TPVariant", tp:0.75, minScore:70}),
@@ -638,7 +638,7 @@ const EXTRA_STRATEGIES: Cfg[] = [
   c({slug:"tp300_s80",       name:"TP+300% + Score≥80",                        grp:"S-TPVariant", tp:3.00, minScore:80}),
 
   // T-SectorRich → 20 (was 8, +12)
-  c({slug:"bio_h30",         name:"Biotech + 30d",                             grp:"T-SectorRich", sector:"biotech", holdDays:30}),
+  c({slug:"bio_h30b",        name:"Biotech + 30d",                             grp:"T-SectorRich", sector:"biotech", holdDays:30}),
   c({slug:"bio_stop10_h60",  name:"Biotech + Stop-10% + 60d",                  grp:"T-SectorRich", sector:"biotech", stop:0.10, holdDays:60}),
   c({slug:"bio_gold1",       name:"Biotech + ≥1 Goud",                         grp:"T-SectorRich", sector:"biotech", minGold:1}),
   c({slug:"bio_lim0",        name:"Biotech + Strikt limiet",                   grp:"T-SectorRich", sector:"biotech", limitBuf:0.00}),
@@ -1316,7 +1316,9 @@ async function run() {
   if (flagged.size > 0) {
     const flagRows = [...flagged.entries()].map(([ticker, v]) => ({
       ticker, avg_price: +v.avg.toFixed(6), last_close: +v.close.toFixed(6),
-      factor: +v.factor.toFixed(2), n_positions: v.n, last_flagged_at: now.toISOString(), resolved: false,
+      factor: +v.factor.toFixed(2), n_positions: v.n, last_flagged_at: now.toISOString(),
+      // 'resolved' bewust niet meegestuurd: op INSERT geldt de kolom-default (false),
+      // op UPDATE (her-vlaggen) blijft een handmatig gezette resolved=true behouden.
     }));
     const { error } = await sb.from("xinix_price_flags").upsert(flagRows, { onConflict: "ticker" });
     if (error) console.error("price-flags upsert:", error.message);
