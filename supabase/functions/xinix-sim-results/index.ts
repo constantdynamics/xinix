@@ -560,28 +560,45 @@ Deno.serve(async (req) => {
     // internationaal (VS/CA/UK/DE/AU/HK), dus de RPC gebruikt bewust GEEN
     // vaste VS-feestdagkalender maar werkelijke koersbeweging als maatstaf.
     // seriesByGrp[grp][date] = { avg, n }.
+    //
+    // Artefact-backstop (belt-and-suspenders): de RPC xinix_family_series sluit
+    // koers-glitches (split/pence-pond) al uit het ploegengemiddelde uit. Mocht
+    // er ooit tóch een onmogelijk gemiddelde binnenkomen (oude RPC-versie, nieuwe
+    // edge-case), dan weren we het hier ook. 300% = ver boven elk echt resultaat
+    // (gemeten max +31%), ver onder de ~+1.000%+ glitch-rendementen. Zo kan de
+    // grafiek nooit pieken, ongeacht waar het probleem zit.
+    const ARTIFACT_PORTFOLIO_RET_PCT = 300;
     const seriesByGrp = new Map<string, Map<string, { avg: number; n: number }>>();
     const dateSet = new Set<string>();
     for (const r of (famSeriesRes.data ?? [])) {
       const grp = r.grp as string;
       const date = r.d as string;
+      const avg = Number(r.avg_return_pct);
+      if (!Number.isFinite(avg) || avg >= ARTIFACT_PORTFOLIO_RET_PCT) continue;
       dateSet.add(date);
       let perGrp = seriesByGrp.get(grp);
       if (!perGrp) { perGrp = new Map(); seriesByGrp.set(grp, perGrp); }
-      perGrp.set(date, { avg: Number(r.avg_return_pct), n: Number(r.n ?? 0) });
+      perGrp.set(date, { avg, n: Number(r.n ?? 0) });
     }
     const allDates = [...dateSet].sort();
 
     // Per groep ook de huidige (laatste-dag) gemiddelde return, # strategieën,
     // beste en slechtste binnen de groep.
-    const grpStats = new Map<string, { n: number; sumRetPct: number; best: number; worst: number; bestSlug: string | null; worstSlug: string | null }>();
+    // n = familiegrootte; retCount = aantal niet-artefact rendementen (noemer van
+    // het gemiddelde). best/worst negeren artefacten zodat een glitch nooit als
+    // "beste" bovenaan komt.
+    const grpStats = new Map<string, { n: number; retCount: number; sumRetPct: number; best: number; worst: number; bestSlug: string | null; worstSlug: string | null }>();
     for (const r of results) {
       const g = r.grp;
-      const cur = grpStats.get(g) ?? { n: 0, sumRetPct: 0, best: -Infinity, worst: Infinity, bestSlug: null, worstSlug: null };
+      const cur = grpStats.get(g) ?? { n: 0, retCount: 0, sumRetPct: 0, best: -Infinity, worst: Infinity, bestSlug: null, worstSlug: null };
       cur.n++;
-      cur.sumRetPct += r.total_return_pct;
-      if (r.total_return_pct > cur.best) { cur.best = r.total_return_pct; cur.bestSlug = r.slug; }
-      if (r.total_return_pct < cur.worst) { cur.worst = r.total_return_pct; cur.worstSlug = r.slug; }
+      const ret = r.total_return_pct;
+      if (Number.isFinite(ret) && ret < ARTIFACT_PORTFOLIO_RET_PCT) {
+        cur.retCount++;
+        cur.sumRetPct += ret;
+        if (ret > cur.best) { cur.best = ret; cur.bestSlug = r.slug; }
+        if (ret < cur.worst) { cur.worst = ret; cur.worstSlug = r.slug; }
+      }
       grpStats.set(g, cur);
     }
     const families = [...grpStats.entries()]
@@ -594,7 +611,7 @@ Deno.serve(async (req) => {
         return {
           grp,
           n: s.n,
-          avg_return_pct: s.n > 0 ? s.sumRetPct / s.n : 0,
+          avg_return_pct: s.retCount > 0 ? s.sumRetPct / s.retCount : 0,
           best_return_pct: s.best === -Infinity ? null : s.best,
           best_slug: s.bestSlug,
           worst_return_pct: s.worst === Infinity ? null : s.worst,

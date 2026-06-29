@@ -973,6 +973,15 @@ async function run() {
       const price = effPrice(p.ticker, Number(p.avg_price));
       if (price == null) { stillOpenTickers.add(p.ticker); continue; }
 
+      // Koers-artefact-freeze: effPrice() heeft deze ticker zojuist gevlagd
+      // (glitch/split) en tegen break-even gewaardeerd. We bevriezen de positie:
+      // GEEN exit, deelwinst of stop-ratchet op een glitch-koers — anders bankt
+      // de sim onechte cash (zoals juni 2026: +$233k op één strategie) of triggert
+      // een valse trailing-stop (break-even < geratchete stop). De positie blijft
+      // open en wordt in de equity-snapshot tegen break-even gewaardeerd; zodra de
+      // koers weer normaal is, hervat de normale exit-logica vanzelf.
+      if (flagged.has(p.ticker)) { stillOpenTickers.add(p.ticker); continue; }
+
       // Vaste stop check (met de stop_loss_price uit DB — kan al eerder zijn geratchet)
       const fixedStopHit = cfg.stop != null && price <= Number(p.avg_price) * (1 - cfg.stop);
       // Trailing stop: vergelijk met geratchete stop_loss_price uit DB
@@ -1090,6 +1099,7 @@ async function run() {
         if (cfg.requireZwitserleven && !zwitserlevenSet.has(t.ticker)) continue;
         const price = priceMap.get(t.ticker);
         if (!price || price <= 0) continue;
+        if (flagged.has(t.ticker)) continue; // niet roteren naar een glitch-koers
         const score = t.goud_score ?? 0;
         if (score < cfg.minScore) continue;
         const sigs = sigsByTicker.get(t.ticker) ?? [];
@@ -1166,6 +1176,10 @@ async function run() {
         if (cfg.requirePoefie && !t.is_poefie) continue;
         const price = priceMap.get(t.ticker);
         if (price == null || price <= 0) continue;
+        // Niet kopen op een gevlagde glitch-koers (een eerdere strategie hield
+        // deze ticker en effPrice() heeft 'm als artefact gevlagd). Voorkomt dat
+        // we instappen tegen een onmogelijke prijs.
+        if (flagged.has(t.ticker)) continue;
         const score = t.goud_score ?? 0;
         const sigs = sigsByTicker.get(t.ticker) ?? [];
         const positiveSigs = sigs.filter((s) => POS_SIGNALS.has(s.signal_type));

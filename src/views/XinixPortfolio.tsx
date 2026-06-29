@@ -3242,6 +3242,15 @@ function FamiliesView() {
     }
   });
 
+  // Artefact-backstop op het leesmoment: ook al weren de RPC én xinix-sim-results
+  // koers-glitches al, hier negeren we punten boven een onmogelijke grens bij het
+  // schalen én tekenen. Zo kan één rotte waarde de y-as nooit platdrukken of een
+  // valse piek tekenen — laatste verdedigingslinie, ongeacht de bron. 300% ligt
+  // ver boven elk echt resultaat (gemeten max +31%) en ver onder ~+1.000%+ glitches.
+  const ARTIFACT_RET_PCT = 300;
+  const isSaneRet = (v: number | null | undefined): v is number =>
+    v != null && Number.isFinite(v) && Math.abs(v) < ARTIFACT_RET_PCT;
+
   // ── Ploegen-grafiek (lijnen per familie) ───────────────────────────────────
   const W = 900, H = 360;
   const PAD = { l: 50, r: 20, t: 16, b: 36 };
@@ -3251,7 +3260,7 @@ function FamiliesView() {
   let yMin = 0, yMax = 0;
   for (const g of visibleGroups) {
     for (const p of g.series) {
-      if (p.avg_return_pct == null) continue;
+      if (!isSaneRet(p.avg_return_pct)) continue;
       if (p.avg_return_pct < yMin) yMin = p.avg_return_pct;
       if (p.avg_return_pct > yMax) yMax = p.avg_return_pct;
     }
@@ -3277,6 +3286,7 @@ function FamiliesView() {
   let byMin = 0, byMax = 0;
   for (const s of barStrategies) {
     const v = s.total_return_pct ?? 0;
+    if (!isSaneRet(v)) continue;
     if (v < byMin) byMin = v;
     if (v > byMax) byMax = v;
   }
@@ -3374,7 +3384,7 @@ function FamiliesView() {
                 if (hiddenGroups.has(g.grp)) return null;
                 const pts: Array<[number, number]> = [];
                 g.series.forEach((p, i) => {
-                  if (p.avg_return_pct != null) pts.push([xLine(i), yScale(p.avg_return_pct)]);
+                  if (isSaneRet(p.avg_return_pct)) pts.push([xLine(i), yScale(p.avg_return_pct)]);
                 });
                 if (pts.length === 0) return null;
                 const d = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
@@ -3417,6 +3427,7 @@ function FamiliesView() {
               <line x1={BPAD.l} x2={BAR_W - BPAD.r} y1={byZero} y2={byZero} stroke="#6b7280" strokeWidth="1" />
               {barStrategies.map((s, i) => {
                 const v = s.total_return_pct ?? 0;
+                if (!isSaneRet(v)) return null; // glitch-strategie: geen monsterstaaf tekenen
                 const bx = BPAD.l + i * barGap + barGap / 2 - barWidth / 2;
                 const barTop = v >= 0 ? byScale(v) : byZero;
                 const barH = Math.abs(byScale(v) - byZero);
