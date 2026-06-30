@@ -108,6 +108,14 @@ Deno.serve(runBackground("compute-extremes", async () => {
   }
   if (todo.length === 0) return { ok: true, message: "alle extremes zijn vers" };
 
+  // Favorieten eerst: zo krijgen de aandelen die de gebruiker volgt (en waarvoor
+  // xinix-fav-alerts low_3y/low_5y nodig heeft) als eerste verse extremes.
+  const { data: favData } = await sb.from("xinix_favorites").select("ticker");
+  const favSet = new Set((favData ?? []).map((f) => f.ticker as string));
+  if (favSet.size > 0) {
+    todo.sort((a, b) => (favSet.has(b) ? 1 : 0) - (favSet.has(a) ? 1 : 0));
+  }
+
   const batch = todo.slice(0, MAX_PER_RUN);
   let updated = 0, failed = 0, processed = 0, notFound = 0;
   const errors: string[] = [];
@@ -123,6 +131,7 @@ Deno.serve(runBackground("compute-extremes", async () => {
   };
   const now = new Date();
   const oneYearAgo = new Date(now.getTime() - 365 * 86400000);
+  const threeYearsAgo = new Date(now.getTime() - 3 * 365 * 86400000);
   const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 86400000);
 
   for (const ticker of batch) {
@@ -132,10 +141,11 @@ Deno.serve(runBackground("compute-extremes", async () => {
       const bars = await fetchYahoo5y(ticker);
       if (bars.length === 0) { await markChecked(ticker); notFound++; continue; }
       const oneY = extremesSince(bars, oneYearAgo);
+      const threeY = extremesSince(bars, threeYearsAgo);
       const fiveY = extremesSince(bars, fiveYearsAgo);
       const medals = countMedals(bars);
       const { error: e1 } = await sb.from("signal_price_summary").upsert({
-        ticker, low_1y: oneY.low, high_1y: oneY.high, low_5y: fiveY.low, high_5y: fiveY.high, last_extremes_at: now.toISOString(),
+        ticker, low_1y: oneY.low, high_1y: oneY.high, low_3y: threeY.low, low_5y: fiveY.low, high_5y: fiveY.high, last_extremes_at: now.toISOString(),
       }, { onConflict: "ticker" });
       // Slimme buy_limit-default: 10% boven 5y-low. Alleen vullen als
       // de gebruiker er nog geen heeft ingesteld (handmatige waarden
