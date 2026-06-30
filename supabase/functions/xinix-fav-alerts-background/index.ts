@@ -25,7 +25,7 @@ async function sendNtfy(server: string, topic: string, title: string, body: stri
 }
 // Plak een zero-width space tussen ticker-base en suffix zodat ntfy-clients
 // .TO / .V / .AX niet als TLD herkennen en auto-linkificeren. Visueel onzichtbaar.
-function safeTickerDisplay(ticker: string): string { return ticker.replace(/\./g, "​."); }
+function safeTickerDisplay(ticker: string): string { return ticker.replace(/\./g, "\u200B."); }
 const SUFFIX_TO_EXCHANGE: Record<string, string> = { TO: "TSE", V: "CVE", CN: "CNSX", NE: "NEO", L: "LON", DE: "ETR", F: "FRA", SG: "STU", MU: "MUN", BE: "BER", DU: "DUS", HM: "HAM", SW: "SWX", VI: "VIE", PA: "EPA", AS: "AMS", BR: "EBR", LS: "ELI", MI: "BIT", MC: "BME", ST: "STO", OL: "OSL", CO: "CPH", HE: "HEL", WA: "WSE", AT: "ATH", HK: "HKG", T: "TYO", SS: "SHA", SZ: "SHE", KS: "KRX", KQ: "KOSDAQ", TW: "TPE", TWO: "TPE", NS: "NSE", BO: "BOM", SI: "SGX", JK: "IDX", KL: "KLSE", BK: "BKK", AX: "ASX", NZ: "NZE", TA: "TLV", IS: "IST", SR: "TADAWUL", JO: "JSE", SA: "BVMF", MX: "BMV", BA: "BCBA", SN: "SGO" };
 function googleExchangeCode(raw: string | null | undefined): string | null {
   if (!raw) return null;
