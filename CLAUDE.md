@@ -241,6 +241,7 @@ Eén gecureerde portefeuille die altijd:
 
 | Datum | Wijziging |
 |---|---|
+| 2026-06-30 | **Favorieten-alerts**: nieuwe edge function `xinix-fav-alerts-background` stuurt gerichte ntfy-pings voor favorieten — >30% dagdaling, nieuw 5y/3y-low, nieuw in top-10/top-20 (op afstand tot limiet), onder de aankooplimiet, en ≥4★ met >20% dag- of >50% weekdaling. Elke melding bevat ticker, link, dagdaling%, afstand-tot-limiet% en sterren. Dedup per conditie via `xinix_fav_alert_state`, baseline-seeding op de eerste run tegen een flood, dagelijkse cron 07:00 UTC. `low_3y` toegevoegd aan `signal_price_summary` (berekend door compute-extremes, favorieten eerst). |
 | 2026-06-11 | **Onderhoudsronde**: gepagineerde fetches tegen de 10k-rijencap (sim/trade/evolve/sim-results/knowledge-export/equity-backfill), `ran_at`→`finished_at`-fix (evolutieruns werden nooit gelogd en nergens getoond), schrijffout-detectie + failure-logging in xinix-sim, álle actieve signalen meegenomen i.p.v. max 2000/3000, auth op kennisexport-POST, ErrorBoundary in de frontend |
 | 2026-05-14 | **Slimme exits + transactiekosten**: TX_COST 0,1%, trailing stop ratchet, partial TP, signal decay exit, kansrotatie, nieuwe N-Trailing groep |
 | 2026-05-14 | **200 strategieën**: uitgebreid van 106 naar 200 (groepen O–W toegevoegd) |
