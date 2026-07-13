@@ -26,6 +26,10 @@ function runBackground(job: string, fn: () => Promise<RunResult>) { return async
 const BATCH_SIZE = 80;
 const BUDGET_MS = 110_000;
 const FAIL_BENCH_AT = 3;
+// Tiered poll-cadans (IO-budget): favorieten 2× per handelsdag (guard voorkomt
+// dubbele polls binnen één venster), overige tickers hooguit 1× per week.
+const FAV_REPOLL_MS = 3 * 60 * 60 * 1000;        // favoriet: niet vaker dan elke 3u
+const REST_STALE_MS = 7 * 24 * 60 * 60 * 1000;   // niet-favoriet: hooguit 1×/week
 
 interface YahooBar { date: string; close: number | null; volume: number | null; }
 interface YahooFetch { bars: YahooBar[]; dividendTtm: number; exchange: string | null; }
@@ -102,6 +106,31 @@ function openExchangesNow(now: Date): string[] {
   return open;
 }
 
+// ── Favoriet-vensters: welke beurzen zitten NU in een favoriet-poll-venster
+// (~1u ná opening óf ~1u vóór sluiting)? Vensters zijn ruim (±) genomen zodat
+// zomer-/wintertijd en cron-granulariteit worden opgevangen; de 3u-guard in de
+// queue zorgt dat elk favoriet-venster tot exact één poll leidt. Mon-Fri.
+function favPollWindowExchangesNow(now: Date): Set<string> {
+  const day = now.getUTCDay();
+  const h = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const wk = day >= 1 && day <= 5;
+  const out = new Set<string>();
+  const NA = ["NasdaqCM", "NasdaqGS", "NasdaqGM", "NASDAQ", "NYSE", "NYSE American", "NYSEArca", "Cboe US", "Toronto", "TSXV", "Canadian Sec", "OTC Markets OTCQB", "OTC Markets OTCPK", "OTC Markets OTCID", "OTC Markets OTCQX"];
+  const EU = ["LSE", "Amsterdam", "Paris", "Frankfurt", "XETRA", "Milan", "Warsaw", "Oslo"];
+  const ASIA = ["HKSE", "Tokyo", "SES", "Shanghai", "Shenzhen", "Jakarta", "Kuala Lumpur", "NSE", "BSE"];
+  // Noord-Amerika (regulier 13:30-21:00 UTC): open+1u 14:00-16:00, sluit-1u 19:30-21:30.
+  if (wk && ((h >= 14 && h < 16) || (h >= 19.5 && h < 21.5))) NA.forEach((e) => out.add(e));
+  // Europa (07:00-16:30 UTC): open+1u 08:00-09:30, sluit-1u 14:30-16:00.
+  if (wk && ((h >= 8 && h < 9.5) || (h >= 14.5 && h < 16))) EU.forEach((e) => out.add(e));
+  // Azië (00:00-11:00 UTC): open+1u 01:00-02:30, sluit-1u 09:00-10:30.
+  if (wk && ((h >= 1 && h < 2.5) || (h >= 9 && h < 10.5))) ASIA.forEach((e) => out.add(e));
+  // ASX (Sydney, UTC+10/11): open ~22:00 UTC → open+1u 23:00-00:30; sluit ~07:00 → sluit-1u 05:00-06:30.
+  const asxMorning = (day >= 0 && day <= 4 && h >= 23) || (day >= 1 && day <= 5 && h < 0.5);
+  const asxAfternoon = day >= 1 && day <= 5 && h >= 5 && h < 6.5;
+  if (asxMorning || asxAfternoon) out.add("ASX");
+  return out;
+}
+
 Deno.serve(runBackground("poll-prices", async () => {
   const sb = getServiceClient();
   const startMs = Date.now();
@@ -135,31 +164,41 @@ Deno.serve(runBackground("poll-prices", async () => {
   const favSet = new Set<string>((favData ?? []).map((f) => f.ticker as string));
   const favTickers = Array.from(favSet);
 
-  // Poll-queue: favorieten altijd eerst (garandeert dagelijkse koersverversing),
-  // daarna resterende slots vullen met reguliere tickers (oudst gepollt eerst).
-  type QueueRow = { ticker: string; buy_limit: number | null; price_fail_count: number; exchange: string | null; goud_score: number | null };
+  // Poll-queue met tiered cadans (IO-budget):
+  //  • Favorieten: 2× per handelsdag — ~1u na opening en ~1u voor sluiting van
+  //    hun eigen beurs. De 3u-guard voorkomt een tweede poll binnen één venster.
+  //    Nieuw toegevoegde favoriet (nog nooit gepollt) wordt meteen opgehaald.
+  //  • Overige tickers: hooguit 1× per week, alleen als hun beurs nu open is,
+  //    oudst-gepollt eerst — verspreidt ~2100 tickers over de week.
+  type QueueRow = { ticker: string; buy_limit: number | null; price_fail_count: number; exchange: string | null; goud_score: number | null; price_polled_at?: string | null };
+  const nowQ = Date.now();
+  const favWindow = favPollWindowExchangesNow(new Date());
   let queue: QueueRow[] = [];
   if (favTickers.length > 0) {
-    const { data: favQueue, error: fErr } = await sb
+    const { data: favRows, error: fErr } = await sb
       .from("signal_tickers")
-      .select("ticker, buy_limit, price_fail_count, exchange, goud_score")
+      .select("ticker, buy_limit, price_fail_count, exchange, goud_score, price_polled_at")
       .eq("active", true)
       .eq("price_benched", false)
-      .in("ticker", favTickers)
-      .or(orClause)
-      .order("price_polled_at", { ascending: true, nullsFirst: true })
-      .limit(BATCH_SIZE);
+      .in("ticker", favTickers);
     if (fErr) throw new Error((fErr as { message?: string }).message ?? String(fErr));
-    queue = (favQueue ?? []) as QueueRow[];
+    queue = ((favRows ?? []) as QueueRow[]).filter((r) => {
+      const pAt = r.price_polled_at ? new Date(r.price_polled_at).getTime() : 0;
+      if (pAt === 0) return true;                    // nieuw → meteen ophalen
+      if (nowQ - pAt < FAV_REPOLL_MS) return false;  // < 3u geleden gepollt
+      return favWindow.has(r.exchange ?? "");        // alleen in een venster
+    }).slice(0, BATCH_SIZE);
   }
   const remaining = BATCH_SIZE - queue.length;
   if (remaining > 0) {
+    const staleBefore = new Date(nowQ - REST_STALE_MS).toISOString();
     const baseQuery = sb
       .from("signal_tickers")
       .select("ticker, buy_limit, price_fail_count, exchange, goud_score")
       .eq("active", true)
       .eq("price_benched", false)
       .or(orClause)
+      .or(`price_polled_at.is.null,price_polled_at.lt.${staleBefore}`)
       .order("price_polled_at", { ascending: true, nullsFirst: true })
       .limit(remaining);
     const { data: regularQueue, error: rErr } = favTickers.length > 0

@@ -124,12 +124,7 @@ async function scoreOneTicker(
 // dan is het een vlakke round-robin over de hele watchlist met een grote
 // batch, zodat ook tier C volledig aan bod komt.
 const SCORE_BATCH = 250;
-const WEEKEND_BATCH = 600;
 const SCORE_BUDGET_MS = 110_000;
-const STALE_A_MS = 1 * 60 * 60 * 1000;
-const STALE_B_MS = 12 * 60 * 60 * 1000;
-const STALE_C_MS = 30 * 24 * 60 * 60 * 1000;
-const WEEKEND_STALE_MS = 1 * 60 * 60 * 1000;
 
 Deno.serve(
   runBackground("compute-scores", async () => {
@@ -211,31 +206,36 @@ Deno.serve(
       factor_count?: number | null;
       score_at?: string | null;
     };
+    // Herscoren is koers-gedreven: (her)bereken een score alleen als er een
+    // níeuwe koers is sinds de vorige score. Zo volgt scoren automatisch de
+    // poll-cadans — favorieten ~2×/dag, overige ~1×/week. Vangnet: minstens
+    // 1× per 8 dagen, zodat wijzigingen in catalysts/events niet blijven liggen.
+    // Favorieten krijgen voorrang in de batch.
+    const { data: favData } = await supabase.from("xinix_favorites").select("ticker");
+    const favSet = new Set<string>((favData ?? []).map((f) => (f as { ticker: string }).ticker));
     const now = Date.now();
-    const staleMs = (t: TR): number =>
-      t.score_at ? now - new Date(t.score_at).getTime() : Number.MAX_SAFE_INTEGER;
-    const tierOf = (t: TR): "A" | "B" | "C" => {
-      if (t.goud_score != null || t.buy_limit != null) return "A";
-      if ((t.factor_count ?? 0) >= 2 || recentSigSet.has(t.ticker)) return "B";
-      return "C";
+    const EIGHT_DAYS_MS = 8 * 24 * 60 * 60 * 1000;
+    const scoreAtMs = (t: TR): number =>
+      t.score_at ? new Date(t.score_at).getTime() : 0;
+    const priceUpdatedMs = (t: TR): number => {
+      const p = priceByTicker.get(t.ticker) as { updated_at?: string } | undefined;
+      return p?.updated_at ? new Date(p.updated_at).getTime() : 0;
     };
-    const day = new Date().getUTCDay(); // 0 = zondag, 6 = zaterdag
-    const isWeekend = day === 0 || day === 6;
-    const batchSize = isWeekend ? WEEKEND_BATCH : SCORE_BATCH;
-    const TIER_THRESH: Record<"A" | "B" | "C", number> = isWeekend
-      ? { A: WEEKEND_STALE_MS, B: WEEKEND_STALE_MS, C: WEEKEND_STALE_MS }
-      : { A: STALE_A_MS, B: STALE_B_MS, C: STALE_C_MS };
-    const TIER_RANK: Record<"A" | "B" | "C", number> = { A: 0, B: 1, C: 2 };
+    const needsScore = (t: TR): boolean => {
+      const sAt = scoreAtMs(t);
+      if (sAt === 0) return true;                 // nog nooit gescoord
+      if (priceUpdatedMs(t) > sAt) return true;   // verse koers sinds vorige score
+      return now - sAt > EIGHT_DAYS_MS;           // vangnet
+    };
 
     const queue = (tickers as TR[])
-      .map((t) => ({ t, tier: tierOf(t), stale: staleMs(t) }))
-      .filter((x) => x.stale >= TIER_THRESH[x.tier])
+      .filter(needsScore)
+      .map((t) => ({ t, isFav: favSet.has(t.ticker), age: now - scoreAtMs(t) }))
       .sort((a, b) => {
-        if (!isWeekend && TIER_RANK[a.tier] !== TIER_RANK[b.tier])
-          return TIER_RANK[a.tier] - TIER_RANK[b.tier];
-        return b.stale - a.stale;
+        if (a.isFav !== b.isFav) return a.isFav ? -1 : 1; // favorieten eerst
+        return b.age - a.age;                             // langst niet gescoord eerst
       })
-      .slice(0, batchSize);
+      .slice(0, SCORE_BATCH);
 
     if (queue.length === 0) {
       return { ok: true, message: "alle scores zijn vers", metrics: { scored: 0, queued: 0 } };
@@ -244,11 +244,11 @@ Deno.serve(
     let scored = 0;
     let failed = 0;
     let processed = 0;
-    const tierCounts = { A: 0, B: 0, C: 0 };
-    for (const { t, tier } of queue) {
+    let favProcessed = 0;
+    for (const { t, isFav } of queue) {
       if (Date.now() - startMs > SCORE_BUDGET_MS) break;
       processed++;
-      tierCounts[tier]++;
+      if (isFav) favProcessed++;
       const ok = await scoreOneTicker(
         supabase,
         t as TickerRow,
@@ -270,18 +270,15 @@ Deno.serve(
     }
 
     const stillStale =
-      (tickers as TR[]).filter((t) => staleMs(t) >= TIER_THRESH[tierOf(t)]).length -
-      processed;
+      (tickers as TR[]).filter(needsScore).length - processed;
     return {
       ok: processed === 0 || failed < processed / 2,
-      message: `${scored} gescoord (A:${tierCounts.A} B:${tierCounts.B} C:${tierCounts.C}), ${failed} fout, ~${Math.max(0, stillStale)} nog te doen`,
+      message: `${scored} gescoord (${favProcessed} favoriet), ${failed} fout, ~${Math.max(0, stillStale)} nog te doen`,
       metrics: {
         scored,
         failed,
         processed,
-        tier_a: tierCounts.A,
-        tier_b: tierCounts.B,
-        tier_c: tierCounts.C,
+        fav_processed: favProcessed,
         queue_remaining: Math.max(0, stillStale),
       },
     };
