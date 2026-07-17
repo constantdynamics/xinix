@@ -47,6 +47,10 @@ const MIN_DOLLAR_VOL = 200_000;    // $200k gemiddeld dagvolume in dollars
 // blijft ongeveer het beste kwart daarvan over.
 const MIN_SCORE = 80;
 
+// Ntfy-melding voor nieuwkomers: alleen wanneer een ticker die nog niet op de
+// lijst stond binnenkomt met een fit-score van minimaal deze drempel.
+const NOTIFY_MIN_SCORE = 90;
+
 const PAGE = 1000;
 
 interface TickerRow {
@@ -136,6 +140,42 @@ function fitScore(rangeMult: number, crashPct: number, chg22d: number | null, mc
   return { score, breakdown };
 }
 
+// ── Ntfy (zelfde aanpak als xinix-fav-alerts) ────────────────────────────────
+async function sendNtfy(server: string, topic: string, title: string, body: string, clickUrl: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const payload: Record<string, unknown> = { topic, title, message: body, priority: 4, tags: ["star2"], click: clickUrl };
+    const res = await fetch((server || "https://ntfy.sh").replace(/\/$/, ""), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return { ok: false, error: `ntfy ${res.status}: ${await res.text()}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+// Zero-width space tussen base en suffix zodat ntfy .TO/.AX niet als TLD linkt.
+function safeTickerDisplay(ticker: string): string { return ticker.replace(/\./g, "​."); }
+const SUFFIX_TO_EXCHANGE: Record<string, string> = { TO: "TSE", V: "CVE", CN: "CNSX", L: "LON", AX: "ASX", HK: "HKG", DE: "ETR", PA: "EPA", AS: "AMS", ST: "STO", OL: "OSL", CO: "CPH", SW: "SWX", MI: "BIT" };
+function googleExchangeCode(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const e = raw.trim().toLowerCase();
+  if (e.includes("nasdaq") || e === "nms" || e === "ngm" || e === "ncm") return "NASDAQ";
+  if (e.includes("amex") || e.includes("nyse american")) return "NYSEAMERICAN";
+  if (e === "nyse" || e === "nyq") return "NYSE";
+  return null;
+}
+function googleFinanceUrl(ticker: string, exchange: string | null): string {
+  const t = ticker.trim().toUpperCase();
+  const dot = t.indexOf(".");
+  if (dot === -1) { const code = googleExchangeCode(exchange) ?? "NASDAQ"; return `https://www.google.com/finance/quote/${encodeURIComponent(t)}:${code}`; }
+  const exch = SUFFIX_TO_EXCHANGE[t.slice(dot + 1)];
+  if (!exch) return `https://www.google.com/finance/quote/${encodeURIComponent(t)}`;
+  return `https://www.google.com/finance/quote/${encodeURIComponent(t.slice(0, dot))}:${exch}`;
+}
+function reviewUrl(ticker: string): string { return `https://constantdynamics.github.io/xinix/?review=${encodeURIComponent(ticker.trim().toUpperCase())}`; }
+
 // Archetype-indeling, zelfde vier types als de briefing.
 const CRYPTO_RE = /\b(bitcoin|crypto|blockchain|digital\s+(assets?|technolog|mining)|hut\s*8|terawulf|hive|miner)\b/i;
 function archetypeOf(company: string | null, industry: string | null, mcap: number, xAboveLow: number, crashPct: number): string {
@@ -216,8 +256,11 @@ Deno.serve(runBackground("xinix-star-scan", async () => {
   // Upsert in twee stappen zodat first_seen_at en best_score behouden blijven:
   // bestaande rijen krijgen een update zonder first_seen_at; nieuwe rijen
   // krijgen alles. best_score = hoogste score ooit gezien.
-  const existing = await fetchAll<{ ticker: string; best_score: number | null }>(sb, "xinix_star_scan_results", "ticker, best_score");
+  const existing = await fetchAll<{ ticker: string; best_score: number | null; qualifies: boolean | null }>(sb, "xinix_star_scan_results", "ticker, best_score, qualifies");
   const existingBest = new Map(existing.map((e) => [e.ticker, num(e.best_score) ?? 0]));
+  // "Huidige lijst" vóór deze run: tickers die al zichtbaar waren. Nieuwkomers
+  // (nog nooit gezien, of eerder afgevallen en nu terug) met fit ≥ 90 pingen.
+  const wasOnList = new Set(existing.filter((e) => e.qualifies === true).map((e) => e.ticker));
 
   const errors: string[] = [];
   let upserted = 0;
@@ -252,9 +295,44 @@ Deno.serve(runBackground("xinix-star-scan", async () => {
     }
   }
 
+  // Ntfy voor nieuwkomers met topscore. De zondagsrun herhaalt zaterdagse
+  // vondsten niet: die staan dan al met qualifies=true in de tabel.
+  const newcomers = qualifying
+    .filter((q) => (q.score as number) >= NOTIFY_MIN_SCORE && !wasOnList.has(q.ticker as string))
+    .sort((a, b) => (b.score as number) - (a.score as number));
+  let notified = 0;
+  if (newcomers.length > 0 && errors.length === 0) {
+    const { data: settings } = await sb.from("signal_settings").select("ntfy_topic, ntfy_server").eq("id", 1).single();
+    const topic = settings?.ntfy_topic as string | null | undefined;
+    if (topic) {
+      const server = (settings?.ntfy_server as string) ?? "https://ntfy.sh";
+      const shown = newcomers.slice(0, 10);
+      const lines = shown.map((q) => {
+        const chg = num(q.pct_change_22d);
+        return [
+          `🌟 Fit ${(q.score as number).toFixed(0)} · ${safeTickerDisplay(q.ticker as string)} — ${q.company ?? "?"}`,
+          `   ${q.pct_vs_high5y}% vs 5j-top · ${chg != null ? `${chg.toFixed(1)}% in 22d` : "22d onbekend"} · ${q.archetype}`,
+          `   📲 ${reviewUrl(q.ticker as string)}`,
+          `   🔗 ${googleFinanceUrl(q.ticker as string, (q.exchange as string | null) ?? null)}`,
+        ].join("\n");
+      });
+      if (newcomers.length > shown.length) lines.push(`… en nog ${newcomers.length - shown.length} meer in het Scanner-tabblad.`);
+      const clickUrl = shown.length === 1
+        ? reviewUrl(shown[0].ticker as string)
+        : "https://constantdynamics.github.io/xinix/?tab=favorieten";
+      const r = await sendNtfy(
+        server, topic,
+        `🌟 ${newcomers.length} nieuwe 5-sterren-kandidaat${newcomers.length > 1 ? "en" : ""} (fit ≥ ${NOTIFY_MIN_SCORE})`,
+        lines.join("\n\n") + "\n\nNieuw op de scanner-ranking dit weekend.",
+        clickUrl,
+      );
+      if (r.ok) notified = newcomers.length; else errors.push(`ntfy: ${r.error}`);
+    }
+  }
+
   return {
     ok: errors.length === 0,
-    message: `${tickers.length} tickers gescand: ${qualifying.length} kwalificeren (score ≥ ${MIN_SCORE}), ${upserted} geüpsert, ${deactivated} gedeactiveerd; ${gatesFailed} poorten, ${belowScore} score te laag, ${isFavorite} favoriet, ${noData} zonder data` + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
-    metrics: { scanned: tickers.length, qualifying: qualifying.length, upserted, deactivated, gates_failed: gatesFailed, below_score: belowScore, favorites_skipped: isFavorite, no_data: noData, errors: errors.length },
+    message: `${tickers.length} tickers gescand: ${qualifying.length} kwalificeren (score ≥ ${MIN_SCORE}), ${upserted} geüpsert, ${deactivated} gedeactiveerd, ${notified} genotificeerd (nieuw ≥ ${NOTIFY_MIN_SCORE}); ${gatesFailed} poorten, ${belowScore} score te laag, ${isFavorite} favoriet, ${noData} zonder data` + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
+    metrics: { scanned: tickers.length, qualifying: qualifying.length, upserted, deactivated, notified, gates_failed: gatesFailed, below_score: belowScore, favorites_skipped: isFavorite, no_data: noData, errors: errors.length },
   };
 }));

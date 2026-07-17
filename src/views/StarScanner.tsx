@@ -109,6 +109,7 @@ export function StarScannerView({ scans }: { scans: ScanResults | null }) {
             Alleen kandidaten met fit-score ≥ 80 worden getoond, beste match bovenaan. De lijst
             blijft tussen runs staan en wordt aangevuld; <span className="px-1 py-0.5 rounded bg-fog-lime/15 text-fog-lime text-[10px] font-bold">NIEUW</span> markeert
             aandelen die dit weekend voor het eerst opdoken. Huidige favorieten worden overgeslagen.
+            Verschijnt er een nieuwkomer met fit ≥ 90, dan krijg je daarvan een ntfy-melding.
           </p>
         </div>
       </CollapsibleIntro>
