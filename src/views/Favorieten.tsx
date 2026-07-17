@@ -21,6 +21,7 @@ import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/Co
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
 import { VerdubbelaarsView } from "./Verdubbelaars";
+import { StarScannerView } from "./StarScanner";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
 
@@ -67,7 +68,7 @@ type ViewMode = "table" | "tiles";
 const VIEW_KEY = "xinix_favorieten_view";
 const SUBTAB_KEY = "xinix_favorieten_subtab";
 
-type FavSubTab = "lijst" | "verdubbelaars";
+type FavSubTab = "lijst" | "verdubbelaars" | "scanner";
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
@@ -137,9 +138,10 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
     setViewMode(v);
     localStorage.setItem(VIEW_KEY, v);
   }
-  const [subTab, setSubTab] = useState<FavSubTab>(
-    () => (localStorage.getItem(SUBTAB_KEY) === "verdubbelaars" ? "verdubbelaars" : "lijst"),
-  );
+  const [subTab, setSubTab] = useState<FavSubTab>(() => {
+    const saved = localStorage.getItem(SUBTAB_KEY);
+    return saved === "verdubbelaars" || saved === "scanner" ? saved : "lijst";
+  });
   function pickSubTab(v: FavSubTab) {
     setSubTab(v);
     localStorage.setItem(SUBTAB_KEY, v);
@@ -599,6 +601,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         {([
           ["lijst", "♥ Lijst"],
           ["verdubbelaars", "🚀 Verdubbelaars"],
+          ["scanner", "🌟 Scanner"],
         ] as Array<[FavSubTab, string]>).map(([key, label]) => (
           <button
             key={key}
@@ -616,6 +619,8 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
 
       {subTab === "verdubbelaars" ? (
         <VerdubbelaarsView dashboard={dashboard} scans={scans} />
+      ) : subTab === "scanner" ? (
+        <StarScannerView scans={scans} />
       ) : (
         <>
       <CollapsibleIntro title="Favorieten" icon={<GradientTabIcon tab="favorieten" />}>

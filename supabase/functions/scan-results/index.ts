@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
   try {
     const sb = getServiceClient();
 
-    const [tickersResult, runsResult, summariesResult, phoenixResult, phoenixCountResult, unscannedCountResult, hikkertjeResult, hikkertjeCountResult, hikkertjeUnscannedResult, poefieResult, poefieCountResult, poefieUnscannedResult] = await Promise.all([
+    const [tickersResult, runsResult, summariesResult, phoenixResult, phoenixCountResult, unscannedCountResult, hikkertjeResult, hikkertjeCountResult, hikkertjeUnscannedResult, poefieResult, poefieCountResult, poefieUnscannedResult, starResult, starRunResult] = await Promise.all([
       // Alle auto-toegevoegde tickers, nieuwste eerst
       sb
         .from("signal_tickers")
@@ -108,6 +108,20 @@ Deno.serve(async (req) => {
         .select("*", { count: "exact", head: true })
         .is("is_poefie", null)
         .eq("active", true),
+      // 5-sterren-scanner: alle gekwalificeerde kandidaten, beste fit eerst
+      sb
+        .from("xinix_star_scan_results")
+        .select("ticker, score, best_score, archetype, company, sector, exchange, last_close, market_cap_usd, range_5y, pct_vs_high5y, x_above_low5y, pct_change_22d, dollar_volume, medal_gold, medal_silver, breakdown, first_seen_at, last_seen_at")
+        .eq("qualifies", true)
+        .order("score", { ascending: false })
+        .limit(200),
+      // Laatste run van de 5-sterren-scanner (voor "laatst gescand op …")
+      sb
+        .from("signal_runs")
+        .select("started_at, finished_at, ok, message")
+        .eq("job", "xinix-star-scan")
+        .order("started_at", { ascending: false })
+        .limit(1),
     ]);
 
     const tickers = (tickersResult.data ?? []) as Array<{
@@ -269,6 +283,8 @@ Deno.serve(async (req) => {
         poefie_ranking: poefieRanking,
         poefie_count: poefieCountResult.count ?? 0,
         poefie_unscanned: poefieUnscannedResult.count ?? 0,
+        star_ranking: starResult.data ?? [],
+        star_last_run: starRunResult.data?.[0] ?? null,
       }),
       { status: 200, headers: { ...cors(req), "content-type": "application/json" } }
     );
