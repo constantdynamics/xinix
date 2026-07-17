@@ -330,6 +330,31 @@ export interface HikkertjeRankEntry {
   above_limit_pct: number | null;
 }
 
+// 5-sterren-scanner: kandidaten die lijken op de aandelen met 5★-rating.
+// Gevuld door xinix-star-scan-background (weekends), zie docs/scan-briefing-5sterren.md.
+export type StarArchetype = "herstelde_reus" | "capitulatie" | "spike_machine" | "crypto_infra";
+export interface StarScanEntry {
+  ticker: string;
+  score: number;
+  best_score: number;
+  archetype: StarArchetype;
+  company: string | null;
+  sector: string | null;
+  exchange: string | null;
+  last_close: number | null;
+  market_cap_usd: number | null;
+  range_5y: number | null;
+  pct_vs_high5y: number | null;
+  x_above_low5y: number | null;
+  pct_change_22d: number | null;
+  dollar_volume: number | null;
+  medal_gold: number | null;
+  medal_silver: number | null;
+  breakdown: Record<string, number> | null;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
 export interface ScanResults {
   tickers: ScanTicker[];
   runs: { "scan-losers": ScanRun[]; "scan-bottoms": ScanRun[] };
@@ -342,6 +367,8 @@ export interface ScanResults {
   poefie_ranking: PoefieRankEntry[];
   poefie_count: number;
   poefie_unscanned: number;
+  star_ranking?: StarScanEntry[];
+  star_last_run?: { started_at: string; finished_at: string | null; ok: boolean | null; message: string | null } | null;
 }
 
 export async function fetchScanResults(): Promise<ScanResults> {
