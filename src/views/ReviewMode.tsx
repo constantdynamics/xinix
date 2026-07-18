@@ -358,7 +358,7 @@ function ReviewChart({ ticker, exchange }: { ticker: string; exchange: string | 
 
 // ── Typen ─────────────────────────────────────────────────────────────────────
 
-export type ReviewList = "favorieten" | "feniks" | "hikkertjes" | "zwitserleven" | "medailles" | "watchlist";
+export type ReviewList = "favorieten" | "scanner" | "feniks" | "hikkertjes" | "zwitserleven" | "medailles" | "watchlist";
 
 interface ReviewItem {
   ticker: string;
@@ -372,12 +372,14 @@ interface ReviewItem {
   last_close?: number | null;
   dividend_yield_pct?: number | null;
   hikkertje_spikes?: number | null;
+  star_score?: number | null;
 }
 
 // ── List picker (stap 1) ──────────────────────────────────────────────────────
 
 const LIST_OPTIONS: { key: ReviewList; icon: ReactNode; label: string; desc: string }[] = [
   { key: "favorieten", icon: <GradientTabIcon tab="favorieten" />, label: "Favorieten", desc: "Favorieten zonder sterren-beoordeling" },
+  { key: "scanner", icon: <span>🌟</span>, label: "5-sterren-scanner", desc: "Scanner-kandidaten (fit ≥ 80) nog niet bekeken of favoriet — beste fit eerst" },
   { key: "feniks", icon: <GradientTabIcon tab="feniks" />, label: "Feniks", desc: "Feniks-aandelen nog niet bekeken of favoriet" },
   { key: "hikkertjes", icon: <GradientTabIcon tab="hikkertjes" />, label: "Hikkertjes", desc: "Hikkertjes nog niet bekeken of favoriet" },
   { key: "zwitserleven", icon: <GradientTabIcon tab="zwitserleven" />, label: "Zwitserleven", desc: "Dividend-aandelen nog niet bekeken of favoriet" },
@@ -424,6 +426,20 @@ function buildQueue(
       }
       return items;
     }
+    case "scanner":
+      // star_ranking is server-side al gesorteerd op fit-score (beste eerst)
+      return (scans?.star_ranking ?? [])
+        .filter((s) => notReviewed(s.ticker))
+        .map((s) => ({
+          ticker: s.ticker,
+          company: s.company,
+          exchange: s.exchange,
+          sector: s.sector,
+          medal_gold: s.medal_gold,
+          medal_silver: s.medal_silver,
+          last_close: s.last_close,
+          star_score: s.score,
+        }));
     case "feniks":
       return (scans?.phoenix_ranking ?? [])
         .filter((p) => notReviewed(p.ticker))
@@ -640,6 +656,9 @@ function ReviewCard({
           )}
           {item.hikkertje_spikes != null && (
             <span className="text-yellow-400 font-semibold">⚡ {item.hikkertje_spikes}× spike</span>
+          )}
+          {item.star_score != null && (
+            <span className="text-fog-lime font-semibold" title="Fit-score met het 5-sterren-profiel">🌟 fit {item.star_score.toFixed(0)}</span>
           )}
         </div>
       </div>
