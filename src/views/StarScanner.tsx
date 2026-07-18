@@ -3,9 +3,12 @@ import type { ScanResults, StarScanEntry, StarArchetype } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Stat, CollapsibleIntro } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
-import { HeartCell, HeartHeader } from "../components/MarkCells";
+import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle } from "../components/MarkCells";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
+
+type SortKey = "score" | "ticker" | "company" | "pct_vs_high5y" | "x_above_low5y" | "pct_change_22d" | "market_cap_usd" | "dollar_volume" | "last_close" | "medals";
+type SortDir = "asc" | "desc";
 
 const ARCHETYPE_LABEL: Record<StarArchetype, string> = {
   herstelde_reus: "🏛️ Herstelde reus",
@@ -64,18 +67,67 @@ export function StarScannerView({ scans }: { scans: ScanResults | null }) {
   const marks = useMarks();
   const [archFilter, setArchFilter] = useState<Set<StarArchetype>>(new Set());
   const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("score");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [showSeen, setShowSeen] = useState(false);
 
   const ranking = useMemo(() => scans?.star_ranking ?? [], [scans]);
   const lastRun = scans?.star_last_run ?? null;
 
+  // "Beoordeeld" = favoriet gemaakt, sterren gegeven of als gezien gemarkeerd
+  // (via het beoordeelscherm of de kolom-iconen). Die verdwijnen uit de ranking.
+  const isReviewed = (ticker: string) => {
+    const T = ticker.toUpperCase();
+    return marks.favorites.has(T) || marks.isSeen(T) || marks.getRating(T) != null;
+  };
+
   const filtered = useMemo(() => {
-    // Server sorteert al op score desc; hier alleen filteren. Favorieten die
-    // sinds de laatste run zijn geharteld verbergen we direct (de scan zet
-    // qualifies pas het volgende weekend op false).
-    let list = ranking.filter((r) => !marks.favorites.has(r.ticker.toUpperCase()));
+    let list = ranking;
+    if (!showSeen) list = list.filter((r) => !isReviewed(r.ticker));
+    else list = list.filter((r) => !marks.favorites.has(r.ticker.toUpperCase()));
     if (archFilter.size > 0) list = list.filter((r) => archFilter.has(r.archetype));
+    list = [...list].sort((a, b) => {
+      let av: number | string | null;
+      let bv: number | string | null;
+      switch (sortKey) {
+        case "score": av = a.score; bv = b.score; break;
+        case "ticker": av = a.ticker; bv = b.ticker; break;
+        case "company": av = a.company; bv = b.company; break;
+        case "pct_vs_high5y": av = a.pct_vs_high5y; bv = b.pct_vs_high5y; break;
+        case "x_above_low5y": av = a.x_above_low5y; bv = b.x_above_low5y; break;
+        case "pct_change_22d": av = a.pct_change_22d; bv = b.pct_change_22d; break;
+        case "market_cap_usd": av = a.market_cap_usd; bv = b.market_cap_usd; break;
+        case "dollar_volume": av = a.dollar_volume; bv = b.dollar_volume; break;
+        case "last_close": av = a.last_close; bv = b.last_close; break;
+        case "medals": av = (a.medal_gold ?? 0) * 10 + (a.medal_silver ?? 0); bv = (b.medal_gold ?? 0) * 10 + (b.medal_silver ?? 0); break;
+      }
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" && typeof bv === "string") {
+        return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
+    });
     return list;
-  }, [ranking, archFilter, marks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ranking, archFilter, marks, sortKey, sortDir, showSeen]);
+
+  const reviewedCount = useMemo(
+    () => ranking.filter((r) => !marks.favorites.has(r.ticker.toUpperCase()) && isReviewed(r.ticker)).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ranking, marks],
+  );
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir(key === "ticker" || key === "company" ? "asc" : "desc"); }
+  }
+  const sortArrow = (key: SortKey) => (sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "");
+  // Volledige klassenamen (geen template-interpolatie) zodat Tailwind ze meeneemt.
+  const thCls = (align: "left" | "right" | "center") =>
+    (align === "left" ? "text-left" : align === "right" ? "text-right" : "text-center") +
+    " px-3 py-2 cursor-pointer hover:text-neutral-300 select-none whitespace-nowrap";
 
   const archCounts = useMemo(() => {
     const c: Record<StarArchetype, number> = { herstelde_reus: 0, capitulatie: 0, spike_machine: 0, crypto_infra: 0 };
@@ -106,10 +158,12 @@ export function StarScannerView({ scans }: { scans: ScanResults | null }) {
             <li><strong className="text-neutral-300">Liquiditeit</strong> — voldoende dollarvolume per dag</li>
           </ul>
           <p className="text-xs text-neutral-400">
-            Alleen kandidaten met fit-score ≥ 80 worden getoond, beste match bovenaan. De lijst
-            blijft tussen runs staan en wordt aangevuld; <span className="px-1 py-0.5 rounded bg-fog-lime/15 text-fog-lime text-[10px] font-bold">NIEUW</span> markeert
-            aandelen die dit weekend voor het eerst opdoken. Huidige favorieten worden overgeslagen.
-            Verschijnt er een nieuwkomer met fit ≥ 90, dan krijg je daarvan een ntfy-melding.
+            Alleen kandidaten met fit-score ≥ 80 worden getoond, beste match bovenaan (klik op een
+            kolomtitel om anders te sorteren). De lijst blijft tussen runs staan en wordt aangevuld;{" "}
+            <span className="px-1 py-0.5 rounded bg-fog-lime/15 text-fog-lime text-[10px] font-bold">NIEUW</span> markeert
+            aandelen die dit weekend voor het eerst opdoken. Beoordeelde aandelen (gezien, favoriet of
+            sterren — bijvoorbeeld via het beoordeelscherm) verdwijnen uit de ranking. Verschijnt er
+            een nieuwkomer met fit ≥ 90, dan krijg je daarvan een ntfy-melding.
           </p>
         </div>
       </CollapsibleIntro>
@@ -117,12 +171,16 @@ export function StarScannerView({ scans }: { scans: ScanResults | null }) {
       <div className="flex flex-wrap items-center gap-3">
         <Stat label="Kandidaten" value={ranking.length} />
         <Stat label="Getoond" value={filtered.length} />
+        <Stat label="Beoordeeld" value={reviewedCount} />
         {lastRun && (
           <div className="text-xs text-neutral-500">
             Laatste scan: {new Date(lastRun.started_at).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
             {lastRun.ok === false && <span className="text-fog-loss ml-1">(mislukt)</span>}
           </div>
         )}
+        <div className="ml-auto">
+          <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -160,18 +218,39 @@ export function StarScannerView({ scans }: { scans: ScanResults | null }) {
               <thead className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
                 <tr>
                   <th className="px-2 py-2 text-right">#</th>
+                  <SeenHeader />
                   <HeartHeader />
-                  <th className="px-3 py-2 text-left">Ticker</th>
-                  <th className="px-3 py-2 text-left">Bedrijf</th>
-                  <th className="px-3 py-2 text-right" title="Fit-score 0-100: hoe goed dit aandeel op het 5-sterren-profiel past">Fit</th>
+                  <th className={thCls("left")} onClick={() => toggleSort("ticker")}>
+                    Ticker <span className="text-fog-lime text-[9px]">{sortArrow("ticker")}</span>
+                  </th>
+                  <th className={thCls("left")} onClick={() => toggleSort("company")}>
+                    Bedrijf <span className="text-fog-lime text-[9px]">{sortArrow("company")}</span>
+                  </th>
+                  <th className={thCls("right")} onClick={() => toggleSort("score")} title="Fit-score 0-100: hoe goed dit aandeel op het 5-sterren-profiel past">
+                    Fit <span className="text-fog-lime text-[9px]">{sortArrow("score")}</span>
+                  </th>
                   <th className="px-3 py-2 text-left">Archetype</th>
-                  <th className="px-3 py-2 text-right" title="Hoe ver onder de 5-jaarstop">vs 5j-top</th>
-                  <th className="px-3 py-2 text-right" title="Hoeveel keer boven de 5-jaarsbodem">× bodem</th>
-                  <th className="px-3 py-2 text-right" title="Koersverandering laatste ~22 handelsdagen">22d</th>
-                  <th className="px-3 py-2 text-right">Mcap</th>
-                  <th className="px-3 py-2 text-right" title="Gemiddeld dagvolume in dollars">$vol/dag</th>
-                  <th className="px-3 py-2 text-right">Koers</th>
-                  <th className="px-3 py-2 text-center">Medailles</th>
+                  <th className={thCls("right")} onClick={() => toggleSort("pct_vs_high5y")} title="Hoe ver onder de 5-jaarstop">
+                    vs 5j-top <span className="text-fog-lime text-[9px]">{sortArrow("pct_vs_high5y")}</span>
+                  </th>
+                  <th className={thCls("right")} onClick={() => toggleSort("x_above_low5y")} title="Hoeveel keer boven de 5-jaarsbodem">
+                    × bodem <span className="text-fog-lime text-[9px]">{sortArrow("x_above_low5y")}</span>
+                  </th>
+                  <th className={thCls("right")} onClick={() => toggleSort("pct_change_22d")} title="Koersverandering laatste ~22 handelsdagen">
+                    22d <span className="text-fog-lime text-[9px]">{sortArrow("pct_change_22d")}</span>
+                  </th>
+                  <th className={thCls("right")} onClick={() => toggleSort("market_cap_usd")}>
+                    Mcap <span className="text-fog-lime text-[9px]">{sortArrow("market_cap_usd")}</span>
+                  </th>
+                  <th className={thCls("right")} onClick={() => toggleSort("dollar_volume")} title="Gemiddeld dagvolume in dollars">
+                    $vol/dag <span className="text-fog-lime text-[9px]">{sortArrow("dollar_volume")}</span>
+                  </th>
+                  <th className={thCls("right")} onClick={() => toggleSort("last_close")}>
+                    Koers <span className="text-fog-lime text-[9px]">{sortArrow("last_close")}</span>
+                  </th>
+                  <th className={thCls("center")} onClick={() => toggleSort("medals")}>
+                    Medailles <span className="text-fog-lime text-[9px]">{sortArrow("medals")}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-5/40">
@@ -200,6 +279,7 @@ function StarRow({ r, rank, onCompanyClick }: { r: StarScanEntry; rank: number; 
   return (
     <tr>
       <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-500 text-xs">{rank}</td>
+      <SeenCell ticker={r.ticker} />
       <HeartCell ticker={r.ticker} />
       <td className="px-3 py-2 whitespace-nowrap">
         <a href={googleFinanceUrl(r.ticker, r.exchange)} target="_blank" rel="noreferrer" className="font-mono font-semibold tab-accent-text hover:underline">
