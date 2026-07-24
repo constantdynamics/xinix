@@ -3,7 +3,7 @@ import type { ScanResults, StarScanEntry, StarArchetype } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Stat, CollapsibleIntro } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
-import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle } from "../components/MarkCells";
+import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
 
@@ -220,6 +220,7 @@ export function StarScannerView({ scans }: { scans: ScanResults | null }) {
                   <th className="px-2 py-2 text-right">#</th>
                   <SeenHeader />
                   <HeartHeader />
+                  <th className="px-3 py-2 text-center" title="Geef direct sterren — het aandeel wordt dan favoriet en verdwijnt uit de ranking">Sterren</th>
                   <th className={thCls("left")} onClick={() => toggleSort("ticker")}>
                     Ticker <span className="text-fog-lime text-[9px]">{sortArrow("ticker")}</span>
                   </th>
@@ -281,6 +282,7 @@ function StarRow({ r, rank, onCompanyClick }: { r: StarScanEntry; rank: number; 
       <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-500 text-xs">{rank}</td>
       <SeenCell ticker={r.ticker} />
       <HeartCell ticker={r.ticker} />
+      <td className="px-3 py-2 text-center whitespace-nowrap"><StarRating ticker={r.ticker} /></td>
       <td className="px-3 py-2 whitespace-nowrap">
         <a href={googleFinanceUrl(r.ticker, r.exchange)} target="_blank" rel="noreferrer" className="font-mono font-semibold tab-accent-text hover:underline">
           {r.ticker}
