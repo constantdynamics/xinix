@@ -34,11 +34,17 @@ Deno.serve(async (req) => {
       "quiet_hours_start",
       "quiet_hours_end",
       "alert_only_goud_events",
+      "notify_cooldown_days",
     ];
     const update: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
     for (const k of allowed) if (k in body) update[k] = body[k];
+    // NOT NULL-kolom: leeg veld in de UI betekent "uit", niet "kapot".
+    if ("notify_cooldown_days" in update) {
+      const n = Number(update.notify_cooldown_days);
+      update.notify_cooldown_days = Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+    }
     const { error } = await supabase
       .from("signal_settings")
       .update(update)

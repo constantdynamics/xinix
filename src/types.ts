@@ -193,6 +193,8 @@ export interface Settings {
   quiet_hours_start: number | null;
   quiet_hours_end: number | null;
   alert_only_goud_events: boolean;
+  /** Minimaal aantal dagen tussen twee meldingen over hetzelfde aandeel. 0 = uit. */
+  notify_cooldown_days: number;
 }
 
 // Status van een doorlopende achtergrond-job (tabblad "Status").

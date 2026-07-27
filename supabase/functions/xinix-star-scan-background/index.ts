@@ -155,6 +155,15 @@ async function sendNtfy(server: string, topic: string, title: string, body: stri
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
+// Deze functie meldt in batch (één ping met meerdere nieuwkomers) en heeft dus
+// geen eigen cooldown-poort nodig. Wel vastleggen wát er gepingd is, zodat de
+// gedeelde cooldown (xinix_notify_gate) weet dat deze aandelen net langs zijn
+// gekomen en de andere meldingsfuncties ze niet meteen opnieuw aankaarten.
+async function notifyRecord(sb: ReturnType<typeof getServiceClient>, tickers: string[], alertKey: string, priority: number): Promise<void> {
+  if (tickers.length === 0) return;
+  await sb.rpc("xinix_notify_record", { p_items: tickers.map((ticker) => ({ ticker, source: "star-scan", alert_key: alertKey, priority })) });
+}
+
 // Zero-width space tussen base en suffix zodat ntfy .TO/.AX niet als TLD linkt.
 function safeTickerDisplay(ticker: string): string { return ticker.replace(/\./g, "​."); }
 const SUFFIX_TO_EXCHANGE: Record<string, string> = { TO: "TSE", V: "CVE", CN: "CNSX", L: "LON", AX: "ASX", HK: "HKG", DE: "ETR", PA: "EPA", AS: "AMS", ST: "STO", OL: "OSL", CO: "CPH", SW: "SWX", MI: "BIT" };
@@ -326,7 +335,10 @@ Deno.serve(runBackground("xinix-star-scan", async () => {
         lines.join("\n\n") + "\n\nNieuw op de scanner-ranking dit weekend.",
         clickUrl,
       );
-      if (r.ok) notified = newcomers.length; else errors.push(`ntfy: ${r.error}`);
+      if (r.ok) {
+        notified = newcomers.length;
+        await notifyRecord(sb, shown.map((q) => q.ticker as string), "star_scan_newcomer", 4);
+      } else errors.push(`ntfy: ${r.error}`);
     }
   }
 

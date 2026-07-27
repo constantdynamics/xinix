@@ -191,6 +191,31 @@ export function SettingsView({ data }: { data?: Dashboard }) {
           </Field>
         </div>
 
+        <Field label="Cooldown per aandeel (dagen, 0 = uit)">
+          <Input
+            type="number"
+            min={0}
+            max={365}
+            value={s.notify_cooldown_days ?? 14}
+            onChange={(e) =>
+              setS({
+                ...s,
+                notify_cooldown_days:
+                  e.target.value === "" ? 0 : Number(e.target.value),
+              })
+            }
+            className="w-full"
+          />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Hetzelfde aandeel krijgt binnen dit aantal dagen maar één melding —
+            over álle meldingskanalen heen (signalen, favorieten-alerts,
+            scanners). Uitzondering: een melding die{" "}
+            <strong className="text-fog-pink">urgenter</strong> is dan de vorige
+            komt er wél doorheen, zodat een overname of FDA-goedkeuring niet
+            blijft hangen achter een "nieuw in de top 20"-ping van gisteren.
+          </p>
+        </Field>
+
         <div className="flex items-center gap-3 pt-2">
           <Button variant="primary" onClick={save}>
             Opslaan
