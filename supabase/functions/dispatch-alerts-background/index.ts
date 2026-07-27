@@ -161,6 +161,25 @@ function pct(x: number | null | undefined): string { if (x == null || !Number.is
 function fmtPrice(x: number | null | undefined): string { if (x == null || !Number.isFinite(x)) return "?"; return `$${x.toFixed(x < 5 ? 3 : 2)}`; }
 function fmtDate(iso: string | null | undefined): string | null { if (!iso) return null; return iso.slice(0, 10); }
 function fmtAbove(p: number): string { return p <= 0 ? `${p.toFixed(0)}% onder limiet` : `+${p.toFixed(0)}% boven limiet`; }
+// ── Globale notificatie-cooldown ─────────────────────────────────────────────
+// Eén teller over álle meldingsfuncties heen (deze functie én xinix-fav-alerts):
+// max 1 melding per aandeel per cooldown-periode (signal_settings.
+// notify_cooldown_days), tenzij de nieuwe melding urgenter is dan wat er binnen
+// die periode al verstuurd is. Voorheen gold hier alleen "max 1 per dag", en
+// wisten de functies niets van elkaars meldingen.
+interface GateRow { ticker: string; allowed: boolean; blocked_until: string | null; last_priority: number | null; last_source: string | null; cooldown_days: number }
+async function notifyGate(sb: ReturnType<typeof getServiceClient>, ticker: string, priority: number): Promise<{ row: GateRow | null; error?: string }> {
+  const { data, error } = await sb.rpc("xinix_notify_gate", { p_items: [{ ticker, priority }] });
+  // Faalt de poort, dan liever een dubbele melding dan helemaal geen meldingen.
+  if (error) return { row: null, error: (error as { message?: string }).message ?? String(error) };
+  const rows = (data ?? []) as GateRow[];
+  return { row: rows[0] ?? null };
+}
+async function notifyRecord(sb: ReturnType<typeof getServiceClient>, ticker: string, alertKey: string, priority: number): Promise<string | null> {
+  const { error } = await sb.rpc("xinix_notify_record", { p_items: [{ ticker, source: "dispatch-alerts", alert_key: alertKey, priority }] });
+  return error ? ((error as { message?: string }).message ?? String(error)) : null;
+}
+
 interface AlertView { title: string; body: string; priority: number; tags: string[]; }
 interface Medals { gold: number; silver: number; bronze: number; }
 interface NearLimitInfo { tier: 1 | 2; abovePct: number; buyLimit: number; lastClose: number; }
@@ -398,12 +417,12 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       if (lc != null) lastCloseByTicker.set(row.ticker as string, lc);
     }
   }
-  let sentEmail = 0, sentNtfy = 0, suppressed = 0, nearLimitAlerts = 0;
+  let sentEmail = 0, sentNtfy = 0, suppressed = 0, nearLimitAlerts = 0, cooldownBlocked = 0;
   const errors: string[] = [];
 
   // Onderdrukken: GEEN meldingen voor aandelen die de gebruiker al als 'gezien'
-  // of als favoriet heeft gemarkeerd (die kent hij al), en max 1 melding per
-  // ticker per dag (voorkomt bv. SNBR buy_limit_hit + buy_limit_close op 1 dag).
+  // of als favoriet heeft gemarkeerd (die kent hij al). De cooldown per ticker
+  // gaat verderop via de xinix_notify_gate-RPC.
   const suppressTickers = new Set<string>();
   {
     const [seenRes, favRes] = await Promise.all([
@@ -413,21 +432,9 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     for (const r of seenRes.data ?? []) suppressTickers.add(r.ticker as string);
     for (const r of favRes.data ?? []) suppressTickers.add(r.ticker as string);
   }
-  // Tickers die vandaag (UTC) al een geslaagde melding kregen → niet nogmaals.
-  const notifiedToday = new Set<string>();
-  {
-    const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
-    const { data: sentRows } = await sb.from("signal_alerts_sent").select("signal_id").eq("success", true).gte("sent_at", dayStart.toISOString());
-    const sentIds = Array.from(new Set((sentRows ?? []).map((r) => r.signal_id as number)));
-    for (let i = 0; i < sentIds.length; i += 200) {
-      const { data: evRows } = await sb.from("signal_events").select("ticker").in("id", sentIds.slice(i, i + 200));
-      for (const r of evRows ?? []) notifiedToday.add(r.ticker as string);
-    }
-  }
-
   for (const sig of signals) {
-    // Onderdruk favorieten/gezien + dubbele melding per dag (vóór alle andere logica).
-    if (suppressTickers.has(sig.ticker) || notifiedToday.has(sig.ticker)) {
+    // Onderdruk favorieten/gezien (vóór alle andere logica).
+    if (suppressTickers.has(sig.ticker)) {
       await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
       suppressed++;
       continue;
@@ -456,11 +463,20 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       suppressed++;
       continue;
     }
-    if (nearLimit) nearLimitAlerts++;
-
     const company = companyByTicker.get(sig.ticker) ?? null;
     const clickUrl = googleFinanceUrl(sig.ticker, exchangeByTicker.get(sig.ticker) ?? null);
     const view = formatAlert(sig, score, company, medals, clickUrl, isLimit, nearLimit);
+
+    // Cooldown-poort: is er binnen de cooldown-periode al een even urgente (of
+    // urgentere) melding voor dit aandeel de deur uit gegaan? Dan niet nogmaals.
+    const gate = await notifyGate(sb, sig.ticker, view.priority);
+    if (gate.error) errors.push(`cooldown-poort ${sig.ticker}: ${gate.error}`);
+    if (gate.row && !gate.row.allowed) {
+      await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
+      cooldownBlocked++;
+      continue;
+    }
+    if (nearLimit) nearLimitAlerts++;
 
     let anyAttempted = false;
     let anySent = false;
@@ -476,9 +492,12 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       await sb.from("signal_alerts_sent").insert({ signal_id: sig.id, channel: "ntfy", success: r.ok, error: r.error ?? null });
       if (r.ok) { sentNtfy++; anySent = true; } else errors.push(`ntfy ${sig.id}: ${r.error}`);
     }
-    // Eén geslaagde melding per ticker per dag: markeer 'm zodat volgende
-    // signalen voor dezelfde ticker (deze run én latere runs vandaag) wegvallen.
-    if (anySent) notifiedToday.add(sig.ticker);
+    // Leg de melding vast in het centrale grootboek, zodat de cooldown-poort
+    // (hier én in de andere meldingsfuncties) dit aandeel nu even overslaat.
+    if (anySent) {
+      const recErr = await notifyRecord(sb, sig.ticker, sig.signal_type, view.priority);
+      if (recErr) errors.push(`cooldown-log ${sig.ticker}: ${recErr}`);
+    }
     // Markeer alleen als 'verstuurd' wanneer minstens één kanaal slaagde, of
     // wanneer er geen kanaal is geconfigureerd. Bij totale mislukking blijft het
     // event open zodat de volgende run (binnen het 24u-venster) opnieuw probeert.
@@ -486,5 +505,5 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
       await sb.from("signal_events").update({ alerted: true }).eq("id", sig.id);
     }
   }
-  return { ok: errors.length === 0, message: `email: ${sentEmail}, ntfy: ${sentNtfy}, suppressed: ${suppressed}, near_limit: ${nearLimitAlerts}, phoenix_generated: ${phoenixGenerated}` + (errors.length ? `; errors: ${errors.slice(0, 3).join("; ")}` : ""), metrics: { email: sentEmail, ntfy: sentNtfy, suppressed, near_limit: nearLimitAlerts, errors: errors.length, total_signals: signals.length, phoenix_generated: phoenixGenerated } };
+  return { ok: errors.length === 0, message: `email: ${sentEmail}, ntfy: ${sentNtfy}, suppressed: ${suppressed}, cooldown: ${cooldownBlocked}, near_limit: ${nearLimitAlerts}, phoenix_generated: ${phoenixGenerated}` + (errors.length ? `; errors: ${errors.slice(0, 3).join("; ")}` : ""), metrics: { email: sentEmail, ntfy: sentNtfy, suppressed, cooldown_blocked: cooldownBlocked, near_limit: nearLimitAlerts, errors: errors.length, total_signals: signals.length, phoenix_generated: phoenixGenerated } };
 }));

@@ -256,6 +256,15 @@ function livelinessReasons(bars: Bar[]): string[] {
   return reasons;
 }
 
+// Deze functie meldt in batch (één ping met meerdere profielmatches) en heeft dus
+// geen eigen cooldown-poort nodig. Wel vastleggen wát er gepingd is, zodat de
+// gedeelde cooldown (xinix_notify_gate) weet dat deze aandelen net langs zijn
+// gekomen en de andere meldingsfuncties ze niet meteen opnieuw aankaarten.
+async function notifyRecord(sb: ReturnType<typeof getServiceClient>, tickers: string[], alertKey: string, priority: number): Promise<void> {
+  if (tickers.length === 0) return;
+  await sb.rpc("xinix_notify_record", { p_items: tickers.map((ticker) => ({ ticker, source: "scan-fallen-phoenix", alert_key: alertKey, priority })) });
+}
+
 async function sendNtfy(server: string, topic: string, title: string, body: string, priority: number, tags: string[], clickUrl?: string): Promise<boolean> {
   try {
     const payload: Record<string, unknown> = { topic, title, message: body, priority, tags };
@@ -392,7 +401,7 @@ Deno.serve(runBackground("scan-fallen-phoenix", async () => {
           const url = googleFinanceUrl(g.yahoo);
           return `\u{1F985} ${g.yahoo} — ${g.name}\n   piek $${g.peak.toFixed(g.peak < 5 ? 3 : 2)} → nu ~${g.lastClose.toFixed(g.lastClose < 5 ? 3 : 2)} (-${g.drawdownPct.toFixed(0)}%)\n   ${g.profileReasons.join(" · ")}\n📲 ${reviewUrl(g.yahoo)}\n🔗 ${url}`;
         });
-        await sendNtfy(
+        const ok = await sendNtfy(
           (settings?.ntfy_server as string) ?? "https://ntfy.sh",
           topic,
           `\u{2B50} ${matches.length} feniks die bij je profiel past`,
@@ -401,6 +410,7 @@ Deno.serve(runBackground("scan-fallen-phoenix", async () => {
           ["star", "bird"],
           sorted.length === 1 ? reviewUrl(sorted[0].yahoo) : undefined,
         );
+        if (ok) await notifyRecord(sb, sorted.map((g) => g.yahoo), "fallen_phoenix_gem", 5);
       }
     }
   }

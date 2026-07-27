@@ -136,6 +136,29 @@ function commonBlock(f: Fav): string[] {
   ];
 }
 
+// ── Globale notificatie-cooldown ─────────────────────────────────────────────
+// De cooldowns hierboven gelden per (ticker, alert_type). Losse tellers dus: een
+// aandeel dat onder de limiet zakt, daarna een 5y-low zet en dan de top 10
+// binnenkomt pingt drie keer in een paar dagen. De poort hieronder telt álle
+// meldingen van álle functies samen: max 1 per aandeel per cooldown-periode
+// (signal_settings.notify_cooldown_days), tenzij de nieuwe melding urgenter is
+// dan wat er binnen die periode al verstuurd is. Zie de xinix_notify_gate-RPC.
+interface GateRow { ticker: string; allowed: boolean; blocked_until: string | null; last_priority: number | null; last_source: string | null; cooldown_days: number }
+async function notifyGate(sb: ReturnType<typeof getServiceClient>, items: Array<{ ticker: string; priority: number }>): Promise<{ blocked: Map<string, GateRow>; error?: string }> {
+  const blocked = new Map<string, GateRow>();
+  if (items.length === 0) return { blocked };
+  const { data, error } = await sb.rpc("xinix_notify_gate", { p_items: items });
+  // Faalt de poort, dan liever een dubbele melding dan helemaal geen meldingen.
+  if (error) return { blocked, error: (error as { message?: string }).message ?? String(error) };
+  for (const r of (data ?? []) as GateRow[]) if (!r.allowed) blocked.set(r.ticker.toUpperCase(), r);
+  return { blocked };
+}
+async function notifyRecord(sb: ReturnType<typeof getServiceClient>, items: Array<{ ticker: string; source: string; alert_key: string; priority: number }>): Promise<string | null> {
+  if (items.length === 0) return null;
+  const { error } = await sb.rpc("xinix_notify_record", { p_items: items });
+  return error ? ((error as { message?: string }).message ?? String(error)) : null;
+}
+
 async function chunkedIn<T>(sb: ReturnType<typeof getServiceClient>, table: string, cols: string, tickers: string[]): Promise<T[]> {
   const out: T[] = [];
   for (let i = 0; i < tickers.length; i += 300) {
@@ -278,14 +301,23 @@ Deno.serve(runBackground("xinix-fav-alerts", async () => {
     }
   }
 
-  // Sorteer te-melden tickers op hoogste prioriteit, dan ticker; pas de veiligheidsklep toe.
+  // Sorteer te-melden tickers op hoogste prioriteit, dan ticker.
   const prioOf = (p: Pending) => Math.max(...p.reasons.map((r) => TYPE_META[r.type].priority));
   const notifyAll = [...perTicker.values()].sort((a, b) => prioOf(b) - prioOf(a) || a.fav.ticker.localeCompare(b.fav.ticker));
-  const toSend = notifyAll.slice(0, MAX_TICKER_ALERTS);
-  const overflow = notifyAll.length - toSend.length;
 
-  let sent = 0; const errors: string[] = [];
+  const errors: string[] = [];
+  // Globale cooldown vóór de veiligheidsklep: geblokkeerde tickers mogen geen
+  // plek in de MAX_TICKER_ALERTS-quota opsouperen.
+  const gate = await notifyGate(sb, notifyAll.map((p) => ({ ticker: p.fav.ticker, priority: prioOf(p) })));
+  if (gate.error) errors.push(`cooldown-poort: ${gate.error}`);
+  const passed = notifyAll.filter((p) => !gate.blocked.has(p.fav.ticker.toUpperCase()));
+  const cooldownBlocked = notifyAll.length - passed.length;
+  const toSend = passed.slice(0, MAX_TICKER_ALERTS);
+  const overflow = passed.length - toSend.length;
+
+  let sent = 0;
   const stateUpserts = [...stateUpsertsAlways];
+  const notifyLog: Array<{ ticker: string; source: string; alert_key: string; priority: number }> = [];
 
   for (const pend of toSend) {
     const f = pend.fav;
@@ -308,6 +340,7 @@ Deno.serve(runBackground("xinix-fav-alerts", async () => {
     if (r.ok) {
       sent++;
       for (const reason of pend.reasons) stateUpserts.push({ ticker: f.ticker, alert_type: reason.type, last_alert_at: nowIso, ref_close: f.last_close });
+      notifyLog.push({ ticker: f.ticker, source: "fav-alerts", alert_key: primary.type, priority });
     } else {
       errors.push(`${f.ticker}: ${r.error}`);
       // niet wegschrijven → volgende run probeert opnieuw
@@ -341,10 +374,12 @@ Deno.serve(runBackground("xinix-fav-alerts", async () => {
     const { error } = await sb.from("xinix_fav_alert_state").upsert(stateUpserts, { onConflict: "ticker,alert_type" });
     if (error) errors.push(`state upsert: ${(error as { message?: string }).message ?? String(error)}`);
   }
+  const recErr = await notifyRecord(sb, notifyLog);
+  if (recErr) errors.push(`cooldown-log: ${recErr}`);
 
   return {
     ok: errors.length === 0,
-    message: `favorieten: ${favs.length}, gemeld: ${sent}, baseline: ${seeded}${isFirstRun ? " (eerste run)" : ""}, overflow: ${overflow}` + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
-    metrics: { favorites: favs.length, notified: sent, seeded, overflow, first_run: isFirstRun, errors: errors.length },
+    message: `favorieten: ${favs.length}, gemeld: ${sent}, cooldown: ${cooldownBlocked}, baseline: ${seeded}${isFirstRun ? " (eerste run)" : ""}, overflow: ${overflow}` + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
+    metrics: { favorites: favs.length, notified: sent, cooldown_blocked: cooldownBlocked, seeded, overflow, first_run: isFirstRun, errors: errors.length },
   };
 }));

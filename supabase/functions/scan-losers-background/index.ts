@@ -277,6 +277,15 @@ function countMedals(barsArr: Bar[]): { gold: number; silver: number; bronze: nu
   return { gold: g, silver: s, bronze: b };
 }
 
+// Deze functie meldt in batch (één ping met meerdere vondsten) en heeft dus geen
+// eigen cooldown-poort nodig. Wel vastleggen wát er gepingd is, zodat de gedeelde
+// cooldown (xinix_notify_gate) weet dat deze aandelen net langs zijn gekomen en
+// de andere meldingsfuncties ze niet meteen opnieuw aankaarten.
+async function notifyRecord(sb: ReturnType<typeof getServiceClient>, tickers: string[], alertKey: string, priority: number): Promise<void> {
+  if (tickers.length === 0) return;
+  await sb.rpc("xinix_notify_record", { p_items: tickers.map((ticker) => ({ ticker, source: "scan-losers", alert_key: alertKey, priority })) });
+}
+
 async function sendNtfy(server: string, topic: string, title: string, body: string, clickUrl: string): Promise<boolean> {
   try {
     const payload: Record<string, unknown> = { topic, title, message: body, priority: 4, tags: ["medal"], click: clickUrl };
@@ -422,13 +431,14 @@ Deno.serve(runBackground("scan-losers", async () => {
         const clickUrl = sorted.length === 1
           ? reviewUrl(sorted[0].yahoo)
           : `${server.replace(/\/$/, "")}/${topic}`;
-        await sendNtfy(
+        const ok = await sendNtfy(
           server,
           topic,
           `🏆 ${notifyGems.length} grote daler${notifyGems.length > 1 ? "s" : ""} met medaille-track-record toegevoegd`,
           lines.join("\n\n") + "\n\nUit de TradingView 'biggest losers' van vandaag; nu in je watchlist.",
           clickUrl,
         );
+        if (ok) await notifyRecord(sb, sorted.map((g) => g.yahoo), "loser_gem", 4);
       }
     }
   }
