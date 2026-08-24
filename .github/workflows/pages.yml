@@ -55,13 +55,14 @@ jobs:
       - name: Add 404 fallback (Pages SPA routing)
         run: cp dist/index.html dist/404.html
 
-      # `enablement: true` maakt de Pages-site aan als die niet (meer) bestaat.
-      # Zonder dit faalt de deploy met "Get Pages site failed / Not Found" zodra
-      # Pages in de repo-instellingen is uitgezet — dan staat de site offline
-      # terwijl de build gewoon slaagt. Vereist `pages: write` (staat hierboven).
+      # Faalt deze stap met "Get Pages site failed ... Not Found", dan staat
+      # GitHub Pages uit in de repo-instellingen en staat de site offline
+      # terwijl de build gewoon slaagt. Fix: Settings -> Pages -> Source =
+      # "GitHub Actions". Niet vanuit CI te repareren: `enablement: true`
+      # geprobeerd op 2026-08-24 en dat geeft "Resource not accessible by
+      # integration" — een Pages-site aanmaken vereist admin-rechten, en de
+      # GITHUB_TOKEN heeft met `pages: write` alleen deploy-rechten.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
