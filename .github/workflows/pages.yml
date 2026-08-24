@@ -55,7 +55,13 @@ jobs:
       - name: Add 404 fallback (Pages SPA routing)
         run: cp dist/index.html dist/404.html
 
+      # `enablement: true` maakt de Pages-site aan als die niet (meer) bestaat.
+      # Zonder dit faalt de deploy met "Get Pages site failed / Not Found" zodra
+      # Pages in de repo-instellingen is uitgezet — dan staat de site offline
+      # terwijl de build gewoon slaagt. Vereist `pages: write` (staat hierboven).
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
