@@ -936,6 +936,57 @@ export async function addMarksBulk(kind: MarkKind, tickers: string[]): Promise<v
   if (!res.ok) throw new Error(`bulk add mark ${res.status}: ${await res.text()}`);
 }
 
+// ── Meldingen (ntfy-log + demping per aandeel) ───────────────────────
+// Het grootboek uit xinix_notify_log: wat is er wanneer over welk aandeel
+// verstuurd. Demping is los van de globale cooldown — zie MuteMonths.
+export interface NotifyLogRow {
+  id: number;
+  ticker: string;
+  source: string;
+  alert_key: string | null;
+  priority: number;
+  sent_at: string;
+  company: string | null;
+  exchange: string | null;
+}
+export interface NotifyMute {
+  ticker: string;
+  muted_until: string | null; // null = voorgoed
+  created_at: string;
+}
+export interface NotifyLogResponse {
+  rows: NotifyLogRow[];
+  mutes: NotifyMute[];
+  cooldown_days: number;
+}
+
+// null = voorgoed dempen.
+export type MuteMonths = 3 | 6 | 12 | null;
+
+export async function fetchNotifyLog(): Promise<NotifyLogResponse> {
+  const res = await fetch(apiUrl("/api/notify-log"), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`notify-log ${res.status}`);
+  return (await res.json()) as NotifyLogResponse;
+}
+
+export async function setNotifyMute(ticker: string, months: MuteMonths): Promise<void> {
+  const res = await fetch(apiUrl("/api/notify-log"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ticker, months }),
+  });
+  if (!res.ok) throw new Error(`demping zetten mislukt (${res.status}): ${await res.text()}`);
+}
+
+export async function clearNotifyMute(ticker: string): Promise<void> {
+  const res = await fetch(apiUrl("/api/notify-log"), {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ticker }),
+  });
+  if (!res.ok) throw new Error(`demping opheffen mislukt (${res.status}): ${await res.text()}`);
+}
+
 // ── Apparaat-koppeling ───────────────────────────────────────────────
 // Favorieten/markeringen staan server-side, maar een apparaat ziet ze
 // pas na invoer van het admin-token. Een koppelcode laat de telefoon
