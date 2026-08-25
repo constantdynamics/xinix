@@ -18,7 +18,8 @@ import {
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, CollapsibleIntro, Stat, Button, EmptyState } from "../components/ui";
-import { HeartCell, HeartHeader, SeenCell, SeenHeader, StarRating } from "../components/MarkCells";
+import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
+import { useMarks } from "../hooks/useMarks";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
 
@@ -123,6 +124,10 @@ export function MeldingenView() {
   const [sort, setSort] = useState<SortKey>("recent");
   const [q, setQ] = useState("");
   const [onlyMuted, setOnlyMuted] = useState(false);
+  // Gezien = afgehandeld: standaard uit beeld, en er komen ook geen ntfy-
+  // meldingen meer over. Met de toggle haal je ze er weer bij.
+  const [showSeen, setShowSeen] = useState(false);
+  const { isSeen, seen } = useMarks();
   const [busy, setBusy] = useState<string | null>(null);
   const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
 
@@ -150,6 +155,7 @@ export function MeldingenView() {
       );
     }
     if (onlyMuted) out = out.filter((r) => r.muted);
+    if (!showSeen) out = out.filter((r) => !isSeen(r.ticker));
     const sorted = [...out];
     sorted.sort((a, b) => {
       if (sort === "ticker") return a.ticker.localeCompare(b.ticker);
@@ -160,16 +166,20 @@ export function MeldingenView() {
       return bt - at;
     });
     return sorted;
-  }, [rows, q, onlyMuted, sort]);
+  }, [rows, q, onlyMuted, sort, showSeen, isSeen, seen]);
 
   const timeline = useMemo(() => {
     if (!data) return [];
     const needle = q.trim().toUpperCase();
-    if (!needle) return data.rows;
-    return data.rows.filter(
-      (r) => r.ticker.toUpperCase().includes(needle) || (r.company ?? "").toUpperCase().includes(needle),
-    );
-  }, [data, q]);
+    let out = data.rows;
+    if (!showSeen) out = out.filter((r) => !isSeen(r.ticker));
+    if (needle) {
+      out = out.filter(
+        (r) => r.ticker.toUpperCase().includes(needle) || (r.company ?? "").toUpperCase().includes(needle),
+      );
+    }
+    return out;
+  }, [data, q, showSeen, isSeen, seen]);
 
   // Demping zetten/opheffen werkt optimistisch niet — het is een zeldzame,
   // bewuste actie en een herlaadronde houdt de weergave gegarandeerd gelijk
@@ -188,16 +198,24 @@ export function MeldingenView() {
   }
 
   const mutedCount = rows.filter((r) => r.muted).length;
+  // Aandelen uit het log die al afgevinkt zijn — die krijgen niets meer,
+  // ongeacht wat er in de demping-kolom staat.
+  const seenSilenced = rows.filter((r) => isSeen(r.ticker)).length;
 
   return (
     <div className="space-y-4">
       <CollapsibleIntro title="Meldingen" icon={<GradientTabIcon tab="meldingen" />}>
         Elke ntfy-ping die is verstuurd, met per aandeel wat je ervan vond en of je er nog
         meldingen over wilt. Markeren werkt hetzelfde als elders: <strong>gezien</strong>,{" "}
-        <strong>hartje</strong> (favoriet) en <strong>sterren</strong> (1–5). Dempen is iets
-        anders dan de globale cooldown van {data?.cooldown_days ?? 14} dagen: die onderdrukt
-        alleen herhaling en laat een urgenter signaal er wél doorheen — een demping houdt
-        <strong> alles</strong> tegen, ook urgente meldingen, tot de gekozen termijn om is.
+        <strong>hartje</strong> (favoriet) en <strong>sterren</strong> (1–5).
+        {" "}
+        <strong>Gezien = afgehandeld</strong>: zo'n aandeel verdwijnt uit dit overzicht én je
+        krijgt er geen ntfy-meldingen meer over. Met <em>🔭 Toon gezien</em> haal je ze terug in
+        beeld; het vinkje weghalen zet de meldingen weer aan.
+        {" "}
+        Dempen is iets anders dan de globale cooldown van {data?.cooldown_days ?? 14} dagen: die
+        onderdrukt alleen herhaling en laat een urgenter signaal er wél doorheen — een demping
+        houdt <strong>alles</strong> tegen, ook urgente meldingen, tot de gekozen termijn om is.
       </CollapsibleIntro>
 
       {error && (
@@ -210,7 +228,8 @@ export function MeldingenView() {
         <Stat label="Meldingen" value={String(data?.rows.length ?? 0)} />
         <Stat label="Aandelen" value={String(rows.filter((r) => r.count > 0).length)} />
         <Stat label="Gedempt" value={String(mutedCount)} />
-        <Stat label="Cooldown" value={`${data?.cooldown_days ?? 14}d`} />
+        <Stat label="Gezien (stil)" value={String(seenSilenced)} />
+
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -241,6 +260,7 @@ export function MeldingenView() {
               <input type="checkbox" checked={onlyMuted} onChange={(e) => setOnlyMuted(e.target.checked)} />
               Alleen gedempte
             </label>
+            <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortKey)}
@@ -253,6 +273,8 @@ export function MeldingenView() {
             </select>
           </>
         )}
+
+        {view === "tijdlijn" && <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />}
 
         <div className="ml-auto">
           <Button size="sm" variant="secondary" onClick={() => void load()} disabled={loading}>
@@ -343,6 +365,7 @@ export function MeldingenView() {
                     <td className="px-3 py-2">
                       <MuteControl
                         row={r}
+                        seen={isSeen(r.ticker)}
                         busy={busy === r.ticker}
                         onChange={(m) => void applyMute(r.ticker, m)}
                       />
@@ -417,10 +440,12 @@ export function MeldingenView() {
 // dan wel voorgoed. Toont bij een actieve demping tot wanneer die loopt.
 function MuteControl({
   row,
+  seen,
   busy,
   onChange,
 }: {
   row: TickerRow;
+  seen: boolean;
   busy: boolean;
   onChange: (m: MuteMonths | "off") => void;
 }) {
@@ -428,6 +453,16 @@ function MuteControl({
 
   return (
     <div className="flex items-center gap-2">
+      {/* Gezien legt het aandeel al stil. Zonder deze badge zou de keuzelijst
+          "Ja, gewoon ontvangen" tonen terwijl er niets binnenkomt. */}
+      {seen && (
+        <span
+          className="px-1.5 py-0.5 rounded border border-fog-lime/40 text-fog-lime text-[10px] font-bold whitespace-nowrap"
+          title="Dit aandeel staat als gezien gemarkeerd en krijgt daarom geen ntfy-meldingen. Vinkje weghalen zet meldingen weer aan."
+        >
+          🔭 stil
+        </span>
+      )}
       <select
         disabled={busy}
         value={current === "until" ? "until" : current}
