@@ -92,10 +92,15 @@ async function scoreOneTicker(
       final_score: result.finalScore,
       action: result.action,
       flagged_warnings: result.warnings,
+      // Alleen de regels die daadwerkelijk triggerden opslaan. De niet-
+      // getriggerde regels zijn de complete gewichtencatalogus uit
+      // _shared/scoring — een constante die identiek op elke rij stond en
+      // ~90% van de tabel vulde. Niets leest ze: de Scores-tab filtert zelf
+      // op `triggered`, track-record gebruikt alleen `nearest_catalyst`.
       components: {
-        structural: structural.components,
-        catalyst: catalyst.components,
-        timing: timing.components,
+        structural: structural.components.filter((x) => x.triggered),
+        catalyst: catalyst.components.filter((x) => x.triggered),
+        timing: timing.components.filter((x) => x.triggered),
         nearest_catalyst: c.nearestCatalyst,
       },
       trade_setup: tradeSetup,
