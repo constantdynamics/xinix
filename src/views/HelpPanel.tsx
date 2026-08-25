@@ -46,7 +46,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         id: "meld-markeren",
         title: "Markeren — gezien · hartje · sterren",
         body:
-          "Dezelfde drie markeringen als op de andere tabbladen, en ze delen dezelfde opslag: wat je hier aanvinkt zie je terug op het Dashboard, in de Watchlist en bij Favorieten.\nGezien (vinkje) = ik heb ernaar gekeken. Hartje = favoriet, komt in de favorieten-lijst en wordt vaker gepolld. Sterren 1-5 = jouw waardering; een aandeel sterren geven maakt het automatisch favoriet.",
+          "Dezelfde drie markeringen als op de andere tabbladen, en ze delen dezelfde opslag: wat je hier aanvinkt zie je terug op het Dashboard, in de Watchlist en bij Favorieten.\nGezien (vinkje) = afgehandeld. Het aandeel verdwijnt uit dit overzicht en je krijgt er geen ntfy-meldingen meer over, ook geen urgente. Met de knop 'Toon gezien' haal je ze terug in beeld; het vinkje weghalen zet de meldingen weer aan.\nHartje = favoriet, komt in de favorieten-lijst en wordt vaker gepolld. Sterren 1-5 = jouw waardering; een aandeel sterren geven maakt het automatisch favoriet.\nLet op de combinatie: een favoriet die je ook als gezien afvinkt wordt stil, ook al staat hij in je favorieten. Wil je alerts blijven krijgen, laat het gezien-vinkje dan uit.",
       },
       {
         id: "meld-dempen",
