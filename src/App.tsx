@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardView } from "./views/Dashboard";
+import { MeldingenView } from "./views/Meldingen";
 import { SettingsView } from "./views/Settings";
 import { TickersView } from "./views/Tickers";
 import { LimitsView } from "./views/Limits";
@@ -60,6 +61,7 @@ class ViewErrorBoundary extends React.Component<
 // Tab -> pageId voor HelpPanel (uitleg onderaan elk tabblad).
 const HELP_PAGE: Record<Tab, string> = {
   dashboard: "dashboard",
+  meldingen: "meldingen",
   scores: "scores",
   tickers: "watchlist",
   limits: "limits",
@@ -377,6 +379,7 @@ export function App() {
           {tab === "dashboard" && data && (
             <DashboardView data={data} onRefresh={() => refresh(true)} onNavigate={setTab} />
           )}
+          {tab === "meldingen" && <MeldingenView />}
           {tab === "settings" && <SettingsView data={data ?? undefined} />}
           {tab === "tickers" && data && (
             <TickersView data={data} onRefresh={() => refresh(true)} />

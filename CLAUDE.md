@@ -234,6 +234,8 @@ Eén gecureerde portefeuille die altijd:
 | `xinix_paper_positions` | Open + gesloten posities single portfolio, incl. `partial_exits` |
 | `signal_runs` | Log van elke edge-function run |
 | `xinix_knowledge_exports` | Maandelijkse snapshots (JSON + markdown samenvatting) |
+| `xinix_notify_log` | Verstuurde ntfy-meldingen (ticker, bron, prioriteit, tijdstip; 365d retentie) |
+| `xinix_notify_mute` | Demping per aandeel: `muted_until` NULL = voorgoed |
 
 ---
 
@@ -241,6 +243,7 @@ Eén gecureerde portefeuille die altijd:
 
 | Datum | Wijziging |
 |---|---|
+| 2026-08-25 | **Meldingen-tabblad**: nieuw tabblad direct naast Dashboard (Hot or Not) met het ntfy-grootboek uit `xinix_notify_log` — per aandeel of als tijdlijn. Per aandeel markeren (gezien / hartje / sterren, hergebruikt `/api/marks`) en dempen: geen meldingen meer voor 3, 6 of 12 maanden of voorgoed. Nieuwe tabel `xinix_notify_mute` + edge function `notify-log`. `xinix_notify_gate` respecteert de demping; anders dan de cooldown is die absoluut — ook een hogere prioriteit breekt er niet doorheen. |
 | 2026-07-27 | **Globale notificatie-cooldown per aandeel**: nieuw grootboek `xinix_notify_log` + RPC's `xinix_notify_gate` / `xinix_notify_record`. Alle meldingsfuncties delen nu één teller: max 1 melding per aandeel per `signal_settings.notify_cooldown_days` (standaard 14 dagen, instelbaar in het Instellingen-tabblad, 0 = uit). Uitzondering: een melding met een strikt hogere ntfy-prioriteit dan wat er binnen de periode al verstuurd is, mag er wél door. Reden: de bestaande cooldowns telden per (ticker, alert_type) binnen één functie (7d onder-limiet, 30d lows, 180d top10/20) en functies wisten niets van elkaars meldingen — dus pingde één aandeel meerdere keren per week. `xinix-fav-alerts` en `dispatch-alerts` gaan door de poort (die laatste had alleen "1× per dag"); de batch-scanners loggen wat ze aankondigen. |
 | 2026-06-30 | **Favorieten-alerts**: nieuwe edge function `xinix-fav-alerts-background` stuurt gerichte ntfy-pings voor favorieten — >30% dagdaling, nieuw 5y/3y-low, nieuw in top-10/top-20 (op afstand tot limiet), onder de aankooplimiet, en ≥4★ met >20% dag- of >50% weekdaling. Elke melding bevat ticker, link, dagdaling%, afstand-tot-limiet% en sterren. Dedup per conditie via `xinix_fav_alert_state`, baseline-seeding op de eerste run tegen een flood, dagelijkse cron 07:00 UTC. `low_3y` toegevoegd aan `signal_price_summary` (berekend door compute-extremes, favorieten eerst). |
 | 2026-06-11 | **Onderhoudsronde**: gepagineerde fetches tegen de 10k-rijencap (sim/trade/evolve/sim-results/knowledge-export/equity-backfill), `ran_at`→`finished_at`-fix (evolutieruns werden nooit gelogd en nergens getoond), schrijffout-detectie + failure-logging in xinix-sim, álle actieve signalen meegenomen i.p.v. max 2000/3000, auth op kennisexport-POST, ErrorBoundary in de frontend |

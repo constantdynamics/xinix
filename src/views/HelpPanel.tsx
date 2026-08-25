@@ -32,6 +32,38 @@ function saveDismissed(s: Set<string>): void {
 }
 
 export const PAGE_HELP: Record<string, PageHelp> = {
+  meldingen: {
+    intro:
+      "Het grootboek van alle ntfy-pings die zijn verstuurd: welk aandeel, wanneer, door welke bron en met welke prioriteit. Per aandeel markeer je hier wat je ervan vond, en zet je of je er nog meldingen over wilt.",
+    blocks: [
+      {
+        id: "meld-views",
+        title: "Twee weergaven — Per aandeel · Tijdlijn",
+        body:
+          "Per aandeel = één regel per ticker, met het aantal meldingen, de laatste datum en de hoogste prioriteit die ooit is gebruikt. Hier markeer en demp je.\nTijdlijn = elke melding los, nieuwste eerst. Puur om terug te lezen wat er wanneer is gestuurd; markeren gebeurt per aandeel, niet per melding.",
+      },
+      {
+        id: "meld-markeren",
+        title: "Markeren — gezien · hartje · sterren",
+        body:
+          "Dezelfde drie markeringen als op de andere tabbladen, en ze delen dezelfde opslag: wat je hier aanvinkt zie je terug op het Dashboard, in de Watchlist en bij Favorieten.\nGezien (vinkje) = ik heb ernaar gekeken. Hartje = favoriet, komt in de favorieten-lijst en wordt vaker gepolld. Sterren 1-5 = jouw waardering; een aandeel sterren geven maakt het automatisch favoriet.",
+      },
+      {
+        id: "meld-dempen",
+        title: "Meldingen ontvangen — dempen per aandeel",
+        body:
+          "Kies per aandeel of je er nog ntfy-meldingen over wilt: gewoon ontvangen, of niet meer voor 3, 6 of 12 maanden, of voorgoed. Een demping die afloopt hoef je niet op te ruimen — daarna komen meldingen vanzelf weer door.\nLet op het verschil met de cooldown in Instellingen. De cooldown onderdrukt alleen herhaling (niet vaker dan eens per zoveel dagen) en laat een melding met een hogere prioriteit er wel doorheen. Een demping is absoluut: die houdt ook urgente meldingen tegen. Dat is bewust — je hebt expliciet gezegd dit aandeel niet meer te willen horen.",
+        example:
+          "Een aandeel dat je hebt afgeschreven zet je op 'Niet - 12 maanden'. Over een jaar komt het vanzelf weer in beeld als er dan nog steeds iets speelt.",
+      },
+      {
+        id: "meld-prio",
+        title: "Prio — ntfy-prioriteit 1 t/m 5",
+        body:
+          "De prioriteit waarmee de ping is verstuurd. 4 (hoog) en 5 (urgent) komen ook door een stille telefoon heen; 1 t/m 3 blijven rustig. De prioriteit bepaalt ook of een melding door de cooldown mag breken.",
+      },
+    ],
+  },
   dashboard: {
     intro:
       "Elke tegel is één aandeel uit je watchlist. De achtergrondkleur van de tegel zegt hoe 'koopwaardig' het er nu uitziet (heat). Hottere tegels staan bovenaan.",

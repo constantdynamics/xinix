@@ -3,6 +3,7 @@
 
 export type Tab =
   | "dashboard"
+  | "meldingen"
   | "scores"
   | "tickers"
   | "limits"
@@ -27,6 +28,7 @@ export interface TabDef {
 
 export const DEFAULT_TABS: TabDef[] = [
   { key: "dashboard", label: "Dashboard" },
+  { key: "meldingen", label: "Meldingen" },
   { key: "scores", label: "Scores" },
   { key: "tickers", label: "Watchlist" },
   { key: "limits", label: "Limieten" },
