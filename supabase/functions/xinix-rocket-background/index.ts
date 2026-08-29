@@ -155,6 +155,11 @@ Deno.serve(runBackground("xinix-rocket", async () => {
     "ticker, company, sector, yahoo_sector, exchange, market_cap_usd, share_count_millions, dividend_yield, " +
     "is_hikkertje, hikkertje_spikes, is_poefie, poefie_max_growth_pct, poefie_incidents, medal_gold",
     (q) => q.eq("active", true));
+  // De vervalcurve is een algemene regelmaat, geen eigenschap van de huidige
+  // watchlist: kalibreer op het HELE archief (ook inactief geworden tickers),
+  // anders gooi je een derde van de waarnemingen weg.
+  const archive = await fetchAll<any>(sb, "signal_tickers", "ticker, poefie_incidents",
+    (q) => q.not("poefie_incidents", "is", null));
   const prices = await fetchAll<any>(sb, "signal_price_summary",
     "ticker, last_close, avg_volume_30d, pct_change_22d, high_5y, low_1y");
   const favs = await fetchAll<any>(sb, "xinix_favorites", "ticker, rating");
@@ -174,10 +179,12 @@ Deno.serve(runBackground("xinix-rocket", async () => {
   }
 
   // ── Kalibratie: meet de vervalcurve opnieuw uit het archief ────────────────
-  const incidentRows = tickers.filter((t) => Array.isArray(t.poefie_incidents) && t.poefie_incidents.length);
-  const byTicker = flattenIncidents(incidentRows);
-  const curve = calibrateCurve(byTicker, nowMs);
-  const totalIncidents = [...byTicker.values()].reduce((n, l) => n + l.length, 0);
+  const archiveAll = flattenIncidents(archive);
+  const curve = calibrateCurve(archiveAll, nowMs);
+  const totalIncidents = [...archiveAll.values()].reduce((n, l) => n + l.length, 0);
+  // Scoren gebeurt wél alleen op de actieve watchlist.
+  const byTicker = flattenIncidents(
+    tickers.filter((t) => Array.isArray(t.poefie_incidents) && t.poefie_incidents.length));
 
   // Basiskans voor aandelen zónder explosie-historie: meet live op de watchlist
   // (hoeveel van hen doen op dit moment >=150% in 22 dagen?) en krimp naar de
@@ -290,6 +297,15 @@ Deno.serve(runBackground("xinix-rocket", async () => {
     } else if (dollarVol != null && dollarVol < 20000) {
       mul("Handelbaarheid", `slechts $${Math.round(dollarVol / 1000)}k omzet per dag`, 0.85);
       flags.push("illiquide");
+      tradeable = false;
+    }
+
+    // Beursgenoteerde shell: de explosie is echt, maar het vehikel is een lege
+    // huls (plaatsing of omgekeerde overname, geen herwaardering om op mee te
+    // liften). Geen kansstraf — gemeten exploderen die juist het vaakst — wel
+    // een vlag, zodat het handelbaar-filter ze eruit haalt.
+    if (mcap != null && mcap < 2e6) {
+      flags.push("shell <$2 mln");
       tradeable = false;
     }
 
