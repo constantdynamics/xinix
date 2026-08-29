@@ -377,6 +377,85 @@ export async function fetchScanResults(): Promise<ScanResults> {
   return (await res.json()) as ScanResults;
 }
 
+// ── Raketten (150% in 30 dagen) ──────────────────────────────────────────────
+// Maandelijkse ranglijst uit xinix-rocket-background: de kans dat een aandeel
+// de komende 6 maanden ergens een maand van +150% maakt. Volledig
+// voorberekend in de backend — de frontend rekent niets zelf uit.
+export interface RocketFactor {
+  label: string;
+  detail: string;
+  /** Vermenigvuldiger op de kans; 1 = neutraal (alleen toelichting). */
+  mult: number;
+}
+export interface RocketItem {
+  ticker: string;
+  rank: number;
+  /** Geschatte kans (%) op >=150% binnen ~30 dagen, in de komende 6 maanden. */
+  prob_6m: number;
+  /** Basiskans uit de vervalcurve, vóór de vermenigvuldigers. */
+  base_prob: number;
+  days_since_explosion: number | null;
+  company: string | null;
+  sector: string | null;
+  exchange: string | null;
+  last_close: number | null;
+  market_cap_usd: number | null;
+  dollar_volume: number | null;
+  pct_change_22d: number | null;
+  pct_below_high5y: number | null;
+  max_explosion_pct: number | null;
+  catalyst_date: string | null;
+  catalyst_type: string | null;
+  explosion_count: number;
+  is_favorite: boolean;
+  rating: number | null;
+  tradeable: boolean;
+  factors: RocketFactor[];
+  flags: string[];
+  computed_at: string;
+}
+export interface RocketCurvePoint {
+  days: number;
+  prob_pct: number;
+  n: number;
+  hits: number;
+}
+export interface RocketCalibration {
+  computed_at: string;
+  curve: RocketCurvePoint[];
+  base_rate_6m: number | null;
+  incidents: number | null;
+  tickers_scored: number | null;
+}
+export interface RocketResponse {
+  items: RocketItem[];
+  calibration: RocketCalibration | null;
+  favorite_count: number;
+  computed_at: string | null;
+}
+
+// Handmatig herberekenen (admin) — draait dezelfde scan als de maandelijkse cron.
+// Roept de achtergrondfunctie direct aan, net als triggerDoublingResearch.
+export async function triggerRocketScan(): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(apiUrl("/api/xinix-rocket-background"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`rocket-scan ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; message?: string };
+}
+
+export async function fetchRocketScores(opts?: { limit?: number; favoritesOnly?: boolean }): Promise<RocketResponse> {
+  const qs = new URLSearchParams();
+  if (opts?.limit) qs.set("limit", String(opts.limit));
+  if (opts?.favoritesOnly) qs.set("favorites", "1");
+  const suffix = qs.toString() ? `?${qs}` : "";
+  const res = await fetch(apiUrl(`/api/rocket-scores${suffix}`));
+  if (!res.ok) throw new Error(`rocket-scores ${res.status}`);
+  return (await res.json()) as RocketResponse;
+}
+
 // ── Verdubbelaars research-overlay ───────────────────────────────────────────
 // Per favoriet samengevatte research (katalysatoren, materiële SEC-meldingen,
 // cash runway, …), elke ~15 dagen ververst door xinix-doubling-research-background.

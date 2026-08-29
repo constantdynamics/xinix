@@ -20,7 +20,7 @@ import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRatin
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
-import { VerdubbelaarsView } from "./Verdubbelaars";
+import { RakettenView } from "./Raketten";
 import { StarScannerView } from "./StarScanner";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
@@ -600,7 +600,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
       <div className="flex items-center gap-1 border-b border-ink-5">
         {([
           ["lijst", "♥ Lijst"],
-          ["verdubbelaars", "🚀 Verdubbelaars"],
+          ["verdubbelaars", "🚀 Raketten"],
           ["scanner", "🌟 Scanner"],
         ] as Array<[FavSubTab, string]>).map(([key, label]) => (
           <button
@@ -618,7 +618,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
       </div>
 
       {subTab === "verdubbelaars" ? (
-        <VerdubbelaarsView dashboard={dashboard} scans={scans} />
+        <RakettenView />
       ) : subTab === "scanner" ? (
         <StarScannerView scans={scans} />
       ) : (
