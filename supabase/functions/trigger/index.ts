@@ -23,6 +23,7 @@ const JOBS = [
   "compute-poefies-background",
   "compute-zwitserleven-background",
   "poll-briefing-background",
+  "xinix-rocket-background",
 ];
 
 Deno.serve(async (req) => {
