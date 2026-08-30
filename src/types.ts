@@ -10,6 +10,10 @@ export interface PriceSummary {
   pct_above_90d_low: number | null;
   pct_change_1d: number | null;
   pct_change_5d: number | null;
+  // ~1 maand (22 handelsdagen) en ~6 maanden (laatste slotkoers >=182 dagen
+  // terug); beide gevuld door poll-prices. NULL = te korte koershistorie.
+  pct_change_22d?: number | null;
+  pct_change_6mo?: number | null;
   avg_volume_30d: number | null;
   volume_ratio: number | null;
   // v1.2 — extremes; gevuld door compute-extremes-background (wekelijks)
