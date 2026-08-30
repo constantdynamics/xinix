@@ -16,11 +16,14 @@ function runBackground(job: string, fn: () => Promise<RunResult>) { return async
 // Backfill van signal_price_summary.pct_change_6mo (~6 maanden koersverandering,
 // getoond als 6M-kolom op het Favorieten-tabblad).
 //
-// poll-prices vult die kolom alleen als de beurs van een ticker open is; bij een
-// nieuwe kolom duurt het daardoor tot de volgende handelsdag voor er iets staat.
-// Deze functie kan altijd draaien en raakt uitsluitend die ene kolom aan — geen
-// koersen, geen signalen, geen poll-status. Draai hem tot "0 bijgewerkt".
-// Favorieten gaan voor, want daar wordt de kolom getoond.
+// poll-prices vult die kolom alleen als de beurs van een ticker open is; een
+// nieuwe favoriet buiten beursuren blijft daardoor op "—" staan. Deze functie
+// kan altijd draaien en raakt uitsluitend die ene kolom aan — geen koersen,
+// geen signalen, geen poll-status.
+//
+// Alleen favorieten: de 6M-kolom staat alleen op het Favorieten-tabblad, dus de
+// rest van de watchlist is hier geen Yahoo-calls waard. Die tickers krijgen hun
+// waarde vanzelf bij de volgende poll-prices-run met open beurs.
 const BUDGET_MS = 110_000;
 const PAGE = 1000;
 const YAHOO_DELAY_MS = 120;
@@ -62,17 +65,14 @@ Deno.serve(runBackground("backfill-6mo", async () => {
   const sb = getServiceClient();
   const startMs = Date.now();
 
-  const missing = await pageTickers((f, t) => sb.from("signal_price_summary").select("ticker").is("pct_change_6mo", null).order("ticker").range(f, t));
-  if (missing.length === 0) return { ok: true, message: "alle tickers hebben al een 6M-waarde", metrics: { candidates: 0 } };
-
+  const missing = new Set(await pageTickers((f, t) => sb.from("signal_price_summary").select("ticker").is("pct_change_6mo", null).order("ticker").range(f, t)));
   // Gebenchte en inactieve tickers overslaan — die geven toch een Yahoo-fout en
   // kosten alleen tijdsbudget.
   const skipSet = new Set(await pageTickers((f, t) => sb.from("signal_tickers").select("ticker").or("price_benched.eq.true,active.eq.false").order("ticker").range(f, t)));
   const { data: favData } = await sb.from("xinix_favorites").select("ticker");
-  const favSet = new Set((favData ?? []).map((f) => f.ticker as string));
 
-  const candidates = missing.filter((t) => !skipSet.has(t));
-  candidates.sort((a, b) => (favSet.has(b) ? 1 : 0) - (favSet.has(a) ? 1 : 0));
+  const candidates = (favData ?? []).map((f) => f.ticker as string).filter((t) => missing.has(t) && !skipSet.has(t));
+  if (candidates.length === 0) return { ok: true, message: "alle favorieten hebben al een 6M-waarde", metrics: { candidates: 0 } };
 
   let processed = 0, updated = 0, short = 0, failed = 0;
   const errors: string[] = [];
@@ -102,7 +102,7 @@ Deno.serve(runBackground("backfill-6mo", async () => {
   const remaining = candidates.length - processed;
   return {
     ok: failed < Math.max(processed / 2, 1),
-    message: `${updated} bijgewerkt, ${short} te korte historie, ${failed} mislukt, ${remaining} nog te doen` + (errors.length ? `; bv: ${errors.slice(0, 3).join("; ")}` : ""),
+    message: `${updated} favorieten bijgewerkt, ${short} te korte historie, ${failed} mislukt, ${remaining} nog te doen` + (errors.length ? `; bv: ${errors.slice(0, 3).join("; ")}` : ""),
     metrics: { candidates: candidates.length, processed, updated, short_history: short, failed, remaining },
   };
 }));
