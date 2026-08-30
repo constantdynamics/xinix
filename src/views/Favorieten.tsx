@@ -52,6 +52,12 @@ interface FavRow {
   buy_limit: number | null;
   above_limit_pct: number | null;
   dividend_yield: number | null;
+  // Koersverandering in % over de laatste dag, week (~5 handelsdagen),
+  // maand (~22 handelsdagen) en ~6 maanden. NULL = geen koersdata.
+  chg_1d: number | null;
+  chg_1w: number | null;
+  chg_1m: number | null;
+  chg_6m: number | null;
   medal_gold: number;
   medal_silver: number;
   medal_bronze: number;
@@ -61,7 +67,9 @@ interface FavRow {
   orphan: boolean;
 }
 
-type SortKey = "ticker" | "company" | "score" | "above_limit_pct" | "last_close" | "rating" | "medals" | "dividend";
+type SortKey =
+  | "ticker" | "company" | "score" | "above_limit_pct" | "last_close" | "rating" | "medals" | "dividend"
+  | "chg_1d" | "chg_1w" | "chg_1m" | "chg_6m";
 type SortDir = "asc" | "desc";
 type ViewMode = "table" | "tiles";
 
@@ -80,6 +88,18 @@ function fmtPrice(v: number | null): string {
 function fmtYield(v: number | null): string {
   if (v == null || v <= 0) return "—";
   return `${(v * 100).toFixed(1)}%`;
+}
+
+// Koersverandering in %: groen bij winst, rood bij verlies, streepje als de
+// koershistorie te kort is (of de ticker geen koersdata heeft).
+function ChangePct({ value, className }: { value: number | null; className?: string }) {
+  if (value == null) return <span className={`text-neutral-600 ${className ?? ""}`}>—</span>;
+  const tone = value > 0 ? "text-fog-gain" : value < 0 ? "text-fog-loss" : "text-neutral-400";
+  return (
+    <span className={`${tone} ${className ?? ""}`}>
+      {value < 0 ? "−" : "+"}{Math.abs(value).toFixed(1)}%
+    </span>
+  );
 }
 
 // Geeft "Xd" als de koers meer dan 2 dagen oud is (mogelijk gemiste poll).
@@ -103,6 +123,10 @@ const FAV_COLUMNS: ColumnMeta[] = [
   { key: "medals", label: "Medailles" },
   { key: "dividend", label: "Dividend" },
   { key: "last_close", label: "Koers" },
+  { key: "chg_1d", label: "Δ 1 dag" },
+  { key: "chg_1w", label: "Δ 1 week" },
+  { key: "chg_1m", label: "Δ 1 maand" },
+  { key: "chg_6m", label: "Δ 6 maanden" },
   { key: "above_limit_pct", label: "vs limiet" },
   { key: "limiet", label: "Limiet" },
 ];
@@ -249,6 +273,10 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         buy_limit,
         above_limit_pct,
         dividend_yield: card?.dividend_yield ?? null,
+        chg_1d: card?.summary?.pct_change_1d ?? null,
+        chg_1w: card?.summary?.pct_change_5d ?? null,
+        chg_1m: card?.summary?.pct_change_22d ?? null,
+        chg_6m: card?.summary?.pct_change_6mo ?? null,
         medal_gold: card?.medal_gold ?? 0,
         medal_silver: card?.medal_silver ?? 0,
         medal_bronze: card?.medal_bronze ?? 0,
@@ -325,6 +353,10 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         case "rating": av = marks.getRating(a.ticker); bv = marks.getRating(b.ticker); break;
         case "medals": av = a.medal_gold * 100 + a.medal_silver * 10 + a.medal_bronze; bv = b.medal_gold * 100 + b.medal_silver * 10 + b.medal_bronze; break;
         case "dividend": av = a.dividend_yield; bv = b.dividend_yield; break;
+        case "chg_1d": av = a.chg_1d; bv = b.chg_1d; break;
+        case "chg_1w": av = a.chg_1w; bv = b.chg_1w; break;
+        case "chg_1m": av = a.chg_1m; bv = b.chg_1m; break;
+        case "chg_6m": av = a.chg_6m; bv = b.chg_6m; break;
       }
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
@@ -535,6 +567,54 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           </td>
         );
       },
+    },
+    chg_1d: {
+      th: (
+        <th
+          className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+          title="Koersverandering sinds de vorige slotkoers"
+          onClick={() => toggleSort("chg_1d")}
+        >
+          1D <span className="text-fog-lime text-[9px]">{sortArrow("chg_1d")}</span>
+        </th>
+      ),
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1d} /></td>,
+    },
+    chg_1w: {
+      th: (
+        <th
+          className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+          title="Koersverandering over ~1 week (5 handelsdagen)"
+          onClick={() => toggleSort("chg_1w")}
+        >
+          1W <span className="text-fog-lime text-[9px]">{sortArrow("chg_1w")}</span>
+        </th>
+      ),
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1w} /></td>,
+    },
+    chg_1m: {
+      th: (
+        <th
+          className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+          title="Koersverandering over ~1 maand (22 handelsdagen)"
+          onClick={() => toggleSort("chg_1m")}
+        >
+          1M <span className="text-fog-lime text-[9px]">{sortArrow("chg_1m")}</span>
+        </th>
+      ),
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1m} /></td>,
+    },
+    chg_6m: {
+      th: (
+        <th
+          className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+          title="Koersverandering over ~6 maanden"
+          onClick={() => toggleSort("chg_6m")}
+        >
+          6M <span className="text-fog-lime text-[9px]">{sortArrow("chg_6m")}</span>
+        </th>
+      ),
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_6m} /></td>,
     },
     above_limit_pct: {
       th: (
@@ -753,6 +833,10 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
               ["medals", "Medailles"],
               ["dividend", "Dividend"],
               ["last_close", "Koers"],
+              ["chg_1d", "1D"],
+              ["chg_1w", "1W"],
+              ["chg_1m", "1M"],
+              ["chg_6m", "6M"],
               ["ticker", "Ticker"],
             ] as Array<[SortKey, string]>).map(([key, label]) => (
               <button
@@ -898,6 +982,16 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
             <div className="text-[10px] font-mono tabular-nums text-neutral-500 mt-0.5">
               {r.last_close != null ? `$${fmtPrice(r.last_close)}` : "—"}
               {r.buy_limit != null && <span className="text-neutral-600"> / lim ${fmtPrice(r.buy_limit)}</span>}
+            </div>
+            {/* Koersverandering over dag/week/maand/half jaar — zelfde vier
+                waarden als de kolommen in de lijstweergave. */}
+            <div className="grid grid-cols-4 gap-0.5 mt-1 text-center font-mono tabular-nums">
+              {([["1D", r.chg_1d], ["1W", r.chg_1w], ["1M", r.chg_1m], ["6M", r.chg_6m]] as Array<[string, number | null]>).map(([label, v]) => (
+                <div key={label}>
+                  <div className="text-[8px] uppercase tracking-wider text-neutral-600 font-bold">{label}</div>
+                  <ChangePct value={v} className="text-[10px]" />
+                </div>
+              ))}
             </div>
             <div className="mt-1"><StarRating ticker={r.ticker} /></div>
             <div className="flex items-center gap-1.5 mt-1 text-[10px]">
