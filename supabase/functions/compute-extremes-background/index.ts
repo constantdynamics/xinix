@@ -116,6 +116,14 @@ Deno.serve(runBackground("compute-extremes", async () => {
     todo.sort((a, b) => (favSet.has(b) ? 1 : 0) - (favSet.has(a) ? 1 : 0));
   }
 
+  // Percentage boven de 5y-bodem voor de automatische buy_limit. Staat in
+  // signal_settings zodat het inlaad-paneel op Favorieten en deze job
+  // dezelfde regel volgen. Valt terug op 10 (het historische gedrag) als
+  // de instelling ontbreekt.
+  const { data: cfg } = await sb.from("signal_settings").select("limit_suggest_pct").eq("id", 1).maybeSingle();
+  const rawPct = Number((cfg as { limit_suggest_pct?: unknown } | null)?.limit_suggest_pct);
+  const limitPct = Number.isFinite(rawPct) && rawPct >= 0 ? rawPct : 10;
+
   const batch = todo.slice(0, MAX_PER_RUN);
   let updated = 0, failed = 0, processed = 0, notFound = 0;
   const errors: string[] = [];
@@ -147,11 +155,11 @@ Deno.serve(runBackground("compute-extremes", async () => {
       const { error: e1 } = await sb.from("signal_price_summary").upsert({
         ticker, low_1y: oneY.low, high_1y: oneY.high, low_3y: threeY.low, low_5y: fiveY.low, high_5y: fiveY.high, last_extremes_at: now.toISOString(),
       }, { onConflict: "ticker" });
-      // Slimme buy_limit-default: 10% boven 5y-low. Alleen vullen als
+      // Slimme buy_limit-default: limitPct% boven 5y-low. Alleen vullen als
       // de gebruiker er nog geen heeft ingesteld (handmatige waarden
       // overschrijven we niet).
       const smartLimit = fiveY.low != null && fiveY.low > 0
-        ? Number((fiveY.low * 1.10).toFixed(fiveY.low < 1 ? 4 : fiveY.low < 10 ? 3 : 2))
+        ? Number((fiveY.low * (1 + limitPct / 100)).toFixed(fiveY.low < 1 ? 4 : fiveY.low < 10 ? 3 : 2))
         : null;
       const tickerUpdate: Record<string, unknown> = {
         medal_gold: medals.gold, medal_silver: medals.silver, medal_bronze: medals.bronze, medals_computed_at: now.toISOString(),

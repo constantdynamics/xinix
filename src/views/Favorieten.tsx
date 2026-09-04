@@ -1189,7 +1189,7 @@ function BulkAddFavoritesPanel({ onClose, onDone }: { onClose: () => void; onDon
   // Sector die alle nieuwe rijen krijgen (auto = raden uit de bedrijfsnaam).
   const [bulkSector, setBulkSector] = useState<Sector | "auto">("auto");
   const [modus, setModus] = useState<SuggestieModus>("low5y");
-  const [pct, setPct] = useState<string>("5");
+  const [pct, setPct] = useState<string>("10");
 
   // Standaardpercentage uit de instellingen; per sessie te overrulen.
   useEffect(() => {
@@ -1199,7 +1199,7 @@ function BulkAddFavoritesPanel({ onClose, onDone }: { onClose: () => void; onDon
         if (s.limit_suggest_pct != null) setPct(String(s.limit_suggest_pct));
       })
       .catch(() => {
-        // Geen instellingen (of geen token) — de 5% default blijft staan.
+        // Geen instellingen (of geen token) — de 10% default blijft staan.
       });
   }, []);
 

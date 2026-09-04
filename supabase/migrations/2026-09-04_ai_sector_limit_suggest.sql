@@ -18,14 +18,19 @@ alter table public.signal_scores add constraint signal_scores_sector_check
 update public.signal_tickers set briefing_status = 'not_applicable'
  where sector = 'ai' and (briefing_status is null or briefing_status = 'pending');
 
--- 2. Voorgestelde aankooplimiet bij het inladen: X% boven de 5-jaarsbodem.
---    Tot nu toe was dit hardcoded in de scan-functies (eerst 5y-low × 1,10,
---    sinds 2026-05-20 exact de 5y-low). Nu instelbaar, met 5% als standaard.
+-- 2. Voorgestelde aankooplimiet: X% boven de 5-jaarsbodem, nu instelbaar.
+--    Er waren twee regels naast elkaar: compute-extremes-background vult
+--    automatisch 5y-low × 1,10 voor tickers zonder limiet, terwijl de
+--    scan-functies sinds 2026-05-20 exact de 5y-low zetten (die scans
+--    selecteren juist aandelen bij hun bodem, dus 10% erboven was daar al
+--    geraakt). Deze instelling stuurt vanaf nu zowel het inlaad-paneel op
+--    Favorieten als compute-extremes. Default 10 = het bestaande gedrag,
+--    zodat de dagelijkse job niet stilzwijgend verandert.
 alter table public.signal_settings
-  add column if not exists limit_suggest_pct numeric not null default 5;
+  add column if not exists limit_suggest_pct numeric not null default 10;
 
 comment on column public.signal_settings.limit_suggest_pct is
-  'Standaard-suggestie voor de aankooplimiet bij het inladen van aandelen: percentage boven de 5-jaarsbodem (5 = 5y-low x 1,05). Per inlaadsessie te overrulen.';
+  'Percentage boven de 5-jaarsbodem voor de aankooplimiet-suggestie (10 = 5y-low x 1,10). Gebruikt door het inlaad-paneel op Favorieten en door compute-extremes-background voor tickers zonder limiet. Per inlaadsessie te overrulen.';
 
 -- 3. Breedte per tabblad: 'normaal' (1280px) / 'breed' (1800px) / 'vol'
 --    (volledige schermbreedte). Leeg = de app-default (breed).
