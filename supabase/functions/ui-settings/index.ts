@@ -12,6 +12,7 @@ import {
 interface TableColumnPref {
   order: string[];
   hidden: string[];
+  colors?: Record<string, string>;
 }
 
 interface UiSettings {
@@ -83,7 +84,17 @@ Deno.serve(async (req) => {
       if (typeof tab !== "string" || tab.length > 64) continue;
       if (!pref || typeof pref !== "object" || Array.isArray(pref)) continue;
       const p = pref as Record<string, unknown>;
-      clean[tab] = { order: strings(p.order), hidden: strings(p.hidden) };
+      const entry: TableColumnPref = { order: strings(p.order), hidden: strings(p.hidden) };
+      // Alleen hex-kleuren doorlaten; de waarde belandt in een style-attribuut.
+      if (p.colors && typeof p.colors === "object" && !Array.isArray(p.colors)) {
+        const kleuren: Record<string, string> = {};
+        for (const [col, hex] of Object.entries(p.colors as Record<string, unknown>).slice(0, 128)) {
+          if (typeof col !== "string" || col.length > 64) continue;
+          if (typeof hex === "string" && /^#[0-9a-fA-F]{6}$/.test(hex)) kleuren[col] = hex;
+        }
+        entry.colors = kleuren;
+      }
+      clean[tab] = entry;
     }
     update.table_columns = clean;
   }

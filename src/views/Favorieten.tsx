@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
   addMark,
   batchAddTickers,
@@ -20,6 +20,7 @@ import { Card, Button, Badge, Select, Stat, CollapsibleIntro } from "../componen
 import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
+import { useColumnColors } from "../hooks/useUiSettings";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
 import { RakettenView } from "./Raketten";
@@ -136,6 +137,17 @@ function priceAge(polledAt: string | null): string | null {
   return `${Math.floor(days / 30)}mnd`;
 }
 
+// Zet de gekozen kolomkleur op de cel. De CSS-regel voor .col-tint forceert
+// 'm ook op de inhoud, want cellen bevatten spans met een eigen text-kleur.
+function tintCell(cell: ReactNode, hex: string | undefined): ReactNode {
+  if (!hex || !isValidElement(cell)) return cell;
+  const el = cell as ReactElement<{ className?: string; style?: React.CSSProperties }>;
+  return cloneElement(el, {
+    className: `${el.props.className ?? ""} col-tint`,
+    style: { ...(el.props.style ?? {}), ["--col-tint" as string]: hex },
+  });
+}
+
 // Tabelkolommen voor de kolom-kiezer. Ticker is de vaste anker-kolom
 // (altijd zichtbaar, altijd vooraan).
 const FAV_COLUMNS: ColumnMeta[] = [
@@ -211,6 +223,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
 
   const isAdmin = !!getToken();
   const { visibleKeys } = useColumnLayout("favorieten", FAV_COLUMNS, "ticker");
+  const columnColors = useColumnColors("favorieten");
 
   // Sync dashboard/scans wanneer de parent ze (later) doorgeeft — anders
   // zelf één keer fetchen. Wanneer beide al binnen zijn slaan we de fetch
@@ -937,9 +950,13 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
             <ColumnPicker tabKey="favorieten" columns={FAV_COLUMNS} lockedKey="ticker" />
           </div>
           <Card className="p-0 overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Eén scroll-container voor horizontaal én verticaal, zodat de
+                kopregel er sticky binnen kan blijven staan. Sticky t.o.v. de
+                pagina kan niet: de app-header is zelf al sticky en een
+                overflow-container breekt de koppeling met de viewport. */}
+            <div className="overflow-auto max-h-[calc(100vh-15rem)] [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:bg-ink-3">
               <table className="w-full text-sm">
-                <thead className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                <thead className="border-b border-ink-5 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
                   <tr>
                     <SeenHeader />
                     <HeartHeader />
@@ -947,12 +964,16 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-5/40">
-                  {filtered.map((r) => {
+                  {filtered.map((r, i) => {
                     const seen = marks.isSeen(r.ticker);
-                    const cls = [
-                      seen ? "opacity-50" : "",
-                      r.orphan ? "bg-fog-warn/[0.06]" : "",
-                    ].filter(Boolean).join(" ");
+                    // Zebra: oneven rijen een haartje lichter, puur om de
+                    // regels uit elkaar te houden bij veel kolommen.
+                    const bg = r.orphan
+                      ? "bg-fog-warn/[0.06]"
+                      : i % 2 === 1
+                      ? "bg-white/[0.022]"
+                      : "";
+                    const cls = [seen ? "opacity-50" : "", bg].filter(Boolean).join(" ");
                     return (
                       <tr
                         key={r.ticker}
@@ -961,7 +982,9 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
                       >
                         <SeenCell ticker={r.ticker} />
                         <HeartCell ticker={r.ticker} />
-                        {visibleKeys.map((k) => <Fragment key={k}>{colMap[k]?.td(r)}</Fragment>)}
+                        {visibleKeys.map((k) => (
+                          <Fragment key={k}>{tintCell(colMap[k]?.td(r), columnColors[k])}</Fragment>
+                        ))}
                       </tr>
                     );
                   })}
