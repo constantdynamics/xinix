@@ -84,9 +84,9 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
       {
         id: "dash-sector",
-        title: "Sector-badge — BIO / MIN / OTH",
+        title: "Sector-badge — BIO / MIN / AI / OTH",
         body:
-          "Biotech, Mining of Overig. Bepaalt ook welke scoring-gewichten gebruikt worden (een biotech wordt op andere dingen beoordeeld dan een mijnbouwer).",
+          "Biotech, Mining, AI of Overig. Bepaalt ook welke scoring-gewichten gebruikt worden (een biotech wordt op andere dingen beoordeeld dan een mijnbouwer). AI en Overig worden niet algoritmisch gescoord: die volg je op koers, limiet en medailles.",
       },
       {
         id: "dash-score",
@@ -222,9 +222,9 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     blocks: [
       {
         id: "wl-sector",
-        title: "Sector — biotech / mining / other",
+        title: "Sector — biotech / mining / ai / other",
         body:
-          "Bepaalt welke scoring-gewichten en welke nieuws-bronnen gebruikt worden. Wordt bij het toevoegen automatisch geraden op basis van de bedrijfsnaam (woorden als 'Therapeutics', 'Mining', 'Lithium'…), maar je kunt 'm aanpassen. 'Other' = valt buiten biotech/mining.",
+          "Bepaalt welke scoring-gewichten en welke nieuws-bronnen gebruikt worden. Wordt bij het toevoegen automatisch geraden op basis van de bedrijfsnaam (woorden als 'Therapeutics', 'Mining', 'Lithium', 'Semiconductor'…), maar je kunt 'm aanpassen. 'AI' is de groep AI-/chip-aandelen: die krijgen geen katalysator-scoring en geen biotech-briefing, maar wel koersen, limieten, medailles en meldingen. 'Other' = valt buiten alle drie.",
       },
       {
         id: "wl-goud",
@@ -701,6 +701,37 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         title: "Notificaties — wanneer krijg je een melding?",
         body:
           "Zodra een NIEUW aandeel voor het eerst aan alle criteria voldoet ÉN risico='Laag' krijgt, wordt er één keer een 🌴 ntfy/email-notificatie verstuurd. Bij volgende 90-daagse herscans van hetzelfde aandeel wordt er géén dubbele melding gestuurd, tenzij het van risiconiveau verandert en weer terugkeert naar Laag.",
+      },
+    ],
+  },
+
+  favorieten: {
+    intro:
+      "Alle aandelen met een hartje, op één rij. Standaard gesorteerd op afstand tot je aankooplimiet, zodat wat het dichtst bij de koop-trigger zit bovenaan staat.",
+    blocks: [
+      {
+        id: "fav-inladen",
+        title: "Inladen met voorgestelde limiet",
+        body:
+          "Met '+ Toevoegen' plak je een lijst tickers (of Google-Finance URL's). Na 'Opzoeken' zie je per aandeel de bedrijfsnaam, beurs, valuta, huidige koers, de 5-jaarsbodem en -top, én een voorgestelde aankooplimiet. Die suggestie is standaard de 5-jaarsbodem plus het percentage uit de Instellingen; je kunt per inlaadsessie omschakelen naar '% onder de huidige koers' en het percentage aanpassen. Alle rijen die je niet zelf hebt aangeraakt rekenen dan meteen mee.\nPer rij pas je aan wat je wilt: de limiet, de sector, sterren, en of het aandeel überhaupt mee moet (vinkje). Pas als je op 'toevoegen' klikt gaat er iets naar de database — je ziet dus eerst wat er gaat gebeuren.",
+      },
+      {
+        id: "fav-toegevoegd",
+        title: "Kolom 'Toegevoegd'",
+        body:
+          "Wanneer je het aandeel favoriet maakte. Sorteer aflopend om de nieuwste bovenaan te krijgen — handig om te controleren of de limiet van je laatste inlaadronde goed staat. Aandelen van de afgelopen twee weken staan in accentkleur. Bij favorieten van vóór deze functie kan het tijdstip ontbreken; die tonen een streepje.",
+      },
+      {
+        id: "fav-limiet",
+        title: "Limiet aanpassen in de lijst",
+        body:
+          "Klik in de kolom 'Limiet' op het bedrag (of op de '+' als er nog geen limiet is) om 'm direct te wijzigen. Enter bevestigt, Escape annuleert. De kolom 'vs limiet' rekent meteen mee: negatief (groen) = de koers staat ónder je limiet.",
+      },
+      {
+        id: "fav-breedte",
+        title: "Breedte van de pagina",
+        body:
+          "Rechtsboven staat een breedte-schakelaar (▯ ▭ ▬): normaal 1280px, breed 1800px, of de volle schermbreedte. De keuze wordt per tabblad onthouden en server-side bewaard, dus 'ie gaat mee naar je andere apparaten. Breder = meer kolommen tegelijk zichtbaar; welke kolommen dat zijn kies je met de kolom-kiezer.",
       },
     ],
   },

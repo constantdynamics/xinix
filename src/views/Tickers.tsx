@@ -12,6 +12,7 @@ import {
 import { TickerDetailsModal } from "./TickerDetailsModal";
 import { PriceChartModal } from "./PriceChartModal";
 import { googleFinanceUrl } from "../tickerLinks";
+import { inferSector } from "../sectorGuess";
 import {
   Card,
   Button,
@@ -69,22 +70,6 @@ function applySuffix(ticker: string, suffix: string): string {
   return suffix ? `${base}.${suffix}` : base;
 }
 
-// Probeer sector te raden op basis van bedrijfsnaam. Mining krijgt
-// voorrang wanneer er commodity-/mijnbouwwoorden inzitten — dat is
-// een sterker signaal dan biotech-prefixen die soms in mining-namen
-// voorkomen ("BioGold Resources" → mining).
-const MINING_RE =
-  /\b(mining|miner|mines|metals?|minerals?|resources?|exploration|drill(?:ing)?|royalt(?:y|ies)|streaming|gold|silver|copper|lithium|uranium|nickel|cobalt|graphite|zinc|platinum|palladium|tin|tungsten|molybdenum|rare\s*earth|potash|iron\s*ore|coal)\b/i;
-
-const BIOTECH_RE =
-  /\b(pharma(?:ceuticals?)?|biopharma|therapeutics|bio(?:science|tech(?:nology)?|logics|pharm)?|genomics?|gene(?:tic|ric)?|oncolog(?:y|ic)|immuno(?:logy|therap)|cell\s*(?:therap|technolog)|gene\s*therap|medicines?|medical|laboratories|labs|sciences|clinical|antibody|antibodies|vaccines?|RNA|DNA|protein)\b/i;
-
-function inferSector(company: string | null | undefined): Sector {
-  if (!company) return "other";
-  if (MINING_RE.test(company)) return "mining";
-  if (BIOTECH_RE.test(company)) return "biotech";
-  return "other";
-}
 
 interface PreviewRow {
   id: number;
@@ -872,6 +857,7 @@ export function TickersView({
               >
                 <option value="biotech">biotech</option>
                 <option value="mining">mining</option>
+                <option value="ai">ai</option>
                 <option value="other">other</option>
               </Select>
               <Button size="sm" variant="primary" onClick={applyBulkSector}>
@@ -1021,6 +1007,7 @@ export function TickersView({
                             >
                               <option value="biotech">biotech</option>
                               <option value="mining">mining</option>
+                <option value="ai">ai</option>
                 <option value="other">other</option>
                             </Select>
                           </td>
@@ -1104,6 +1091,7 @@ export function TickersView({
               >
                 <option value="biotech">biotech</option>
                 <option value="mining">mining</option>
+                <option value="ai">ai</option>
                 <option value="other">other</option>
               </Select>
               <Input

@@ -56,7 +56,7 @@ export function SignalLogView() {
   // filters
   const [filterAction, setFilterAction] = useState<"all" | "STRONG_BUY" | "BUY">("all");
   const [filterStatus, setFilterStatus] = useState<"all" | "lopend" | "afgesloten">("all");
-  const [filterSector, setFilterSector] = useState<"all" | "biotech" | "mining" | "other">("all");
+  const [filterSector, setFilterSector] = useState<"all" | "biotech" | "mining" | "ai" | "other">("all");
   const [search, setSearch] = useState("");
 
   // sort
@@ -203,6 +203,7 @@ export function SignalLogView() {
           <Pill tone="neutral" size="sm" active={filterSector === "all"} onClick={() => setFilterSector("all")}>Alle</Pill>
           <Pill tone="cyan" size="sm" active={filterSector === "biotech"} onClick={() => setFilterSector("biotech")}>Biotech</Pill>
           <Pill tone="watch" size="sm" active={filterSector === "mining"} onClick={() => setFilterSector("mining")}>Mining</Pill>
+          <Pill tone="pink" size="sm" active={filterSector === "ai"} onClick={() => setFilterSector("ai")}>AI</Pill>
           <Pill tone="neutral" size="sm" active={filterSector === "other"} onClick={() => setFilterSector("other")}>Other</Pill>
         </div>
 

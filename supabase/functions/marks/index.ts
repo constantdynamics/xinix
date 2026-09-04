@@ -1,5 +1,5 @@
 // Markeringen per ticker: favorieten (hartje) en gezien (verrekijker).
-// GET    → { favorites: string[], seen: string[] }
+// GET    → { favorites, seen, ratings, favorited_at }
 // POST   { kind: "favorite" | "seen", ticker: string }   → toevoegen
 // DELETE { kind: "favorite" | "seen", ticker: string }   → verwijderen
 //
@@ -32,20 +32,27 @@ Deno.serve(async (req) => {
 
   if (req.method === "GET") {
     const [fav, seen] = await Promise.all([
-      supabase.from("xinix_favorites").select("ticker, rating"),
+      supabase.from("xinix_favorites").select("ticker, rating, created_at"),
       supabase.from("xinix_seen").select("ticker"),
     ]);
     if (fav.error) return textResponse(req, fav.error.message, { status: 500 });
     if (seen.error) return textResponse(req, seen.error.message, { status: 500 });
-    const favList = (fav.data ?? []) as Array<{ ticker: string; rating: number | null }>;
+    const favList = (fav.data ?? []) as Array<{
+      ticker: string;
+      rating: number | null;
+      created_at: string | null;
+    }>;
     const ratings: Record<string, number> = {};
+    const favoritedAt: Record<string, string> = {};
     for (const r of favList) {
       if (r.rating != null) ratings[r.ticker] = r.rating;
+      if (r.created_at) favoritedAt[r.ticker] = r.created_at;
     }
     return jsonResponse(req, {
       favorites: favList.map((r) => r.ticker),
       seen: (seen.data ?? []).map((r) => r.ticker as string),
       ratings,
+      favorited_at: favoritedAt,
     });
   }
 

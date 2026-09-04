@@ -216,6 +216,32 @@ export function SettingsView({ data }: { data?: Dashboard }) {
           </p>
         </Field>
 
+        <Field label="Voorgestelde aankooplimiet (% boven de 5-jaarsbodem)">
+          <Input
+            type="number"
+            min={0}
+            max={200}
+            step={0.5}
+            value={s.limit_suggest_pct ?? 5}
+            onChange={(e) =>
+              setS({
+                ...s,
+                limit_suggest_pct:
+                  e.target.value === "" ? 0 : Number(e.target.value),
+              })
+            }
+            className="w-full"
+          />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Standaardwaarde die het inlaad-paneel op het Favorieten-tabblad
+            gebruikt om een aankooplimiet voor te stellen: de 5-jaarsbodem plus
+            dit percentage. Bij <strong className="text-neutral-300">0</strong>{" "}
+            is de suggestie exact de 5-jaarsbodem. Je kunt de suggestie per
+            inlaadsessie overrulen (ook naar "% onder de huidige koers") en per
+            aandeel handmatig aanpassen voordat het wordt toegevoegd.
+          </p>
+        </Field>
+
         <div className="flex items-center gap-3 pt-2">
           <Button variant="primary" onClick={save}>
             Opslaan

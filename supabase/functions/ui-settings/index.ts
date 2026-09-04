@@ -20,6 +20,7 @@ interface UiSettings {
   tab_labels: Record<string, string>;
   tab_hidden: string[];
   table_columns: Record<string, TableColumnPref>;
+  tab_width: Record<string, string>;
   updated_at: string;
 }
 
@@ -30,6 +31,7 @@ function defaults(): UiSettings {
     tab_labels: {},
     tab_hidden: [],
     table_columns: {},
+    tab_width: {},
     updated_at: new Date().toISOString(),
   };
 }
@@ -84,6 +86,14 @@ Deno.serve(async (req) => {
       clean[tab] = { order: strings(p.order), hidden: strings(p.hidden) };
     }
     update.table_columns = clean;
+  }
+  if (body.tab_width && typeof body.tab_width === "object" && !Array.isArray(body.tab_width)) {
+    const clean: Record<string, string> = {};
+    for (const [tab, w] of Object.entries(body.tab_width).slice(0, 64)) {
+      if (typeof tab !== "string" || tab.length > 64) continue;
+      if (w === "normaal" || w === "breed" || w === "vol") clean[tab] = w;
+    }
+    update.tab_width = clean;
   }
 
   const { data, error } = await sb

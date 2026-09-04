@@ -22,6 +22,8 @@ import type { Dashboard } from "./types";
 import { Button, NavTab, Input, Skeleton, Dot, Toaster } from "./components/ui";
 import { DeviceSync } from "./components/DeviceSync";
 import { DEFAULT_TABS as TABS, type Tab, type TabDef } from "./tabsConfig";
+import { WidthPicker } from "./components/WidthPicker";
+import { TAB_WIDTH_CLASS, useTabWidth } from "./hooks/useUiSettings";
 import { useMarks } from "./hooks/useMarks";
 import { useUiSettings } from "./hooks/useUiSettings";
 import { TAB_ICONS } from "./tabIcons";
@@ -231,11 +233,15 @@ export function App() {
     return () => clearTimeout(id);
   }, [lastFetchAt]);
 
+  // Paginabreedte volgt de keuze voor het actieve tabblad; header, tab-nav,
+  // inhoud en footer schuiven mee zodat alles uitgelijnd blijft.
+  const widthCls = TAB_WIDTH_CLASS[useTabWidth(tab)];
+
   return (
     <div className="min-h-screen bg-ink-1 text-neutral-100">
       {/* Top bar */}
       <header className="sticky top-0 z-30 border-b border-ink-5 bg-ink-1/95 backdrop-blur supports-[backdrop-filter]:bg-ink-1/70">
-        <div className="mx-auto max-w-7xl px-4 py-3 flex items-center gap-4">
+        <div className={`mx-auto ${widthCls} px-4 py-3 flex items-center gap-4`}>
           <a
             href="#favorieten"
             onClick={(e) => {
@@ -289,6 +295,7 @@ export function App() {
               <span className="text-fog-pink">●</span>
               <span className="hidden sm:inline">token</span>
             </Button>
+            <WidthPicker tabKey={tab} className="hidden lg:inline-flex" />
             <Button
               size="sm"
               variant="ghost"
@@ -311,7 +318,7 @@ export function App() {
         </div>
 
         {/* Tab nav — onderlijn-stijl, horizontaal scrollbaar op mobiel */}
-        <div className="mx-auto max-w-7xl px-4 flex gap-0.5 overflow-x-auto scrollbar-thin items-center">
+        <div className={`mx-auto ${widthCls} px-4 flex gap-0.5 overflow-x-auto scrollbar-thin items-center`}>
           {effectiveTabs.map((t, idx) => (
             <NavTab
               key={t.key}
@@ -329,7 +336,7 @@ export function App() {
 
         {showTokenBar && (
           <div className="border-t border-ink-5 bg-ink-2/60">
-            <div className="mx-auto max-w-7xl px-4 py-2 flex flex-col gap-2 animate-fade-up">
+            <div className={`mx-auto ${widthCls} px-4 py-2 flex flex-col gap-2 animate-fade-up`}>
               <div className="flex items-center gap-2 flex-wrap">
                 <Input
                   type="password"
@@ -364,7 +371,7 @@ export function App() {
       </header>
 
       <main
-        className="mx-auto max-w-7xl px-4 py-6"
+        className={`mx-auto ${widthCls} px-4 py-6`}
         style={{ "--tab-accent": tabAccent } as React.CSSProperties}
       >
         {error && (
@@ -405,7 +412,7 @@ export function App() {
       </main>
 
       <footer className="border-t border-ink-5 mt-8">
-        <div className="mx-auto max-w-7xl px-4 py-4 text-[11px] text-neutral-400 flex items-center justify-between gap-3 flex-wrap">
+        <div className={`mx-auto ${widthCls} px-4 py-4 text-[11px] text-neutral-400 flex items-center justify-between gap-3 flex-wrap`}>
           <span>
             <span className="wordmark">Xinix</span> — pre/post-event detection
           </span>
