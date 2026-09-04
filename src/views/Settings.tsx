@@ -216,6 +216,35 @@ export function SettingsView({ data }: { data?: Dashboard }) {
           </p>
         </Field>
 
+        <Field label="Voorgestelde aankooplimiet (% boven de 5-jaarsbodem)">
+          <Input
+            type="number"
+            min={0}
+            max={200}
+            step={0.5}
+            value={s.limit_suggest_pct ?? 10}
+            onChange={(e) =>
+              setS({
+                ...s,
+                limit_suggest_pct:
+                  e.target.value === "" ? 0 : Number(e.target.value),
+              })
+            }
+            className="w-full"
+          />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            De 5-jaarsbodem plus dit percentage. Wordt op twee plekken gebruikt:
+            het inlaad-paneel op het Favorieten-tabblad stelt hiermee een limiet
+            voor, én de dagelijkse extremes-job vult hiermee automatisch een
+            limiet voor watchlist-aandelen die er nog geen hebben. Handmatig
+            ingestelde limieten worden nooit overschreven. Bij{" "}
+            <strong className="text-neutral-300">0</strong> is de limiet exact de
+            5-jaarsbodem. In het inlaad-paneel kun je per sessie overrulen (ook
+            naar "% onder de huidige koers") en per aandeel handmatig aanpassen
+            vóór het toevoegen.
+          </p>
+        </Field>
+
         <div className="flex items-center gap-3 pt-2">
           <Button variant="primary" onClick={save}>
             Opslaan

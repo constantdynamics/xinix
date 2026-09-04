@@ -14,6 +14,7 @@ const state = {
   favorites: new Set<string>(),
   seen: new Set<string>(),
   ratings: new Map<string, number>(),
+  favoritedAt: new Map<string, string>(),
 };
 const listeners = new Set<Listener>();
 
@@ -37,6 +38,10 @@ async function ensureLoaded(): Promise<void> {
     for (const [t, r] of Object.entries(data.ratings ?? {})) {
       state.ratings.set(t.toUpperCase(), r);
     }
+    state.favoritedAt = new Map();
+    for (const [t, at] of Object.entries(data.favorited_at ?? {})) {
+      state.favoritedAt.set(t.toUpperCase(), at);
+    }
     state.loaded = true;
     emit();
   } catch (err) {
@@ -50,6 +55,8 @@ export interface MarksApi {
   favorites: Set<string>;
   seen: Set<string>;
   ratings: Map<string, number>;
+  /** Wanneer een ticker favoriet werd (ISO-string), voor de "toegevoegd"-kolom. */
+  favoritedAt: Map<string, string>;
   isFavorite: (ticker: string) => boolean;
   isSeen: (ticker: string) => boolean;
   getRating: (ticker: string) => number | null;
@@ -75,6 +82,7 @@ export function useMarks(): MarksApi {
     favorites: state.favorites,
     seen: state.seen,
     ratings: state.ratings,
+    favoritedAt: state.favoritedAt,
     loaded: state.loaded,
     isFavorite: (t) => state.favorites.has(t.toUpperCase()),
     isSeen: (t) => state.seen.has(t.toUpperCase()),
@@ -105,10 +113,18 @@ export function useMarks(): MarksApi {
       const set = setForKind(kind);
       const wasOn = set.has(T);
       const prevRating = kind === "favorite" ? (state.ratings.get(T) ?? null) : null;
+      const prevAt = kind === "favorite" ? (state.favoritedAt.get(T) ?? null) : null;
       // optimistic
       if (wasOn) set.delete(T);
       else set.add(T);
-      if (kind === "favorite" && wasOn) state.ratings.delete(T);
+      if (kind === "favorite") {
+        if (wasOn) {
+          state.ratings.delete(T);
+          state.favoritedAt.delete(T);
+        } else {
+          state.favoritedAt.set(T, new Date().toISOString());
+        }
+      }
       emit();
       try {
         if (wasOn) await removeMark(kind, T);
@@ -117,7 +133,11 @@ export function useMarks(): MarksApi {
         // rollback
         if (wasOn) set.add(T);
         else set.delete(T);
-        if (kind === "favorite" && wasOn && prevRating != null) state.ratings.set(T, prevRating);
+        if (kind === "favorite") {
+          if (wasOn && prevRating != null) state.ratings.set(T, prevRating);
+          if (wasOn && prevAt != null) state.favoritedAt.set(T, prevAt);
+          if (!wasOn) state.favoritedAt.delete(T);
+        }
         emit();
         console.error("toggle mark failed", err);
       }

@@ -8,6 +8,7 @@ import {
   type TickerInput,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
+import { inferSector } from "../sectorGuess";
 import {
   Card,
   Button,
@@ -368,6 +369,7 @@ export function LimitsView({
           <option value="all">Alle</option>
           <option value="biotech">biotech</option>
           <option value="mining">mining</option>
+          <option value="ai">ai</option>
           <option value="other">other</option>
         </Select>
         <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
@@ -809,16 +811,6 @@ function parseLimitPaste(text: string): { rows: PasteRow[]; errors: string[] } {
   return { rows, errors };
 }
 
-const MINING_RE =
-  /\b(mining|miner|mines|metals?|minerals?|resources?|exploration|drill(?:ing)?|royalt(?:y|ies)|streaming|gold|silver|copper|lithium|uranium|nickel|cobalt|graphite|zinc|platinum|palladium|tin|tungsten|molybdenum|rare\s*earth|potash|iron\s*ore|coal)\b/i;
-const BIOTECH_RE =
-  /\b(pharma(?:ceuticals?)?|biopharma|therapeutics|bio(?:science|tech(?:nology)?|logics|pharm)?|genomics?|gene(?:tic|ric)?|oncolog(?:y|ic)|immuno(?:logy|therap)|cell\s*(?:therap|technolog)|gene\s*therap|medicines?|medical|laboratories|labs|sciences|clinical|antibody|antibodies|vaccines?|RNA|DNA|protein)\b/i;
-function inferSector(company: string | null | undefined): Sector {
-  if (!company) return "other";
-  if (MINING_RE.test(company)) return "mining";
-  if (BIOTECH_RE.test(company)) return "biotech";
-  return "other";
-}
 
 function BulkPaste({
   data,

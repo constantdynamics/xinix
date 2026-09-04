@@ -4,6 +4,7 @@ import {
   batchAddTickers,
   fetchDashboard,
   fetchScanResults,
+  fetchSettings,
   getToken,
   lookupTickers,
   patchTicker,
@@ -12,9 +13,10 @@ import {
   type TickerInput,
 } from "../api";
 import type { Dashboard, Card as CardType, Sector } from "../types";
-import { SECTOR_LABEL, SECTOR_TONE } from "../types";
+import { SECTOR_LABEL, SECTOR_TONE, SECTOR_NAAM, SECTORS } from "../types";
 import { googleFinanceUrl } from "../tickerLinks";
-import { Card, Button, Badge, Stat, CollapsibleIntro } from "../components/ui";
+import { inferSector as inferSectorUitNaam } from "../sectorGuess";
+import { Card, Button, Badge, Select, Stat, CollapsibleIntro } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
@@ -62,6 +64,8 @@ interface FavRow {
   medal_silver: number;
   medal_bronze: number;
   bronnen: Bron[];
+  /** Wanneer het aandeel favoriet werd (ISO). NULL bij oude rijen zonder tijdstip. */
+  favorited_at: string | null;
   // True wanneer de ticker als favoriet bestaat maar niet (meer) in de watchlist
   // staat — alle data is dan onbekend en de rij toont enkel streepjes.
   orphan: boolean;
@@ -69,7 +73,7 @@ interface FavRow {
 
 type SortKey =
   | "ticker" | "company" | "score" | "above_limit_pct" | "last_close" | "rating" | "medals" | "dividend"
-  | "chg_1d" | "chg_1w" | "chg_1m" | "chg_6m";
+  | "chg_1d" | "chg_1w" | "chg_1m" | "chg_6m" | "favorited_at";
 type SortDir = "asc" | "desc";
 type ViewMode = "table" | "tiles";
 
@@ -83,6 +87,27 @@ function fmtPrice(v: number | null): string {
   if (v < 1) return v.toFixed(4);
   if (v < 10) return v.toFixed(3);
   return v.toFixed(2);
+}
+
+// Datum kort: "4 sep" binnen het lopende jaar, anders met jaartal.
+function fmtDate(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const zelfdeJaar = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("nl-NL", {
+    day: "numeric",
+    month: "short",
+    ...(zelfdeJaar ? {} : { year: "numeric" }),
+  });
+}
+
+// Nieuw toegevoegd (< 14 dagen) krijgt accentkleur — dat zijn de rijen
+// waarvan de limiet nog gecontroleerd moet worden.
+function isRecent(iso: string | null): boolean {
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && Date.now() - t < 14 * 24 * 60 * 60 * 1000;
 }
 
 function fmtYield(v: number | null): string {
@@ -129,6 +154,7 @@ const FAV_COLUMNS: ColumnMeta[] = [
   { key: "chg_6m", label: "Δ 6 maanden" },
   { key: "above_limit_pct", label: "vs limiet" },
   { key: "limiet", label: "Limiet" },
+  { key: "favorited_at", label: "Toegevoegd" },
 ];
 
 // Optionele props: als App.tsx al een dashboard/scans-fetch heeft gedaan, kunnen
@@ -281,6 +307,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         medal_silver: card?.medal_silver ?? 0,
         medal_bronze: card?.medal_bronze ?? 0,
         bronnen,
+        favorited_at: marks.favoritedAt.get(T) ?? null,
         orphan,
       });
     }
@@ -357,6 +384,10 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         case "chg_1w": av = a.chg_1w; bv = b.chg_1w; break;
         case "chg_1m": av = a.chg_1m; bv = b.chg_1m; break;
         case "chg_6m": av = a.chg_6m; bv = b.chg_6m; break;
+        case "favorited_at":
+          av = a.favorited_at ? Date.parse(a.favorited_at) : null;
+          bv = b.favorited_at ? Date.parse(b.favorited_at) : null;
+          break;
       }
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
@@ -419,7 +450,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
   if (loading) return <Card className="p-10 text-center text-sm text-neutral-500">Laden…</Card>;
   if (error) return <Card className="p-4 text-sm text-fog-loss border-fog-loss/30">{error}</Card>;
 
-  const sectors: Sector[] = ["biotech", "mining", "other"];
+  const sectors: Sector[] = SECTORS;
   const allBronnen: Bron[] = ["feniks", "poefie", "hikkertje", "zwitserleven", "watchlist"];
 
   const bronCounts: Record<Bron, number> = { feniks: 0, poefie: 0, hikkertje: 0, zwitserleven: 0, watchlist: 0 };
@@ -668,6 +699,31 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
             >
               {savingLimit === r.ticker ? "…" : (r.buy_limit != null ? fmtPrice(r.buy_limit) : "+")}
             </button>
+          )}
+        </td>
+      ),
+    },
+    favorited_at: {
+      th: (
+        <th
+          className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+          title="Wanneer dit aandeel favoriet werd — sorteer aflopend om de nieuwste bovenaan te zetten en te controleren of de limiet klopt"
+          onClick={() => toggleSort("favorited_at")}
+        >
+          Toegevoegd <span className="text-fog-lime text-[9px]">{sortArrow("favorited_at")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+          {r.favorited_at ? (
+            <span
+              className={isRecent(r.favorited_at) ? "text-fog-lime" : "text-neutral-400"}
+              title={new Date(r.favorited_at).toLocaleString("nl-NL")}
+            >
+              {fmtDate(r.favorited_at)}
+            </span>
+          ) : (
+            <span className="text-neutral-600">—</span>
           )}
         </td>
       ),
@@ -958,7 +1014,17 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
               >
                 {r.ticker}
               </a>
-              {r.sector && <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">{SECTOR_LABEL[r.sector]}</span>}
+              <span className="flex items-center gap-1 shrink-0">
+                {r.favorited_at && (
+                  <span
+                    className={`text-[9px] tabular-nums ${isRecent(r.favorited_at) ? "text-fog-lime" : "text-neutral-600"}`}
+                    title={`Favoriet sinds ${new Date(r.favorited_at).toLocaleString("nl-NL")}`}
+                  >
+                    {fmtDate(r.favorited_at)}
+                  </span>
+                )}
+                {r.sector && <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">{SECTOR_LABEL[r.sector]}</span>}
+              </span>
             </div>
             <button
               type="button"
@@ -1058,8 +1124,56 @@ function parseTickerInput(input: string): Array<{ ticker: string; exchange?: str
   return out;
 }
 
-interface ResolvedRow extends LookupResult {
+
+// ── Inladen van favorieten ────────────────────────────────────────────────
+// Plak tickers → opzoeken bij Yahoo → controleer/pas per rij aan (limiet,
+// sector, sterren, wel/niet meenemen) → pas dán toevoegen. De voorgestelde
+// limiet is standaard een percentage boven de 5-jaarsbodem; dat percentage
+// komt uit de instellingen en is per inlaadsessie te overrulen.
+
+type SuggestieModus = "low5y" | "koers";
+
+interface ImportRij {
+  key: string;
+  input_ticker: string;
+  ticker: string;
+  company: string;
+  sector: Sector;
+  /** False zodra de gebruiker de sector zelf koos — auto-detect blijft er dan af. */
+  sectorAuto: boolean;
+  currency: string | null;
+  exchange: string | null;
+  last_close: number | null;
+  low_5y: number | null;
+  high_5y: number | null;
+  recognized: boolean;
+  error?: string;
   alreadyFavorite: boolean;
+  /** Limiet als tekst zodat half-getypte waarden ("12,") niet omvallen. */
+  limiet: string;
+  /** False zodra de gebruiker de limiet handmatig aanpaste. */
+  limietAuto: boolean;
+  rating: number | null;
+  selected: boolean;
+}
+
+// Afronden op een zinnig aantal decimalen voor de koershoogte.
+function roundLimiet(v: number): number {
+  const d = v < 1 ? 4 : v < 10 ? 3 : 2;
+  return Number(v.toFixed(d));
+}
+
+function berekenSuggestie(
+  rij: Pick<ImportRij, "low_5y" | "last_close">,
+  modus: SuggestieModus,
+  pct: number
+): number | null {
+  if (modus === "low5y") {
+    if (rij.low_5y == null || rij.low_5y <= 0) return null;
+    return roundLimiet(rij.low_5y * (1 + pct / 100));
+  }
+  if (rij.last_close == null || rij.last_close <= 0) return null;
+  return roundLimiet(rij.last_close * (1 - pct / 100));
 }
 
 function BulkAddFavoritesPanel({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
@@ -1067,13 +1181,30 @@ function BulkAddFavoritesPanel({ onClose, onDone }: { onClose: () => void; onDon
   const [input, setInput] = useState("");
   const [resolving, setResolving] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [resolved, setResolved] = useState<ResolvedRow[] | null>(null);
+  const [rijen, setRijen] = useState<ImportRij[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [voortgang, setVoortgang] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Sector die alle nieuwe rijen krijgen (auto = raden uit de bedrijfsnaam).
+  const [bulkSector, setBulkSector] = useState<Sector | "auto">("auto");
+  const [modus, setModus] = useState<SuggestieModus>("low5y");
+  const [pct, setPct] = useState<string>("10");
+
+  // Standaardpercentage uit de instellingen; per sessie te overrulen.
   useEffect(() => {
     inputRef.current?.focus();
+    fetchSettings()
+      .then((s) => {
+        if (s.limit_suggest_pct != null) setPct(String(s.limit_suggest_pct));
+      })
+      .catch(() => {
+        // Geen instellingen (of geen token) — de 10% default blijft staan.
+      });
   }, []);
+
+  const pctNum = Number(pct.replace(",", "."));
+  const pctGeldig = Number.isFinite(pctNum) && pctNum >= 0;
 
   async function onLookup() {
     setError(null);
@@ -1083,70 +1214,159 @@ function BulkAddFavoritesPanel({ onClose, onDone }: { onClose: () => void; onDon
       return;
     }
     setResolving(true);
+    setVoortgang(null);
     try {
-      const tickers = parsed.map((p) => p.ticker);
-      const results = await lookupTickers(tickers);
-      const rows: ResolvedRow[] = results.map((r) => ({
-        ...r,
-        alreadyFavorite: marks.favorites.has(r.ticker.toUpperCase()),
-      }));
-      setResolved(rows);
+      // De lookup pakt maximaal 50 tickers per call; bij een grotere plak
+      // hakken we 'm in stukken zodat er niets stilletjes wegvalt.
+      const alle = parsed.map((p) => p.ticker);
+      const resultaten: LookupResult[] = [];
+      const CHUNK = 40;
+      for (let i = 0; i < alle.length; i += CHUNK) {
+        setVoortgang(`Opzoeken… ${Math.min(i + CHUNK, alle.length)}/${alle.length}`);
+        resultaten.push(...(await lookupTickers(alle.slice(i, i + CHUNK))));
+      }
+      const p0 = Number.isFinite(pctNum) ? pctNum : 0;
+      setRijen(
+        resultaten.map((r, i) => {
+          const sector: Sector =
+            bulkSector === "auto" ? inferSectorUitNaam(r.company) : bulkSector;
+          const suggestie = berekenSuggestie(r, modus, p0);
+          return {
+            key: `${r.input_ticker ?? r.ticker}-${i}`,
+            input_ticker: r.input_ticker ?? r.ticker,
+            ticker: r.ticker,
+            company: r.company ?? r.ticker,
+            sector,
+            sectorAuto: bulkSector === "auto",
+            currency: r.currency,
+            exchange: r.exchange,
+            last_close: r.last_close,
+            low_5y: r.low_5y,
+            high_5y: r.high_5y,
+            recognized: r.recognized,
+            error: r.error,
+            alreadyFavorite: marks.favorites.has(r.ticker.toUpperCase()),
+            limiet: suggestie != null ? String(suggestie) : "",
+            limietAuto: true,
+            rating: null,
+            selected: r.recognized,
+          };
+        })
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setResolving(false);
+      setVoortgang(null);
     }
   }
 
+  // Herbereken alleen de limieten die de gebruiker niet zelf heeft aangeraakt.
+  function herberekenLimieten(nieuweModus: SuggestieModus, nieuwPct: number) {
+    setRijen((prev) =>
+      prev == null
+        ? prev
+        : prev.map((r) => {
+            if (!r.limietAuto) return r;
+            const s = berekenSuggestie(r, nieuweModus, nieuwPct);
+            return { ...r, limiet: s != null ? String(s) : "" };
+          })
+    );
+  }
+
+  function zetModus(m: SuggestieModus) {
+    setModus(m);
+    if (pctGeldig) herberekenLimieten(m, pctNum);
+  }
+  function zetPct(v: string) {
+    setPct(v);
+    const n = Number(v.replace(",", "."));
+    if (Number.isFinite(n) && n >= 0) herberekenLimieten(modus, n);
+  }
+  function zetBulkSector(s: Sector | "auto") {
+    setBulkSector(s);
+    setRijen((prev) =>
+      prev == null
+        ? prev
+        : prev.map((r) =>
+            s === "auto"
+              ? { ...r, sector: inferSectorUitNaam(r.company), sectorAuto: true }
+              : { ...r, sector: s, sectorAuto: false }
+          )
+    );
+  }
+  function patchRij(key: string, patch: Partial<ImportRij>) {
+    setRijen((prev) => (prev == null ? prev : prev.map((r) => (r.key === key ? { ...r, ...patch } : r))));
+  }
+
+  const teVoegen = (rijen ?? []).filter((r) => r.selected && r.recognized);
+
   async function onConfirmAdd() {
-    if (!resolved) return;
+    if (teVoegen.length === 0) return;
     setAdding(true);
     setError(null);
     try {
-      // 1) Nieuwe tickers (recognized && niet al in favorieten) toevoegen aan watchlist
-      const toAddWatchlist: TickerInput[] = resolved
-        .filter((r) => r.recognized && !r.alreadyFavorite)
-        .map((r) => ({
+      // 1) Watchlist: ticker, bedrijfsnaam, sector, beurs en de gekozen limiet.
+      //    Een lege limiet sturen we níet mee — anders zou een bestaande
+      //    limiet bij een her-import op NULL gezet worden.
+      const rows: TickerInput[] = teVoegen.map((r) => {
+        const n = Number(r.limiet.replace(",", "."));
+        const limiet = r.limiet.trim() !== "" && Number.isFinite(n) && n > 0 ? n : undefined;
+        return {
           ticker: r.ticker,
-          company: r.company ?? r.ticker,
-          sector: "other" as const,
-        }));
-      if (toAddWatchlist.length > 0) {
-        try {
-          await batchAddTickers(toAddWatchlist);
-        } catch {
-          // Watchlist-add mag falen (bv. al bestaand) — favoriet-toevoeging is
-          // het belangrijkst en gebeurt onafhankelijk hieronder.
-        }
+          company: r.company || r.ticker,
+          sector: r.sector,
+          exchange: r.exchange ?? undefined,
+          ...(limiet !== undefined ? { buy_limit: limiet } : {}),
+        };
+      });
+      const CHUNK = 100;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        setVoortgang(`Toevoegen… ${Math.min(i + CHUNK, rows.length)}/${rows.length}`);
+        await batchAddTickers(rows.slice(i, i + CHUNK));
       }
-      // 2) Alle herkende tickers favorieten — gebruik addMark per ticker zodat
-      //    de hook-state ook ge-update wordt en optimistic UI klopt.
-      for (const r of resolved) {
-        if (!r.recognized || r.alreadyFavorite) continue;
+
+      // 2) Hartje + eventuele sterren per ticker, zodat de lokale marks-state
+      //    meteen klopt en de rij direct in de lijst verschijnt.
+      const mislukt: string[] = [];
+      for (const r of teVoegen) {
         try {
-          await addMark("favorite", r.ticker);
+          if (!r.alreadyFavorite) await addMark("favorite", r.ticker);
+          if (r.rating != null) await marks.setRating(r.ticker, r.rating);
         } catch (err) {
-          console.error("favorite add failed for", r.ticker, err);
+          console.error("favoriet toevoegen mislukt voor", r.ticker, err);
+          mislukt.push(r.ticker);
         }
       }
-      // 3) Sluit het panel en herlaad data
+      if (mislukt.length > 0) {
+        setError(`Niet gelukt voor: ${mislukt.join(", ")}`);
+        return;
+      }
       onDone();
       onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setAdding(false);
+      setVoortgang(null);
     }
   }
+
+  const geparseerd = parseTickerInput(input).length;
 
   return (
     <Card className="p-4 space-y-3 border-fog-lime/30">
       <div className="flex items-center justify-between">
         <div className="font-semibold text-sm">Favorieten toevoegen</div>
-        <button onClick={onClose} className="text-xs text-neutral-500 hover:text-neutral-300">Sluiten</button>
+        <button onClick={onClose} className="text-xs text-neutral-500 hover:text-neutral-300">
+          Sluiten
+        </button>
       </div>
       <div className="text-[11px] text-neutral-500 leading-relaxed">
         Plak tickers (één per regel, met komma's of spaties), of Google-Finance URL's zoals{" "}
         <code className="text-fog-lime">https://www.google.com/finance/beta/quote/FRMM:NASDAQ?window=1Y</code>.
-        Onbekende tickers worden eerst aan de watchlist toegevoegd en daarna als favoriet gemarkeerd.
+        Na het opzoeken zie je per aandeel de koers, de 5-jaarsbodem en een
+        voorgestelde aankooplimiet — die je kunt aanpassen vóór het toevoegen.
       </div>
       <textarea
         ref={inputRef}
@@ -1156,46 +1376,191 @@ function BulkAddFavoritesPanel({ onClose, onDone }: { onClose: () => void; onDon
         placeholder={"AAPL\nMSFT\nhttps://www.google.com/finance/beta/quote/FRMM:NASDAQ?window=1Y"}
         className="w-full px-2 py-1.5 rounded bg-ink-3 border border-ink-5 text-xs font-mono text-neutral-100 focus:outline-none focus:border-fog-lime"
       />
-      <div className="flex items-center gap-2">
+
+      {/* Instellingen voor deze inlaadsessie */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">Limiet-suggestie</span>
+        <Select value={modus} onChange={(e) => zetModus(e.target.value as SuggestieModus)} className="h-7 text-xs">
+          <option value="low5y">% boven 5-jaarsbodem</option>
+          <option value="koers">% onder huidige koers</option>
+        </Select>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={pct}
+          onChange={(e) => zetPct(e.target.value)}
+          className={
+            "w-16 px-1.5 py-0.5 rounded bg-ink-3 border text-right font-mono text-xs text-neutral-100 focus:outline-none " +
+            (pctGeldig ? "border-ink-5 focus:border-fog-lime" : "border-fog-loss")
+          }
+        />
+        <span className="text-neutral-500">%</span>
+        <span className="w-px h-4 bg-ink-5 mx-1" />
+        <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold">Sector</span>
+        <Select
+          value={bulkSector}
+          onChange={(e) => zetBulkSector(e.target.value as Sector | "auto")}
+          className="h-7 text-xs"
+        >
+          <option value="auto">auto (uit naam)</option>
+          {SECTORS.map((s) => (
+            <option key={s} value={s}>
+              {SECTOR_NAAM[s]}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
         <Button size="sm" onClick={onLookup} disabled={resolving || adding || input.trim() === ""}>
           {resolving ? "Opzoeken…" : "Opzoeken"}
         </Button>
-        {resolved && (
-          <Button size="sm" onClick={onConfirmAdd} disabled={adding || resolved.every((r) => !r.recognized || r.alreadyFavorite)}>
-            {adding ? "Bezig…" : `${resolved.filter((r) => r.recognized && !r.alreadyFavorite).length} toevoegen`}
+        {rijen && (
+          <Button size="sm" onClick={onConfirmAdd} disabled={adding || teVoegen.length === 0}>
+            {adding ? "Bezig…" : `${teVoegen.length} toevoegen`}
           </Button>
         )}
-        <span className="text-[10px] text-neutral-500 ml-2">{parseTickerInput(input).length} tickers geparseerd</span>
+        <span className="text-[10px] text-neutral-500 ml-1">{geparseerd} tickers geparseerd</span>
+        {voortgang && <span className="text-[10px] text-fog-lime">{voortgang}</span>}
       </div>
       {error && <div className="text-xs text-fog-loss">{error}</div>}
-      {resolved && (
-        <div className="border border-ink-5 rounded overflow-hidden">
-          <table className="w-full text-xs">
+
+      {rijen && (
+        <div className="border border-ink-5 rounded overflow-x-auto">
+          <table className="w-full text-xs min-w-[860px]">
             <thead className="bg-ink-3/40 text-[10px] uppercase text-neutral-500">
               <tr>
+                <th className="px-2 py-1 text-left w-8">
+                  <input
+                    type="checkbox"
+                    title="Alles aan/uit"
+                    checked={rijen.every((r) => r.selected || !r.recognized)}
+                    onChange={(e) =>
+                      setRijen((prev) =>
+                        prev == null
+                          ? prev
+                          : prev.map((r) => (r.recognized ? { ...r, selected: e.target.checked } : r))
+                      )
+                    }
+                  />
+                </th>
                 <th className="px-2 py-1 text-left">Ticker</th>
                 <th className="px-2 py-1 text-left">Bedrijf</th>
-                <th className="px-2 py-1 text-left">Beurs</th>
+                <th className="px-2 py-1 text-left">Sector</th>
+                <th className="px-2 py-1 text-right">Koers</th>
+                <th className="px-2 py-1 text-right" title="Laagste weekslot in 5 jaar">5j-bodem</th>
+                <th className="px-2 py-1 text-right" title="Hoogste weekslot in 5 jaar">5j-top</th>
+                <th className="px-2 py-1 text-right">Limiet</th>
+                <th className="px-2 py-1 text-right" title="Hoe ver de koers boven de gekozen limiet staat">vs limiet</th>
+                <th className="px-2 py-1 text-left">Sterren</th>
                 <th className="px-2 py-1 text-left">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-5/40">
-              {resolved.map((r) => (
-                <tr key={r.ticker}>
-                  <td className="px-2 py-1 font-mono">{r.ticker}</td>
-                  <td className="px-2 py-1 text-neutral-300">{r.company ?? "—"}</td>
-                  <td className="px-2 py-1 text-neutral-500">{r.exchange ?? "—"}</td>
-                  <td className="px-2 py-1">
-                    {!r.recognized ? (
-                      <span className="text-fog-loss">Onbekend{r.error ? ` (${r.error})` : ""}</span>
-                    ) : r.alreadyFavorite ? (
-                      <span className="text-neutral-500">Al favoriet</span>
-                    ) : (
-                      <span className="text-fog-lime">Klaar om toe te voegen</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {rijen.map((r) => {
+                const limietNum = Number(r.limiet.replace(",", "."));
+                const limietGeldig = r.limiet.trim() === "" || (Number.isFinite(limietNum) && limietNum > 0);
+                const vsLimiet =
+                  r.last_close != null && limietGeldig && r.limiet.trim() !== "" && limietNum > 0
+                    ? ((r.last_close - limietNum) / limietNum) * 100
+                    : null;
+                return (
+                  <tr key={r.key} className={r.recognized ? "" : "opacity-60"}>
+                    <td className="px-2 py-1">
+                      <input
+                        type="checkbox"
+                        checked={r.selected}
+                        disabled={!r.recognized}
+                        onChange={(e) => patchRij(r.key, { selected: e.target.checked })}
+                      />
+                    </td>
+                    <td className="px-2 py-1 font-mono">
+                      {r.ticker}
+                      {r.input_ticker !== r.ticker && (
+                        <span className="text-neutral-600"> ←{r.input_ticker}</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1 text-neutral-300 max-w-[220px] truncate" title={r.company}>
+                      {r.company}
+                      {r.currency && r.currency !== "USD" && (
+                        <span className="ml-1 text-[9px] text-fog-warn font-bold">{r.currency}</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1">
+                      <Select
+                        value={r.sector}
+                        onChange={(e) => patchRij(r.key, { sector: e.target.value as Sector, sectorAuto: false })}
+                        className="h-6 text-[11px]"
+                      >
+                        {SECTORS.map((s) => (
+                          <option key={s} value={s}>
+                            {SECTOR_NAAM[s]}
+                          </option>
+                        ))}
+                      </Select>
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tabular-nums">
+                      {r.last_close != null ? fmtPrice(r.last_close) : <span className="text-neutral-600">—</span>}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tabular-nums text-neutral-500">
+                      {r.low_5y != null ? fmtPrice(r.low_5y) : "—"}
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tabular-nums text-neutral-500">
+                      {r.high_5y != null ? fmtPrice(r.high_5y) : "—"}
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={r.limiet}
+                        onChange={(e) => patchRij(r.key, { limiet: e.target.value, limietAuto: false })}
+                        placeholder="—"
+                        className={
+                          "w-20 px-1.5 py-0.5 rounded bg-ink-3 border text-right font-mono text-xs text-neutral-100 focus:outline-none " +
+                          (limietGeldig ? "border-ink-5 focus:border-fog-lime" : "border-fog-loss")
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono tabular-nums">
+                      {vsLimiet != null ? (
+                        <span className={vsLimiet <= 0 ? "text-fog-lime" : vsLimiet <= 10 ? "text-fog-warn" : "text-neutral-400"}>
+                          {vsLimiet < 0 ? "−" : "+"}
+                          {Math.abs(vsLimiet).toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span className="text-neutral-600">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1">
+                      <div className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            title={`${n} ster${n > 1 ? "ren" : ""}`}
+                            onClick={() => patchRij(r.key, { rating: r.rating === n ? null : n })}
+                            className={
+                              "text-[11px] leading-none transition-colors " +
+                              ((r.rating ?? 0) >= n ? "text-fog-warn" : "text-neutral-700 hover:text-neutral-500")
+                            }
+                          >
+                            ★
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-2 py-1">
+                      {!r.recognized ? (
+                        <span className="text-fog-loss">Onbekend{r.error ? ` (${r.error})` : ""}</span>
+                      ) : r.alreadyFavorite ? (
+                        <span className="text-neutral-500">Al favoriet — limiet wordt bijgewerkt</span>
+                      ) : (
+                        <span className="text-fog-lime">Klaar om toe te voegen</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

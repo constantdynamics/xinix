@@ -1,3 +1,10 @@
+// tickers — CRUD op de watchlist (signal_tickers).
+// POST   { ...ticker }        → één ticker upserten
+// POST   { rows: [...] }      → batch upserten (gededupliceerd op ticker)
+// POST   ?action=unbench-all  → alle gebenchte tickers weer in de prijs-queue
+// PATCH  ?ticker=XYZ          → losse velden bijwerken
+// DELETE ?ticker=XYZ          → op inactief zetten (soft delete)
+
 import { getServiceClient } from "../_shared/supabase.ts";
 import { checkAuth } from "../_shared/auth.ts";
 import {
@@ -6,11 +13,14 @@ import {
   textResponse,
 } from "../_shared/cors.ts";
 
-type Sector = "biotech" | "mining";
+type Sector = "biotech" | "mining" | "other" | "ai";
 
+// Onbekende waarden worden 'other' — nooit stilzwijgend 'biotech', want dan
+// zou een AI- of overig aandeel de biotech-briefing en -scoring in rollen.
 function normalizeSector(v: unknown): Sector {
-  const s = String(v ?? "").toLowerCase();
-  return s === "mining" ? "mining" : "biotech";
+  const s = String(v ?? "").toLowerCase().trim();
+  if (s === "mining" || s === "biotech" || s === "ai") return s;
+  return "other";
 }
 
 function num(v: unknown): number | null {
@@ -60,10 +70,11 @@ const V1_1_SHARED_FIELDS = [
   "cash_runway_months",
   "insider_ownership_pct",
   "pre_event_ytd_return_pct",
+  "buy_limit",
   "notes",
 ] as const;
 
-const NUMERIC_V1_1 = new Set([
+const NUMERIC_V1_1 = new Set<string>([
   "trial_endpoint_duration_weeks",
   "prior_crl_count",
   "competitor_failures_in_target",
@@ -76,8 +87,10 @@ const NUMERIC_V1_1 = new Set([
   "cash_runway_months",
   "insider_ownership_pct",
   "pre_event_ytd_return_pct",
+  "buy_limit",
 ]);
-const BOOLEAN_V1_1 = new Set([
+
+const BOOLEAN_V1_1 = new Set<string>([
   "mechanism_has_clinical_precedent",
   "primary_endpoint_powered_for_subgroup",
   "label_narrowed_after_crl",
@@ -126,6 +139,7 @@ function buildRow(input: Record<string, unknown>) {
     active: true,
     updated_at: new Date().toISOString(),
   };
+  if ("exchange" in input) row.exchange = str(input.exchange);
   applyV1_1(row, input);
   return row;
 }
@@ -136,14 +150,34 @@ Deno.serve(async (req) => {
 
   if (!checkAuth(req)) return textResponse(req, "Unauthorized", { status: 401 });
   const supabase = getServiceClient();
+  const url = new URL(req.url);
 
   if (req.method === "POST") {
+    if (url.searchParams.get("action") === "unbench-all") {
+      const { data, error } = await supabase
+        .from("signal_tickers")
+        .update({
+          price_benched: false,
+          price_fail_count: 0,
+          price_last_error: null,
+          price_polled_at: null,
+        })
+        .eq("price_benched", true)
+        .select("ticker");
+      if (error) return textResponse(req, error.message, { status: 500 });
+      return jsonResponse(req, { ok: true, unbenched: (data ?? []).length });
+    }
+
     const body = (await req.json()) as Record<string, unknown>;
 
     if (Array.isArray(body.rows)) {
-      const rows = (body.rows as Record<string, unknown>[])
+      const built = (body.rows as Record<string, unknown>[])
         .map(buildRow)
         .filter((r) => r.ticker && r.company);
+      // Dedupe: een upsert met twee rijen voor dezelfde conflict-key faalt.
+      const byTicker = new Map<string, Record<string, unknown>>();
+      for (const r of built) byTicker.set(r.ticker as string, r);
+      const rows = [...byTicker.values()];
       if (rows.length === 0)
         return textResponse(req, "no valid rows", { status: 400 });
       const { error, data } = await supabase
@@ -151,7 +185,11 @@ Deno.serve(async (req) => {
         .upsert(rows, { onConflict: "ticker" })
         .select("ticker");
       if (error) return textResponse(req, error.message, { status: 500 });
-      return jsonResponse(req, { ok: true, inserted: (data ?? []).length });
+      return jsonResponse(req, {
+        ok: true,
+        inserted: (data ?? []).length,
+        deduped: built.length - rows.length,
+      });
     }
 
     if (!body.ticker || !body.company)
@@ -164,7 +202,6 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === "PATCH") {
-    const url = new URL(req.url);
     const ticker = url.searchParams.get("ticker");
     if (!ticker) return textResponse(req, "ticker required", { status: 400 });
     const body = (await req.json()) as Record<string, unknown>;
@@ -173,6 +210,8 @@ Deno.serve(async (req) => {
     };
     applyV1_1(update, body);
     if ("company" in body) update.company = str(body.company);
+    if ("sector" in body) update.sector = normalizeSector(body.sector);
+    if ("exchange" in body) update.exchange = str(body.exchange);
     if ("disease_area" in body) update.disease_area = str(body.disease_area);
     if ("modality" in body) update.modality = str(body.modality);
     if ("phase" in body) update.phase = str(body.phase);
@@ -181,6 +220,16 @@ Deno.serve(async (req) => {
     if ("deposit_type" in body) update.deposit_type = str(body.deposit_type);
     if ("share_count_millions" in body)
       update.share_count_millions = num(body.share_count_millions);
+    // Bench-beheer: vrijgeven zet de ticker vooraan in de prijs-queue
+    // (price_polled_at NULL sorteert bovenaan).
+    if (body.unbench === true || body.price_benched === false) {
+      update.price_benched = false;
+      update.price_fail_count = 0;
+      update.price_last_error = null;
+      update.price_polled_at = null;
+    } else if (body.price_benched === true) {
+      update.price_benched = true;
+    }
     const { error } = await supabase
       .from("signal_tickers")
       .update(update)
@@ -190,7 +239,6 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === "DELETE") {
-    const url = new URL(req.url);
     const ticker = url.searchParams.get("ticker");
     if (!ticker) return textResponse(req, "ticker required", { status: 400 });
     const { error } = await supabase

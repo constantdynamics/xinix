@@ -49,16 +49,28 @@ export interface Catalyst {
   status: string;
 }
 
-export type Sector = "biotech" | "mining" | "other";
+export type Sector = "biotech" | "mining" | "other" | "ai";
+
+// Alle sectoren in vaste volgorde — filter-pills en dropdowns lezen hieruit
+// zodat een nieuwe sector maar op één plek toegevoegd hoeft te worden.
+export const SECTORS: Sector[] = ["biotech", "mining", "ai", "other"];
 
 export const SECTOR_LABEL: Record<Sector, string> = {
   biotech: "BIO",
   mining: "MIN",
+  ai: "AI",
   other: "OTH",
 };
-export const SECTOR_TONE: Record<Sector, "cyan" | "watch" | "neutral"> = {
+export const SECTOR_NAAM: Record<Sector, string> = {
+  biotech: "Biotech",
+  mining: "Mining",
+  ai: "AI",
+  other: "Overig",
+};
+export const SECTOR_TONE: Record<Sector, "cyan" | "watch" | "neutral" | "pink"> = {
   biotech: "cyan",
   mining: "watch",
+  ai: "pink",
   other: "neutral",
 };
 
@@ -199,6 +211,8 @@ export interface Settings {
   alert_only_goud_events: boolean;
   /** Minimaal aantal dagen tussen twee meldingen over hetzelfde aandeel. 0 = uit. */
   notify_cooldown_days: number;
+  /** Voorgestelde aankooplimiet bij inladen: % boven de 5-jaarsbodem. */
+  limit_suggest_pct: number;
 }
 
 // Status van een doorlopende achtergrond-job (tabblad "Status").

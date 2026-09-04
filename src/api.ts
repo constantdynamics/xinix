@@ -76,7 +76,7 @@ export async function saveSettings(s: Partial<Settings>): Promise<void> {
 export interface TickerInput {
   ticker: string;
   company: string;
-  sector?: "biotech" | "mining" | "other";
+  sector?: "biotech" | "mining" | "other" | "ai";
   goud_score?: number;
   goud_type?: string;
   trigger_event?: string;
@@ -184,6 +184,11 @@ export interface LookupResult {
   company: string | null;
   currency: string | null;
   exchange: string | null;
+  // Koers-context uit dezelfde Yahoo-call, gebruikt om een aankooplimiet
+  // voor te stellen vóór het toevoegen. NULL als Yahoo geen historie gaf.
+  last_close: number | null;
+  low_5y: number | null;
+  high_5y: number | null;
   error?: string;
 }
 
@@ -606,12 +611,16 @@ export interface TableColumnPref {
   hidden: string[];
 }
 
+export type TabWidth = "normaal" | "breed" | "vol";
+
 export interface UiSettings {
   id: number;
   tab_order: string[];
   tab_labels: Record<string, string>;
   tab_hidden: string[];
   table_columns: Record<string, TableColumnPref>;
+  /** Paginabreedte per tab-key. Ontbrekende tabs krijgen de app-default. */
+  tab_width?: Record<string, TabWidth>;
   updated_at: string;
 }
 
@@ -979,6 +988,8 @@ export interface MarksResponse {
   favorites: string[];
   seen: string[];
   ratings?: Record<string, number>;
+  /** ISO-tijdstip waarop de favoriet is aangemaakt, per ticker. */
+  favorited_at?: Record<string, string>;
 }
 
 export async function fetchMarks(): Promise<MarksResponse> {

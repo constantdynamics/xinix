@@ -35,6 +35,7 @@ Deno.serve(async (req) => {
       "quiet_hours_end",
       "alert_only_goud_events",
       "notify_cooldown_days",
+      "limit_suggest_pct",
     ];
     const update: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -44,6 +45,11 @@ Deno.serve(async (req) => {
     if ("notify_cooldown_days" in update) {
       const n = Number(update.notify_cooldown_days);
       update.notify_cooldown_days = Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+    }
+    // NOT NULL-kolom; leeg veld = "geen opslag boven de 5y-bodem".
+    if ("limit_suggest_pct" in update) {
+      const n = Number(update.limit_suggest_pct);
+      update.limit_suggest_pct = Number.isFinite(n) ? Math.min(200, Math.max(0, n)) : 0;
     }
     const { error } = await supabase
       .from("signal_settings")

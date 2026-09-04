@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchScanResults, type ScanTicker, type ScanRun } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { EditableLimit } from "../components/EditableLimit";
-import { SECTOR_LABEL, SECTOR_TONE } from "../types";
+import { SECTOR_LABEL, SECTOR_TONE, type Sector } from "../types";
 import {
   Card,
   Badge,
@@ -14,7 +14,7 @@ import {
 } from "../components/ui";
 
 type SourceFilter = "all" | "losers" | "bottoms";
-type SectorFilter = "all" | "biotech" | "mining" | "other";
+type SectorFilter = "all" | "biotech" | "mining" | "ai" | "other";
 type SortBy = "date_desc" | "date_asc" | "medals" | "gold" | "ticker";
 
 const SOURCE_LABEL: Record<"losers" | "bottoms" | "unknown", string> = {
@@ -238,15 +238,15 @@ export function ScansView() {
           {/* Sector-filter */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-bold w-12">Sector</span>
-            {(["all", "biotech", "mining", "other"] as SectorFilter[]).map((s) => (
+            {(["all", "biotech", "mining", "ai", "other"] as SectorFilter[]).map((s) => (
               <Pill
                 key={s}
-                tone={s === "biotech" ? "cyan" : s === "mining" ? "watch" : "neutral"}
+                tone={s === "biotech" ? "cyan" : s === "mining" ? "watch" : s === "ai" ? "pink" : "neutral"}
                 active={sector === s}
                 onClick={() => setSector(s)}
                 size="sm"
               >
-                {s === "all" ? "Alle" : s === "biotech" ? "Biotech" : s === "mining" ? "Mining" : "Overig"}
+                {s === "all" ? "Alle" : s === "biotech" ? "Biotech" : s === "mining" ? "Mining" : s === "ai" ? "AI" : "Overig"}
               </Pill>
             ))}
           </div>
@@ -324,8 +324,8 @@ export function ScansView() {
                     </td>
                     <td className="p-3">
                       {t.sector && t.sector !== "other" ? (
-                        <Badge tone={SECTOR_TONE[t.sector as "biotech" | "mining"]}>
-                          {SECTOR_LABEL[t.sector as "biotech" | "mining"]}
+                        <Badge tone={SECTOR_TONE[t.sector as Sector]}>
+                          {SECTOR_LABEL[t.sector as Sector]}
                         </Badge>
                       ) : (
                         <span className="text-neutral-500 text-xs">—</span>

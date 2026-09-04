@@ -9,7 +9,7 @@
 // een verse versie van de server gehaald en de cache bijgewerkt.
 
 import { useEffect, useState } from "react";
-import { fetchUiSettings, saveUiSettings, type TableColumnPref, type UiSettings } from "../api";
+import { fetchUiSettings, saveUiSettings, type TabWidth, type TableColumnPref, type UiSettings } from "../api";
 
 const CACHE_KEY = "xinix_ui_settings_cache_v1";
 
@@ -92,6 +92,35 @@ export async function saveTableColumns(tabKey: string, pref: TableColumnPref): P
   const current = state.settings?.table_columns ?? {};
   const next: Record<string, TableColumnPref> = { ...current, [tabKey]: pref };
   const saved = await saveUiSettings({ table_columns: next });
+  state.settings = saved;
+  state.loaded = true;
+  writeCache(state.settings);
+  emit();
+}
+
+// Paginabreedte per tab. Default 'breed': ruimer dan de oude 1280px zodat er
+// meer kolommen passen, maar niet zo breed dat lange tekstblokken onleesbaar
+// worden. Per tab te overrulen via de breedte-schakelaar.
+export const DEFAULT_TAB_WIDTH: TabWidth = "breed";
+
+export const TAB_WIDTH_CLASS: Record<TabWidth, string> = {
+  normaal: "max-w-7xl",
+  breed: "max-w-[1800px]",
+  vol: "max-w-none",
+};
+
+export function useTabWidth(tabKey: string): TabWidth {
+  const { settings } = useUiSettings();
+  const w = settings?.tab_width?.[tabKey];
+  return w === "normaal" || w === "breed" || w === "vol" ? w : DEFAULT_TAB_WIDTH;
+}
+
+// Bewaar de breedte voor één tab; andere tabs blijven ongemoeid.
+// Vereist een admin-token (saveUiSettings geeft anders een 401).
+export async function saveTabWidth(tabKey: string, width: TabWidth): Promise<void> {
+  const current = state.settings?.tab_width ?? {};
+  const next: Record<string, TabWidth> = { ...current, [tabKey]: width };
+  const saved = await saveUiSettings({ tab_width: next });
   state.settings = saved;
   state.loaded = true;
   writeCache(state.settings);
