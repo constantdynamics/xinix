@@ -86,6 +86,12 @@ export function useUiSettings(): { settings: UiSettings | null; loaded: boolean 
   return { settings: state.settings, loaded: state.loaded };
 }
 
+// Zichtbare kolommen + hun gekozen fontkleur, in de gekozen volgorde.
+export function useColumnColors(tabKey: string): Record<string, string> {
+  const { settings } = useUiSettings();
+  return settings?.table_columns?.[tabKey]?.colors ?? {};
+}
+
 // Bewaar de kolominstelling voor één tab. Overige tabs blijven ongemoeid.
 // Vereist een admin-token (saveUiSettings geeft anders een 401).
 export async function saveTableColumns(tabKey: string, pref: TableColumnPref): Promise<void> {

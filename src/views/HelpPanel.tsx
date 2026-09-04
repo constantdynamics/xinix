@@ -728,6 +728,12 @@ export const PAGE_HELP: Record<string, PageHelp> = {
           "Klik in de kolom 'Limiet' op het bedrag (of op de '+' als er nog geen limiet is) om 'm direct te wijzigen. Enter bevestigt, Escape annuleert. De kolom 'vs limiet' rekent meteen mee: negatief (groen) = de koers staat ónder je limiet.",
       },
       {
+        id: "fav-kolomkleur",
+        title: "Kolomkleuren en leesbaarheid",
+        body:
+          "In de kolom-kiezer staat achter elke kolom een bolletje. Klik erop en kies uit 25 neonkleuren welke fontkleur die kolom krijgt; 'Standaardkleur gebruiken' zet 'm terug. De kleur overrulet ook de ingebouwde kleuring van die kolom (bijvoorbeeld groen/rood bij winst en verlies), dus kies 'm bewust voor kolommen waar die kleuring iets betekent.\nDe kopregel blijft staan als je door de lijst scrolt, en om-en-om is de regelachtergrond een fractie lichter — beide om bij veel kolommen de regels uit elkaar te houden.",
+      },
+      {
         id: "fav-breedte",
         title: "Breedte van de pagina",
         body:

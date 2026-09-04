@@ -2,10 +2,11 @@
 // zijn én in welke volgorde. De keuze wordt per tab server-side bewaard
 // (ui_settings) zodat ze over devices synchroniseert.
 
-import { type DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import { getToken, type TableColumnPref } from "../api";
 import { saveTableColumns, useUiSettings } from "../hooks/useUiSettings";
 import { Button } from "./ui";
+import { NEON_KLEUREN } from "../columnColors";
 
 export interface ColumnMeta {
   key: string;
@@ -64,6 +65,9 @@ export function ColumnPicker({
   const [open, setOpen] = useState(false);
   const [order, setOrder] = useState<string[]>([]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [colors, setColors] = useState<Record<string, string>>({});
+  // Welke kolom heeft zijn kleurpalet open (null = geen).
+  const [paletteFor, setPaletteFor] = useState<string | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -75,6 +79,8 @@ export function ColumnPicker({
     const { order: o, hidden: h } = resolveColumnOrder(columns, settings?.table_columns?.[tabKey], lockedKey);
     setOrder(o);
     setHidden(h);
+    setColors(settings?.table_columns?.[tabKey]?.colors ?? {});
+    setPaletteFor(null);
     setMsg(null);
     setOpen(true);
   }
@@ -83,7 +89,10 @@ export function ColumnPicker({
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setPaletteFor(null);
+      }
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -122,7 +131,7 @@ export function ColumnPicker({
     setSaving(true);
     setMsg(null);
     try {
-      await saveTableColumns(tabKey, { order, hidden: [...hidden] });
+      await saveTableColumns(tabKey, { order, hidden: [...hidden], colors });
       setMsg("Opgeslagen.");
       setTimeout(() => setOpen(false), 700);
     } catch (e) {
@@ -135,6 +144,18 @@ export function ColumnPicker({
   function reset() {
     setOrder(columns.map((c) => c.key));
     setHidden(new Set());
+    setColors({});
+    setPaletteFor(null);
+  }
+
+  function zetKleur(key: string, hex: string | null) {
+    setColors((prev) => {
+      const next = { ...prev };
+      if (hex == null) delete next[key];
+      else next[key] = hex;
+      return next;
+    });
+    setPaletteFor(null);
   }
 
   const visibleCount = order.filter((k) => !hidden.has(k)).length;
@@ -151,7 +172,8 @@ export function ColumnPicker({
             <span className="text-[10px] text-neutral-500">{visibleCount}/{order.length} zichtbaar</span>
           </div>
           <div className="text-[10px] text-neutral-500 leading-snug">
-            Sleep met ⋮⋮ om te herordenen, vink uit om te verbergen.
+            Sleep met ⋮⋮ om te herordenen, vink uit om te verbergen. Klik op
+            het bolletje voor de fontkleur van die kolom.
           </div>
           <div className="space-y-1 max-h-[50vh] overflow-y-auto">
             {order.map((key) => {
@@ -159,8 +181,8 @@ export function ColumnPicker({
               const isHidden = hidden.has(key);
               const isDragging = dragKey === key;
               return (
+                <Fragment key={key}>
                 <div
-                  key={key}
                   draggable={!isLocked}
                   onDragStart={() => { if (!isLocked) setDragKey(key); }}
                   onDragOver={(e) => onDragOver(e, key)}
@@ -191,7 +213,42 @@ export function ColumnPicker({
                     <span className="text-neutral-200">{labelOf(key)}</span>
                   </label>
                   {isLocked && <span className="text-[9px] uppercase text-neutral-600 font-bold">vast</span>}
+                  <button
+                    type="button"
+                    title={colors[key] ? `Kleur: ${colors[key]}` : "Fontkleur kiezen"}
+                    onClick={() => setPaletteFor((p) => (p === key ? null : key))}
+                    className="h-4 w-4 shrink-0 rounded-full border border-ink-6 hover:border-neutral-400 transition-colors"
+                    style={colors[key] ? { background: colors[key] } : undefined}
+                  >
+                    {!colors[key] && <span className="block text-[8px] leading-[14px] text-neutral-500">×</span>}
+                  </button>
                 </div>
+                {paletteFor === key && (
+                  <div className="rounded border border-ink-6 bg-ink-1 p-1.5 space-y-1.5">
+                    <div className="grid grid-cols-9 gap-1">
+                      {NEON_KLEUREN.map((k) => (
+                        <button
+                          key={k.hex}
+                          type="button"
+                          title={`${k.naam} (${k.hex})`}
+                          onClick={() => zetKleur(key, k.hex)}
+                          style={{ background: k.hex }}
+                          className={`h-4 w-4 rounded-sm transition-transform hover:scale-125 ${
+                            colors[key] === k.hex ? "ring-2 ring-white ring-offset-1 ring-offset-ink-1" : ""
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => zetKleur(key, null)}
+                      className="text-[10px] text-neutral-500 hover:text-neutral-300"
+                    >
+                      Standaardkleur gebruiken
+                    </button>
+                  </div>
+                )}
+                </Fragment>
               );
             })}
           </div>

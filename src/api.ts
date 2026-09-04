@@ -609,6 +609,8 @@ export async function removeZwitserlevenStock(ticker: string): Promise<{ ok: boo
 export interface TableColumnPref {
   order: string[];
   hidden: string[];
+  /** Fontkleur per kolom-key (hex uit het neon-palet). Ontbreekt = standaard. */
+  colors?: Record<string, string>;
 }
 
 export type TabWidth = "normaal" | "breed" | "vol";

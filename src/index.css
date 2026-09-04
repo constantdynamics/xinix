@@ -106,3 +106,12 @@ input[type="range"] {
   accent-color: #ff1f8f;
   background: transparent;
 }
+
+/* Kolomkleur in tabellen — de kolom-kiezer zet --col-tint op de cel.
+   Ook de inhoud forceren, want cellen bevatten spans met hun eigen
+   text-kleur (winst/verlies, medailles); zonder !important zou een
+   gekozen kolomkleur daar niet doorheen komen. */
+td.col-tint,
+td.col-tint * {
+  color: var(--col-tint) !important;
+}
