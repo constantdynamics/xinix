@@ -1110,6 +1110,28 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
   );
 }
 
+// Beurscode uit een Google-Finance URL → Yahoo-suffix. Zonder deze vertaling
+// wordt "QTWO:CVE" opgezocht als kale "QTWO", en dáár geeft Yahoo een heel
+// ander bedrijf terug (Q2 Holdings op de NYSE i.p.v. Q2 Metals op de TSXV).
+// Amerikaanse beurzen hebben geen suffix; onbekende codes laten we met rust.
+const YAHOO_SUFFIX: Record<string, string> = {
+  NASDAQ: "", NYSE: "", NYSEAMERICAN: "", NYSEARCA: "", BATS: "", OTCMKTS: "",
+  CVE: ".V", TSXV: ".V", TSE: ".TO", TSX: ".TO", CNSX: ".CN",
+  ASX: ".AX", LON: ".L", HKG: ".HK", TYO: ".T", SHA: ".SS", SHE: ".SZ",
+  EPA: ".PA", ETR: ".DE", FRA: ".F", AMS: ".AS", EBR: ".BR", BIT: ".MI",
+  BME: ".MC", ELI: ".LS", STO: ".ST", CPH: ".CO", HEL: ".HE", OSL: ".OL",
+  ICE: ".IC", VIE: ".VI", SWX: ".SW", VTX: ".SW", NZE: ".NZ", TAE: ".TA",
+  JSE: ".JO", BVMF: ".SA", BMV: ".MX", NSE: ".NS", BOM: ".BO", KRX: ".KS",
+  TPE: ".TW", SGX: ".SI", KLSE: ".KL", IDX: ".JK", SET: ".BK",
+};
+
+// Plak de juiste Yahoo-suffix aan een ticker die nog geen suffix heeft.
+function metBeursSuffix(ticker: string, exchange?: string): string {
+  if (!exchange || ticker.includes(".")) return ticker;
+  const suffix = YAHOO_SUFFIX[exchange.toUpperCase()];
+  return suffix === undefined ? ticker : ticker + suffix;
+}
+
 // Parse vrije tekst input naar (ticker, optionele exchange) paren.
 // Ondersteund:
 //   - Plain ticker: "AAPL"
@@ -1139,9 +1161,12 @@ function parseTickerInput(input: string): Array<{ ticker: string; exchange?: str
         ticker = tok.toUpperCase();
       }
     }
-    if (ticker && !seen.has(ticker)) {
-      seen.add(ticker);
-      out.push({ ticker, exchange });
+    if (ticker) {
+      ticker = metBeursSuffix(ticker, exchange);
+      if (!seen.has(ticker)) {
+        seen.add(ticker);
+        out.push({ ticker, exchange });
+      }
     }
   }
   return out;

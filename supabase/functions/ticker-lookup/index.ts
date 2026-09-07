@@ -91,6 +91,15 @@ async function lookupOne(ticker: string): Promise<LookupResult> {
     const meta = res0?.meta;
     if (!meta) return miss(ticker);
 
+    // Yahoo valt bij een onbekend symbool stilletjes terug op de US-notering:
+    // een vraag om "QTWO.V" (Q2 Metals, TSXV) levert "QTWO" (Q2 Holdings, NYSE).
+    // Dat is een ander bedrijf, dus alleen een exacte symbooltreffer telt —
+    // anders probeert resolve() gewoon de volgende suffix.
+    const gotSymbol = (meta.symbol ?? "").toUpperCase();
+    if (gotSymbol && gotSymbol !== ticker.toUpperCase()) {
+      return miss(ticker, `yahoo gaf ${gotSymbol} terug`);
+    }
+
     const closes = (res0?.indicators?.quote?.[0]?.close ?? []).filter(
       (v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0
     );
