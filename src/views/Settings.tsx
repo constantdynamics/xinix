@@ -196,7 +196,7 @@ export function SettingsView({ data }: { data?: Dashboard }) {
             type="number"
             min={0}
             max={365}
-            value={s.notify_cooldown_days ?? 14}
+            value={s.notify_cooldown_days ?? 100}
             onChange={(e) =>
               setS({
                 ...s,
