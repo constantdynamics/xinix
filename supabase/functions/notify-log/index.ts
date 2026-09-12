@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
         return { ...r, company: m?.company ?? null, exchange: m?.exchange ?? null };
       }),
       mutes: muteRes.data ?? [],
-      cooldown_days: (cfgRes.data as { notify_cooldown_days?: number } | null)?.notify_cooldown_days ?? 14,
+      cooldown_days: (cfgRes.data as { notify_cooldown_days?: number } | null)?.notify_cooldown_days ?? 100,
     });
   }
 
