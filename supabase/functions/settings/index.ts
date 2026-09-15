@@ -36,6 +36,7 @@ Deno.serve(async (req) => {
       "alert_only_goud_events",
       "notify_cooldown_days",
       "limit_suggest_pct",
+      "hippo_alert_min_prob",
     ];
     const update: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -50,6 +51,11 @@ Deno.serve(async (req) => {
     if ("limit_suggest_pct" in update) {
       const n = Number(update.limit_suggest_pct);
       update.limit_suggest_pct = Number.isFinite(n) ? Math.min(200, Math.max(0, n)) : 0;
+    }
+    // NOT NULL-kolom; leeg veld = "geen hippo-meldingen" (0 = uit).
+    if ("hippo_alert_min_prob" in update) {
+      const n = Number(update.hippo_alert_min_prob);
+      update.hippo_alert_min_prob = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
     }
     const { error } = await supabase
       .from("signal_settings")

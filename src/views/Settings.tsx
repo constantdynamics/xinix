@@ -245,6 +245,36 @@ export function SettingsView({ data }: { data?: Dashboard }) {
           </p>
         </Field>
 
+        <Field label="Hippo-melding vanaf kans (%, 0 = uit)">
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            value={s.hippo_alert_min_prob ?? 80}
+            onChange={(e) =>
+              setS({
+                ...s,
+                hippo_alert_min_prob:
+                  e.target.value === "" ? 0 : Number(e.target.value),
+              })
+            }
+            className="w-full"
+          />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Het tabblad Favorieten → Hippos schat elke 2 uur per favoriet de
+            kans dat de koers binnen 14 dagen minimaal +50% doet. Zodra die
+            gekalibreerde kans voor een verhandelbare favoriet minimaal dit
+            percentage is, krijg je meteen een ntfy-melding. Die gaat{" "}
+            <strong className="text-fog-pink">buiten de cooldown</strong> om
+            (een sprint van 14 dagen kan niet 100 dagen wachten), maar demping en
+            "gezien" gelden wél; per aandeel hoogstens één melding per 14 dagen,
+            tenzij de kans sindsdien 10 punten hoger ligt. Kijk op het tabblad
+            welke kansen het model in de praktijk haalt voordat je de drempel
+            kiest.
+          </p>
+        </Field>
+
         <div className="flex items-center gap-3 pt-2">
           <Button variant="primary" onClick={save}>
             Opslaan

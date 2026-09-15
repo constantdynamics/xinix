@@ -461,6 +461,95 @@ export async function fetchRocketScores(opts?: { limit?: number; favoritesOnly?:
   return (await res.json()) as RocketResponse;
 }
 
+// ── Hippos (+50% in 14 dagen) ────────────────────────────────────────────────
+// Per favoriet de gekalibreerde kans dat de koers binnen 14 dagen minimaal
+// +50% doet, berekend door xinix-hippo-background (elke 2 uur). Volledig
+// voorberekend; de frontend toont alleen.
+export interface HippoItem {
+  ticker: string;
+  rank: number;
+  /** Gekalibreerde kans (%) op +50% binnen 14 dagen. */
+  prob: number;
+  /** Modelkans vóór kalibratie (%). */
+  raw_prob: number;
+  /** Gepoolde basiskans (%) per dag over alle favorieten. */
+  base_rate: number;
+  /** Eigen basiskans (%) van dit aandeel, gekrompen naar de gepoolde. */
+  own_rate: number | null;
+  company: string | null;
+  sector: string | null;
+  exchange: string | null;
+  last_close: number | null;
+  dollar_volume: number | null;
+  pct_change_5d: number | null;
+  pct_change_22d: number | null;
+  volume_ratio: number | null;
+  days_since_peak: number | null;
+  pct_below_high1y: number | null;
+  peak_count: number;
+  rating: number | null;
+  tradeable: boolean;
+  factors: RocketFactor[];
+  flags: string[];
+  scanned_at: string | null;
+  alerted_at: string | null;
+  alerted_prob: number | null;
+  computed_at: string;
+}
+export interface HippoLiftBucket {
+  bucket: string;
+  n: number;
+  hits: number;
+  rate_pct: number;
+  lift: number;
+}
+export interface HippoCalibBucket {
+  bucket: string;
+  lo: number;
+  hi: number;
+  n: number;
+  hits: number;
+  rate_pct: number | null;
+}
+export interface HippoCalibration {
+  computed_at: string;
+  base_rate: number;
+  days_n: number;
+  hits: number;
+  tickers_scanned: number;
+  favorites: number;
+  lifts: Record<string, { label: string; buckets: HippoLiftBucket[] }>;
+  calib: HippoCalibBucket[];
+  max_prob: number | null;
+}
+export interface HippoResponse {
+  items: HippoItem[];
+  calibration: HippoCalibration | null;
+  /** Meldingsdrempel (%) uit de instellingen. */
+  threshold: number;
+  favorite_count: number;
+  scanned_count: number;
+  computed_at: string | null;
+}
+
+// Handmatig een run starten (admin): scant de volgende batch favorieten en
+// herberekent de ranglijst — dezelfde run als de 2-uurlijkse cron.
+export async function triggerHippoScan(): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(apiUrl("/api/xinix-hippo-background"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`hippo-scan ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; message?: string };
+}
+
+export async function fetchHippoScores(): Promise<HippoResponse> {
+  const res = await fetch(apiUrl("/api/hippo-scores"));
+  if (!res.ok) throw new Error(`hippo-scores ${res.status}`);
+  return (await res.json()) as HippoResponse;
+}
+
 // ── Verdubbelaars research-overlay ───────────────────────────────────────────
 // Per favoriet samengevatte research (katalysatoren, materiële SEC-meldingen,
 // cash runway, …), elke ~15 dagen ververst door xinix-doubling-research-background.
