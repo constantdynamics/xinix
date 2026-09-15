@@ -90,7 +90,7 @@ const HOLD_MULT = 1.2;        // de dag erna nog ≥ +20%, anders een 1-dags dat
 const MIN_PRICE = 0.10;       // sub-dime-koersen zijn ruis (zelfde grens als poefies)
 const MAX_BAR_JUMP = 5;       // bar ≥5× de vorige én meteen terug = data-fout
 const MIN_BARS = 120;
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 250;       // ~0,35 s per ticker gemeten; het budget hieronder is de echte grens
 const RESCAN_DAYS = 30;
 const BUDGET_MS = 95_000;
 const SLEEP_MS = 250;
@@ -367,7 +367,11 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     .filter((x) => !x.at || Date.parse(x.at) < cutoffMs)
     .sort((a, b) => (a.at ? Date.parse(a.at) : 0) - (b.at ? Date.parse(b.at) : 0))
     .slice(0, BATCH_SIZE);
+  // Yahoo-fouten (geschrapte ticker, 404) zijn geen run-fout: ze worden als
+  // ok=false in de historie gezet en over 30 dagen opnieuw geprobeerd. Alleen
+  // als vrijwel de hele batch faalt is er echt iets mis.
   let scanned = 0, scanErrors = 0;
+  const scanErrMsgs: string[] = [];
   for (const d of due) {
     if (Date.now() - startMs > BUDGET_MS) break;
     scanned++;
@@ -378,7 +382,7 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     } catch (e) {
       scanErrors++;
       const msg = e instanceof Error ? e.message : String(e);
-      if (errors.length < 3) errors.push(`${d.ticker}: ${msg}`);
+      if (scanErrMsgs.length < 3) scanErrMsgs.push(`${d.ticker}: ${msg}`);
       row = { ticker: d.ticker, scanned_at: new Date().toISOString(), ok: false, error: msg, bars: 0, days_n: 0, hits: 0, hits_2y: 0, days_2y: 0, peak_count: 0, last_peak_date: null, first_date: null, buckets: {}, calib: {} };
     }
     const { error } = await sb.from("xinix_hippo_history").upsert(row, { onConflict: "ticker" });
@@ -538,9 +542,10 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   }
 
   const top5 = scored.slice(0, 5).map((s) => `${s.ticker} ${s.prob}%`).join(", ");
+  const scanBroken = scanned > 0 && scanErrors >= Math.max(1, Math.ceil(scanned / 2));
   return {
-    ok: errors.length === 0,
-    message: `gescand ${scanned}/${due.length} (fouten ${scanErrors}), gescoord ${scored.length}/${favs.length}, basiskans ${r1(pool.p0 * 100)}%, hoogste ${scored[0]?.prob ?? "—"}%, drempel ${threshold}%, gemeld ${notified}` + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
+    ok: errors.length === 0 && !scanBroken,
+    message: `gescand ${scanned}/${due.length} (fouten ${scanErrors}), gescoord ${scored.length}/${favs.length}, basiskans ${r1(pool.p0 * 100)}%, hoogste ${scored[0]?.prob ?? "—"}%, drempel ${threshold}%, gemeld ${notified}` + (scanErrMsgs.length ? `; yahoo: ${scanErrMsgs.join("; ")}` : "") + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
     metrics: { scanned, scan_errors: scanErrors, scored: scored.length, favorites: favs.length, tickers_with_history: pool.tickers, base_rate_pct: r1(pool.p0 * 100), days_n: pool.n, hits: pool.hits, max_prob: scored[0]?.prob ?? null, threshold, candidates, blocked, notified, top5, errors: errors.length },
   };
 }));
