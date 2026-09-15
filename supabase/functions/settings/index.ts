@@ -37,6 +37,8 @@ Deno.serve(async (req) => {
       "notify_cooldown_days",
       "limit_suggest_pct",
       "hippo_alert_min_prob",
+      "hippo_alert_horizon",
+      "hippo_alert_max_per_week",
     ];
     const update: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -56,6 +58,16 @@ Deno.serve(async (req) => {
     if ("hippo_alert_min_prob" in update) {
       const n = Number(update.hippo_alert_min_prob);
       update.hippo_alert_min_prob = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
+    }
+    // Alleen de twee gemeten horizonnen; iets anders zou de check-constraint
+    // raken en de hele opslag laten falen.
+    if ("hippo_alert_horizon" in update) {
+      update.hippo_alert_horizon = Number(update.hippo_alert_horizon) === 7 ? 7 : 14;
+    }
+    // NOT NULL-kolom; 0 = geen weekplafond.
+    if ("hippo_alert_max_per_week" in update) {
+      const n = Number(update.hippo_alert_max_per_week);
+      update.hippo_alert_max_per_week = Number.isFinite(n) ? Math.min(50, Math.max(0, Math.round(n))) : 0;
     }
     const { error } = await supabase
       .from("signal_settings")

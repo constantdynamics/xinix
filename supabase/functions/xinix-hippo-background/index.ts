@@ -3,9 +3,13 @@
 // die kans boven signal_settings.hippo_alert_min_prob komt (standaard 80%).
 //
 // ── Hoe de kans wordt gemeten ────────────────────────────────────────────────
-// De gebeurtenis: vanaf een handelsdag t haalt de slotkoers in de 10
-// handelsdagen daarna (≈ 14 kalenderdagen) minimaal +50%, en de dag ná dat
-// moment staat de koers nog ≥ +20% (anders is het een 1-dags data-piek).
+// De gebeurtenis: vanaf een handelsdag t haalt de slotkoers binnen de horizon
+// minimaal +50%, en de dag ná dat moment staat de koers nog ≥ +20% (anders is
+// het een 1-dags data-piek). Twee horizonnen worden náást elkaar gemeten:
+// 5 handelsdagen (≈ 7 kalenderdagen) en 10 handelsdagen (≈ 14). Beide op exact
+// dezelfde dagen en met exact dezelfde kenmerken, zodat het verschil af te lezen
+// is in plaats van te beredeneren; alleen de uitkomst verschilt. Een korter
+// venster is strenger, dus die kansen liggen per definitie lager.
 //
 // 1. Scan (gebudgetteerd, ~100 favorieten per run, herscan per 30 dagen):
 //    10 jaar dagkoersen per favoriet bij Yahoo. Per dag: gebeurde het? Plus
@@ -47,7 +51,7 @@ function runBackground(job: string, fn: () => Promise<RunResult>) {
 }
 
 // ── ntfy + links (zelfde aanpak als xinix-fav-alerts) ────────────────────────
-interface Settings { ntfy_topic: string | null; ntfy_server: string; quiet_hours_start: number | null; quiet_hours_end: number | null; hippo_alert_min_prob: number | null; }
+interface Settings { ntfy_topic: string | null; ntfy_server: string; quiet_hours_start: number | null; quiet_hours_end: number | null; hippo_alert_min_prob: number | null; hippo_alert_horizon: number | null; hippo_alert_max_per_week: number | null; }
 function inQuietHours(s: Settings): boolean { if (s.quiet_hours_start == null || s.quiet_hours_end == null) return false; const h = new Date().getUTCHours(); const start = s.quiet_hours_start; const end = s.quiet_hours_end; if (start === end) return false; if (start < end) return h >= start && h < end; return h >= start || h < end; }
 async function sendNtfy(server: string, topic: string, title: string, body: string, priority: number, tags: string[], clickUrl: string | null): Promise<{ ok: boolean; error?: string }> {
   const payload: Record<string, unknown> = { topic, title, message: body, priority, tags };
@@ -85,15 +89,26 @@ function favAppUrl(ticker: string): string { return `https://constantdynamics.gi
 
 // ── Parameters ───────────────────────────────────────────────────────────────
 const EVENT_MULT = 1.5;       // +50%
-const FWD_BARS = 10;          // 10 handelsdagen ≈ 14 kalenderdagen
+// De horizonnen die naast elkaar gemeten worden. `bars` is het aantal
+// handelsdagen vooruit, `days` de kalenderdagen die dat benadert.
+interface Horizon { key: string; bars: number; days: number }
+const HORIZONS: Horizon[] = [
+  { key: "7",  bars: 5,  days: 7 },
+  { key: "14", bars: 10, days: 14 },
+];
+// Alle horizonnen worden op dezelfde dagen gemeten (het grootste venster moet
+// volledig beschikbaar zijn), anders vergelijk je twee verschillende steekproeven.
+const MAX_FWD_BARS = Math.max(...HORIZONS.map((h) => h.bars));
+const DEFAULT_HORIZON = "14";     // de horizon die de losse kolommen spiegelen
+const PEAK_BARS = MAX_FWD_BARS;   // definitie van een "+50%-piek" voor het since-kenmerk
 const HOLD_MULT = 1.2;        // de dag erna nog ≥ +20%, anders een 1-dags data-piek
 const MIN_PRICE = 0.10;       // sub-dime-koersen zijn ruis (zelfde grens als poefies)
 const MAX_BAR_JUMP = 5;       // bar ≥5× de vorige én meteen terug = data-fout
 const MIN_BARS = 120;
 // Yahoo kost ~0,35 s per ticker, maar de echte grens is de CPU-limiet van de
-// edge runtime (2 s per aanroep): een batch van 250 werd na ~160 tickers
-// afgebroken. 100 is gemeten veilig; het tijdsbudget is de tweede vangrail.
-const BATCH_SIZE = 100;
+// edge runtime: een batch van 250 werd na ~160 tickers afgebroken. 100 was
+// gemeten veilig met één horizon; met twee verdubbelt de kalibratielus, dus 75.
+const BATCH_SIZE = 75;
 const RESCAN_DAYS = 30;
 const BUDGET_MS = 95_000;
 const SLEEP_MS = 250;
@@ -104,7 +119,7 @@ const LIFT_MIN = 0.2, LIFT_MAX = 5;
 const PROB_CAP = 90;
 const REALERT_DAYS = 14;      // opnieuw melden: na 14 dagen, of …
 const REALERT_GAIN = 10;      // … als de kans ≥10 punten hoger is dan bij de vorige melding
-const MAX_ALERTS = 10;
+const WEEK_MS = 7 * 86400000; // rollend venster voor het weekplafond
 const DAY = 86400000;
 
 // Vijf toestandskenmerken, elk in buckets. De bucket-sleutel is de index in de
@@ -142,14 +157,24 @@ function bump(c: Counts, key: string, hit: boolean) { const e = c[key] ?? (c[key
 
 // ── Gepoolde lifts uit alle histories ────────────────────────────────────────
 interface Pooled {
+  hz: string;                       // "7" of "14"
   p0: number;                       // fractie
   n: number; hits: number; tickers: number;
   lifts: Record<string, Record<string, { n: number; h: number; rate: number; lift: number }>>;
   calib: Counts;
 }
 function clampLift(x: number) { return Math.min(LIFT_MAX, Math.max(LIFT_MIN, x)); }
-function poolHistories(rows: HistoryRow[]): Pooled | null {
-  const ok = rows.filter((r) => r.ok && r.days_n > 0);
+/** Haal de tellingen van één horizon uit een historie-rij. */
+function countsOf(r: HistoryRow, hz: string): HorizonCounts | null {
+  const h = (r.horizons ?? {})[hz];
+  if (h && h.days_n > 0) return h;
+  // Rijen van vóór de horizon-migratie dragen alleen de 14-daagse in de losse
+  // kolommen; die blijven meetellen tot hun eerstvolgende herscan.
+  if (hz === "14" && r.days_n > 0) return { days_n: r.days_n, hits: r.hits, days_2y: r.days_2y, hits_2y: r.hits_2y, buckets: r.buckets ?? {}, calib: r.calib ?? {} };
+  return null;
+}
+function poolHistories(rows: HistoryRow[], hz: string): Pooled | null {
+  const ok = rows.map((r) => (r.ok ? countsOf(r, hz) : null)).filter((c): c is HorizonCounts => c != null);
   if (!ok.length) return null;
   let n = 0, hits = 0;
   const sums: Record<string, Counts> = {};
@@ -173,7 +198,22 @@ function poolHistories(rows: HistoryRow[]): Pooled | null {
       lifts[f.key][k] = { n: v.n, h: v.h, rate, lift: clampLift(rate / p0) };
     }
   }
-  return { p0, n, hits, tickers: ok.length, lifts, calib };
+  return { hz, p0, n, hits, tickers: ok.length, lifts, calib };
+}
+/**
+ * Het plafond: de hoogste frequentie die ooit in een kansbucket gemeten is.
+ * Een gekalibreerde kans kan daar niet bovenuit, dus een meldingsdrempel
+ * erboven vuurt nooit. Alleen buckets met genoeg waarnemingen tellen mee,
+ * anders blaast één toevallige uitschieter het getal op.
+ */
+function ceilingOf(pool: Pooled): number | null {
+  let best: number | null = null;
+  for (const v of Object.values(pool.calib)) {
+    if (v.n < 1000) continue;
+    const rate = (100 * v.h) / v.n;
+    if (best == null || rate > best) best = rate;
+  }
+  return best;
 }
 interface Features { r5: number | null; r22: number | null; vol: number | null; since: number | null; hi: number | null }
 function rawProb(pool: Pooled, ownLift: number, feats: Features): { prob: number; parts: Array<{ key: string; bucket: string; lift: number; n: number }> } {
@@ -242,22 +282,46 @@ async function fetchYahoo10y(ticker: string): Promise<Bar[]> {
 }
 
 // ── Historie meten ───────────────────────────────────────────────────────────
-interface HistoryRow {
-  ticker: string; scanned_at: string; ok: boolean; error: string | null;
-  bars: number; days_n: number; hits: number; hits_2y: number; days_2y: number;
-  peak_count: number; last_peak_date: string | null; first_date: string | null;
+interface HorizonCounts {
+  days_n: number; hits: number; days_2y: number; hits_2y: number;
   buckets: Record<string, Counts>; calib: Counts;
 }
-function analyze(ticker: string, bars: Bar[], pool: Pooled | null, nowMs: number): HistoryRow {
-  const n = bars.length;
-  const row: HistoryRow = { ticker, scanned_at: new Date().toISOString(), ok: true, error: null, bars: n, days_n: 0, hits: 0, hits_2y: 0, days_2y: 0, peak_count: 0, last_peak_date: null, first_date: n ? bars[0].date : null, buckets: {}, calib: {} };
-  if (n < MIN_BARS) { row.ok = false; row.error = `te weinig historie (${n} dagen)`; return row; }
-  for (const f of FEATURES) row.buckets[f.key] = {};
+interface HistoryRow {
+  ticker: string; scanned_at: string; ok: boolean; error: string | null;
+  bars: number;
+  // De losse tellingen spiegelen horizon 14, zodat bestaande queries werken.
+  days_n: number; hits: number; hits_2y: number; days_2y: number;
+  buckets: Record<string, Counts>; calib: Counts;
+  peak_count: number; last_peak_date: string | null; first_date: string | null;
+  horizons: Record<string, HorizonCounts>;
+}
+function emptyCounts(): HorizonCounts {
+  const buckets: Record<string, Counts> = {};
+  for (const f of FEATURES) buckets[f.key] = {};
+  return { days_n: 0, hits: 0, days_2y: 0, hits_2y: 0, buckets, calib: {} };
+}
+function emptyHistory(ticker: string, error: string | null, bars = 0): HistoryRow {
+  const e = emptyCounts();
+  return {
+    ticker, scanned_at: new Date().toISOString(), ok: error == null, error, bars,
+    days_n: 0, hits: 0, hits_2y: 0, days_2y: 0, buckets: e.buckets, calib: {},
+    peak_count: 0, last_peak_date: null, first_date: null,
+    horizons: Object.fromEntries(HORIZONS.map((h) => [h.key, emptyCounts()])),
+  };
+}
 
-  // Piekdagen: dag j waarop de koers ≥ +50% staat t.o.v. een van de 10 dagen ervoor.
+function analyze(ticker: string, bars: Bar[], pools: Record<string, Pooled | null>, nowMs: number): HistoryRow {
+  const n = bars.length;
+  const row = emptyHistory(ticker, null, n);
+  row.first_date = n ? bars[0].date : null;
+  if (n < MIN_BARS) { row.ok = false; row.error = `te weinig historie (${n} dagen)`; return row; }
+
+  // Piekdagen: dag j waarop de koers ≥ +50% staat t.o.v. een van de dagen ervoor.
+  // Horizon-onafhankelijk, zodat het since-kenmerk voor beide horizonnen gelijk is
+  // en alleen de uitkomst verschilt.
   const isPeak = new Array<boolean>(n).fill(false);
   for (let j = 1; j < n; j++) {
-    for (let k = 1; k <= FWD_BARS && j - k >= 0; k++) {
+    for (let k = 1; k <= PEAK_BARS && j - k >= 0; k++) {
       const base = bars[j - k].close;
       if (base >= MIN_PRICE && bars[j].close >= base * EVENT_MULT) { isPeak[j] = true; break; }
     }
@@ -268,31 +332,36 @@ function analyze(ticker: string, bars: Bar[], pool: Pooled | null, nowMs: number
   row.peak_count = peakCount;
   row.last_peak_date = lastPeakIdx >= 0 ? bars[lastPeakIdx].date : null;
 
-  // Per dag: de vijf kenmerken op die dag + of de gebeurtenis daarna volgde.
-  // Alleen dagen met een volledig venster van 10 handelsdagen vooruit tellen.
+  // Per dag: de vijf kenmerken op die dag + per horizon of de gebeurtenis volgde.
+  // Alleen dagen waar het gróótste venster volledig beschikbaar is tellen mee,
+  // zodat beide horizonnen op exact dezelfde steekproef rusten.
   const twoYearsAgo = nowMs - 730 * DAY;
-  const days: Array<{ feats: Features; hit: boolean; ms: number }> = [];
+  const days: Array<{ feats: Features; hits: Record<string, boolean>; ms: number }> = [];
   let volSum = 0;                                // lopende som van vol[t-30..t-1]
   let lastPeakBefore = -1;
   // Glijdend maximum over de 252 bars vóór t (monotone deque van indexen),
   // zodat de 1-jaarstop O(1) per dag kost — de CPU-limiet van de edge
   // runtime is krap.
   const dq: number[] = [];
-  for (let t = 0; t + FWD_BARS <= n - 1; t++) {
+  for (let t = 0; t + MAX_FWD_BARS <= n - 1; t++) {
     if (isPeak[t]) lastPeakBefore = t;
     if (t >= 30) volSum -= bars[t - 30].vol;
     while (dq.length && dq[0] < t - 252) dq.shift();
     const c = bars[t].close;
     if (t >= 30 && c >= MIN_PRICE) {
-      let hit = false;
-      for (let j = t + 1; j <= t + FWD_BARS; j++) {
+      // Eén keer vooruit lopen: de eerste dag waarop +50% gehaald werd en
+      // standhield. Die index bepaalt meteen welke horizonnen hem tellen.
+      let firstHit = -1;
+      for (let j = t + 1; j <= t + MAX_FWD_BARS; j++) {
         if (bars[j].close < c * EVENT_MULT) continue;
-        if (j + 1 >= n || bars[j + 1].close >= c * HOLD_MULT) { hit = true; break; }
+        if (j + 1 >= n || bars[j + 1].close >= c * HOLD_MULT) { firstHit = j - t; break; }
       }
+      const hits: Record<string, boolean> = {};
+      for (const h of HORIZONS) hits[h.key] = firstHit > 0 && firstHit <= h.bars;
       const hi = dq.length ? Math.max(c, bars[dq[0]].close) : c;
       const avgVol = volSum / 30;
       days.push({
-        ms: bars[t].ms, hit,
+        ms: bars[t].ms, hits,
         feats: {
           r5: (c / bars[t - 5].close - 1) * 100,
           r22: (c / bars[t - 22].close - 1) * 100,
@@ -307,18 +376,29 @@ function analyze(ticker: string, bars: Bar[], pool: Pooled | null, nowMs: number
     dq.push(t);
   }
 
-  for (const d of days) {
-    row.days_n++; if (d.hit) row.hits++;
-    if (d.ms >= twoYearsAgo) { row.days_2y++; if (d.hit) row.hits_2y++; }
-    for (const f of FEATURES) bump(row.buckets[f.key], bucketKey((d.feats as unknown as Record<string, number | null>)[f.key], f), d.hit);
+  for (const h of HORIZONS) {
+    const cnt = row.horizons[h.key];
+    for (const d of days) {
+      const hit = d.hits[h.key];
+      cnt.days_n++; if (hit) cnt.hits++;
+      if (d.ms >= twoYearsAgo) { cnt.days_2y++; if (hit) cnt.hits_2y++; }
+      for (const f of FEATURES) bump(cnt.buckets[f.key], bucketKey((d.feats as unknown as Record<string, number | null>)[f.key], f), hit);
+    }
+    // Kalibratie: wat zei het model (met de lifts van vóór deze batch) op elke
+    // historische dag, en wat gebeurde er? De eigen lift komt uit de volledige
+    // eigen historie — dezelfde waarde die het scoren straks gebruikt.
+    const pool = pools[h.key];
+    if (pool && cnt.days_n > 0) {
+      const own = ownLiftOf(pool, cnt.hits, cnt.days_n).lift;
+      for (const d of days) bump(cnt.calib, calibKey(rawProb(pool, own, d.feats).prob), d.hits[h.key]);
+    }
   }
-  // Kalibratie: wat zei het model (met de lifts van vóór deze batch) op elke
-  // historische dag, en wat gebeurde er? De eigen lift komt uit de volledige
-  // eigen historie — dezelfde waarde die het scoren straks gebruikt.
-  if (pool && row.days_n > 0) {
-    const own = ownLiftOf(pool, row.hits, row.days_n).lift;
-    for (const d of days) bump(row.calib, calibKey(rawProb(pool, own, d.feats).prob), d.hit);
-  }
+
+  // De losse kolommen spiegelen horizon 14.
+  const main = row.horizons[DEFAULT_HORIZON];
+  row.days_n = main.days_n; row.hits = main.hits;
+  row.days_2y = main.days_2y; row.hits_2y = main.hits_2y;
+  row.buckets = main.buckets; row.calib = main.calib;
   return row;
 }
 
@@ -369,7 +449,9 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   // De lifts van vóór deze batch: nodig om per historische dag de modelkans
   // te kunnen uitrekenen (kalibratie). Bij de allereerste runs is er nog
   // niets, dan blijft de kalibratie leeg tot de volgende herscan.
-  const poolBefore = poolHistories(histories.filter((h) => favSet.has(h.ticker)));
+  const own = histories.filter((h) => favSet.has(h.ticker));
+  const poolsBefore: Record<string, Pooled | null> = {};
+  for (const h of HORIZONS) poolsBefore[h.key] = poolHistories(own, h.key);
   const cutoffMs = nowMs - RESCAN_DAYS * DAY;
   const due = favs
     .map((f) => ({ ticker: f.ticker, at: histBy.get(f.ticker)?.scanned_at ?? null }))
@@ -387,12 +469,12 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     let row: HistoryRow;
     try {
       const bars = await fetchYahoo10y(d.ticker);
-      row = analyze(d.ticker, bars, poolBefore, nowMs);
+      row = analyze(d.ticker, bars, poolsBefore, nowMs);
     } catch (e) {
       scanErrors++;
       const msg = e instanceof Error ? e.message : String(e);
       if (scanErrMsgs.length < 3) scanErrMsgs.push(`${d.ticker}: ${msg}`);
-      row = { ticker: d.ticker, scanned_at: new Date().toISOString(), ok: false, error: msg, bars: 0, days_n: 0, hits: 0, hits_2y: 0, days_2y: 0, peak_count: 0, last_peak_date: null, first_date: null, buckets: {}, calib: {} };
+      row = emptyHistory(d.ticker, msg);
     }
     const { error } = await sb.from("xinix_hippo_history").upsert(row, { onConflict: "ticker" });
     if (error) errors.push(`history ${d.ticker}: ${error.message}`);
@@ -402,7 +484,10 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   histories = [...histBy.values()];
 
   // ── 2. Scoren op verse koersen ────────────────────────────────────────────
-  const pool = poolHistories(histories.filter((h) => favSet.has(h.ticker)));
+  const ownAfter = histories.filter((h) => favSet.has(h.ticker));
+  const pools: Record<string, Pooled | null> = {};
+  for (const h of HORIZONS) pools[h.key] = poolHistories(ownAfter, h.key);
+  const pool = pools[DEFAULT_HORIZON];
   if (!pool) {
     return { ok: errors.length === 0, message: `gescand ${scanned} (fouten ${scanErrors}); nog geen historie om op te scoren`, metrics: { scanned, scan_errors: scanErrors } };
   }
@@ -410,7 +495,7 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const [tk, pr, prevScores] = await Promise.all([
     chunkedIn<any>(sb, "signal_tickers", "ticker, company, exchange, sector, yahoo_sector", tickers),
     chunkedIn<any>(sb, "signal_price_summary", "ticker, last_close, last_volume, avg_volume_30d, volume_ratio, pct_change_5d, pct_change_22d, high_1y, updated_at", tickers),
-    chunkedIn<any>(sb, "xinix_hippo_scores", "ticker, alerted_at, alerted_prob", tickers),
+    chunkedIn<any>(sb, "xinix_hippo_scores", "ticker, alerted_at, alerted_prob, alerted_horizon", tickers),
   ]);
   const tkBy = new Map(tk.map((r) => [r.ticker, r]));
   const prBy = new Map(pr.map((r) => [r.ticker, r]));
@@ -434,21 +519,32 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     if (r5 != null && r5 >= 50) since = 0;    // sprint loopt nu; de scan kan tot 30 dagen achterlopen
     const feats: Features = { r5, r22, vol, since, hi };
 
-    const own = ownLiftOf(pool, h.hits, h.days_n);
-    const raw = rawProb(pool, own.lift, feats);
-    const cal = calibrate(pool, raw.prob);
-
-    const factors: Factor[] = [];
-    factors.push({ label: "Basiskans", detail: `${r1(pool.p0 * 100)}% van alle favoriet-dagen begon een +50%-sprint (${pool.hits.toLocaleString("nl-NL")} van ${pool.n.toLocaleString("nl-NL")})`, mult: 1 });
-    factors.push({ label: "Eigen historie", detail: h.hits > 0 ? `${r1((100 * h.hits) / h.days_n)}% van de eigen dagen (${h.hits}× in ${Math.round(h.days_n / 252)} jaar, ${h.peak_count} sprint${h.peak_count === 1 ? "" : "s"}${h.hits_2y ? `, ${h.hits_2y} dag${h.hits_2y === 1 ? "" : "en"} in de laatste 2 jaar` : ""})` : `nooit +50% in 14 dagen gedaan in ${Math.round(h.days_n / 252)} jaar`, mult: r1(own.lift) });
-    for (const part of raw.parts) {
-      const fd = FEATURES.find((x) => x.key === part.key)!;
-      const v = (feats as unknown as Record<string, number | null>)[part.key];
-      const shown = v == null ? (fd.nullLabel ?? "onbekend") : part.key === "vol" ? `${v.toFixed(1)}×` : part.key === "since" ? `${Math.round(v)} dagen` : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}%`;
-      const e = pool.lifts[part.key]?.[part.bucket];
-      factors.push({ label: fd.label, detail: `${shown} → bucket ${bucketLabel(part.bucket, fd)}${e ? `: ${r1(e.rate * 100)}% gemeten op ${e.n.toLocaleString("nl-NL")} dagen` : ""}`, mult: r1(part.lift) });
+    // Dezelfde opbouw voor elke horizon: alleen de gemeten uitkomst verschilt.
+    const per: Record<string, { prob: number; raw: number; base: number; ownRate: number; factors: Factor[] } | null> = {};
+    for (const hz of HORIZONS) {
+      const pl = pools[hz.key];
+      const cnt = countsOf(h, hz.key);
+      if (!pl || !cnt) { per[hz.key] = null; continue; }
+      const own = ownLiftOf(pl, cnt.hits, cnt.days_n);
+      const raw = rawProb(pl, own.lift, feats);
+      const cal = calibrate(pl, raw.prob);
+      const jaren = Math.max(1, Math.round(cnt.days_n / 252));
+      const factors: Factor[] = [];
+      factors.push({ label: "Basiskans", detail: `${r1(pl.p0 * 100)}% van alle favoriet-dagen begon een +50%-sprint binnen ${hz.days} dagen (${pl.hits.toLocaleString("nl-NL")} van ${pl.n.toLocaleString("nl-NL")})`, mult: 1 });
+      factors.push({ label: "Eigen historie", detail: cnt.hits > 0 ? `${r1((100 * cnt.hits) / cnt.days_n)}% van de eigen dagen (${cnt.hits}× in ${jaren} jaar, ${h.peak_count} sprint${h.peak_count === 1 ? "" : "s"}${cnt.hits_2y ? `, ${cnt.hits_2y} dag${cnt.hits_2y === 1 ? "" : "en"} in de laatste 2 jaar` : ""})` : `nooit +50% binnen ${hz.days} dagen gedaan in ${jaren} jaar`, mult: r1(own.lift) });
+      for (const part of raw.parts) {
+        const fd = FEATURES.find((x) => x.key === part.key)!;
+        const v = (feats as unknown as Record<string, number | null>)[part.key];
+        const shown = v == null ? (fd.nullLabel ?? "onbekend") : part.key === "vol" ? `${v.toFixed(1)}×` : part.key === "since" ? `${Math.round(v)} dagen` : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}%`;
+        const e = pl.lifts[part.key]?.[part.bucket];
+        factors.push({ label: fd.label, detail: `${shown} → bucket ${bucketLabel(part.bucket, fd)}${e ? `: ${r1(e.rate * 100)}% gemeten op ${e.n.toLocaleString("nl-NL")} dagen` : ""}`, mult: r1(part.lift) });
+      }
+      factors.push({ label: "Kalibratie", detail: cal.n > 0 ? `model zegt ${r1(raw.prob)}%; op ${cal.n.toLocaleString("nl-NL")} historische dagen met zo'n modelkans gebeurde het in ${r1(cal.observed!)}%` : `model zegt ${r1(raw.prob)}%; nog geen kalibratiedata voor deze kansbucket`, mult: raw.prob > 0 ? r1(cal.prob / raw.prob) : 1 });
+      per[hz.key] = { prob: cal.prob, raw: raw.prob, base: pl.p0 * 100, ownRate: own.rate * 100, factors };
     }
-    factors.push({ label: "Kalibratie", detail: cal.n > 0 ? `model zegt ${r1(raw.prob)}%; op ${cal.n.toLocaleString("nl-NL")} historische dagen met zo'n modelkans gebeurde het in ${r1(cal.observed!)}%` : `model zegt ${r1(raw.prob)}%; nog geen kalibratiedata voor deze kansbucket`, mult: raw.prob > 0 ? r1(cal.prob / raw.prob) : 1 });
+    const main14 = per[DEFAULT_HORIZON];
+    if (!main14) continue;
+    const main7 = per["7"];
 
     const dollarVol = avgVol != null ? avgVol * lastClose : null;
     const flags: string[] = [];
@@ -460,13 +556,16 @@ Deno.serve(runBackground("xinix-hippos", async () => {
 
     scored.push({
       ticker: f.ticker,
-      prob: r1(cal.prob), raw_prob: r1(raw.prob), base_rate: r1(pool.p0 * 100), own_rate: r1(own.rate * 100),
+      prob: r1(main14.prob), raw_prob: r1(main14.raw), base_rate: r1(main14.base), own_rate: r1(main14.ownRate),
+      factors: main14.factors,
+      prob_7d: main7 ? r1(main7.prob) : null, raw_prob_7d: main7 ? r1(main7.raw) : null,
+      base_rate_7d: main7 ? r1(main7.base) : null, factors_7d: main7 ? main7.factors : [],
       company: t?.company ?? null, sector: t?.yahoo_sector ?? t?.sector ?? null, exchange: t?.exchange ?? null,
       last_close: lastClose, dollar_volume: dollarVol != null ? Math.round(dollarVol) : null,
       pct_change_5d: r5, pct_change_22d: r22, volume_ratio: vol != null ? r1(vol) : null,
       days_since_peak: since, pct_below_high1y: hi != null ? r1(hi) : null,
       peak_count: h.peak_count, rating: ratingBy.get(f.ticker) ?? null,
-      tradeable, factors, flags, scanned_at: h.scanned_at, computed_at: runStart,
+      tradeable, flags, scanned_at: h.scanned_at, computed_at: runStart,
     });
   }
   scored.sort((a, b) => b.prob - a.prob || b.raw_prob - a.raw_prob);
@@ -479,25 +578,42 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const { error: delErr } = await sb.from("xinix_hippo_scores").delete().lt("computed_at", runStart);
   if (delErr) errors.push(`opruimen: ${delErr.message}`);
 
-  const liftsOut: Record<string, unknown> = {};
-  for (const f of FEATURES) {
-    liftsOut[f.key] = { label: f.label, buckets: Object.entries(pool.lifts[f.key] ?? {}).sort(([a], [b]) => (a === "null" ? 1 : b === "null" ? -1 : Number(a) - Number(b))).map(([k, v]) => ({ bucket: bucketLabel(k, f), n: v.n, hits: v.h, rate_pct: r1(v.rate * 100), lift: r1(v.lift) })) };
+  const ceilings: Record<string, number | null> = {};
+  const calibRows: any[] = [];
+  for (const hz of HORIZONS) {
+    const pl = pools[hz.key];
+    if (!pl) { ceilings[hz.key] = null; continue; }
+    const liftsOut: Record<string, unknown> = {};
+    for (const f of FEATURES) {
+      liftsOut[f.key] = { label: f.label, buckets: Object.entries(pl.lifts[f.key] ?? {}).sort(([a], [b]) => (a === "null" ? 1 : b === "null" ? -1 : Number(a) - Number(b))).map(([k, v]) => ({ bucket: bucketLabel(k, f), n: v.n, hits: v.h, rate_pct: r1(v.rate * 100), lift: r1(v.lift) })) };
+    }
+    const calibOut = Object.entries(pl.calib).sort(([a], [b]) => Number(a) - Number(b)).map(([k, v]) => ({ bucket: k, ...calibRange(k), n: v.n, hits: v.h, rate_pct: v.n ? r1((100 * v.h) / v.n) : null }));
+    const ceil = ceilingOf(pl);
+    ceilings[hz.key] = ceil;
+    const probs = scored.map((s) => (hz.key === "7" ? s.prob_7d : s.prob)).filter((x: number | null) => x != null) as number[];
+    calibRows.push({
+      horizon: Number(hz.key), computed_at: runStart, base_rate: r1(pl.p0 * 100),
+      days_n: pl.n, hits: pl.hits, tickers_scanned: pl.tickers, favorites: favs.length,
+      lifts: liftsOut, calib: calibOut,
+      max_prob: probs.length ? Math.max(...probs) : null,
+      ceiling: ceil != null ? r1(ceil) : null,
+    });
   }
-  const calibOut = Object.entries(pool.calib).sort(([a], [b]) => Number(a) - Number(b)).map(([k, v]) => ({ bucket: k, ...calibRange(k), n: v.n, hits: v.h, rate_pct: v.n ? r1((100 * v.h) / v.n) : null }));
-  const { error: calErr } = await sb.from("xinix_hippo_calibration").upsert({
-    id: 1, computed_at: runStart, base_rate: r1(pool.p0 * 100), days_n: pool.n, hits: pool.hits,
-    tickers_scanned: pool.tickers, favorites: favs.length, lifts: liftsOut, calib: calibOut,
-    max_prob: scored.length ? scored[0].prob : null,
-  }, { onConflict: "id" });
-  if (calErr) errors.push(`kalibratie: ${calErr.message}`);
+  if (calibRows.length) {
+    const { error: calErr } = await sb.from("xinix_hippo_calibration").upsert(calibRows, { onConflict: "horizon" });
+    if (calErr) errors.push(`kalibratie: ${calErr.message}`);
+  }
 
   // ── 3. Melden ─────────────────────────────────────────────────────────────
-  let notified = 0, candidates = 0, blocked = 0;
-  const { data: settingsRow } = await sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, hippo_alert_min_prob").eq("id", 1).single();
+  let notified = 0, candidates = 0, blocked = 0, weekCapped = 0;
+  const { data: settingsRow } = await sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, hippo_alert_min_prob, hippo_alert_horizon, hippo_alert_max_per_week").eq("id", 1).single();
   const settings = settingsRow as Settings | null;
   const threshold = num(settings?.hippo_alert_min_prob) ?? 80;
+  const alertHz = String(num(settings?.hippo_alert_horizon) ?? 14);
+  const maxPerWeek = Math.max(0, num(settings?.hippo_alert_max_per_week) ?? 1);
+  const probOf = (s: any): number | null => (alertHz === "7" ? s.prob_7d : s.prob);
   if (settings?.ntfy_topic && threshold > 0 && !inQuietHours(settings)) {
-    const cands = scored.filter((s) => s.prob >= threshold && s.tradeable);
+    const cands = scored.filter((s) => { const v = probOf(s); return v != null && v >= threshold && s.tradeable; });
     candidates = cands.length;
     if (cands.length) {
       const ct = cands.map((c) => c.ticker);
@@ -513,19 +629,42 @@ Deno.serve(runBackground("xinix-hippos", async () => {
         if (mutedSet.has(up) || seenSet.has(up)) { blocked++; continue; }
         const prev = prevBy.get(c.ticker);
         const lastMs = prev?.alerted_at ? Date.parse(prev.alerted_at) : null;
-        const lastProb = num(prev?.alerted_prob);
-        // Eigen dedup i.p.v. de globale cooldown: een sprint van 14 dagen kan
-        // niet 100 dagen wachten. Demping en "gezien" gelden wél.
-        if (lastMs != null && nowMs - lastMs < REALERT_DAYS * DAY && !(lastProb != null && c.prob >= lastProb + REALERT_GAIN)) { blocked++; continue; }
+        // Een eerdere melding op een ándere horizon is geen geldige vergelijking
+        // voor de "kans is flink gestegen"-uitzondering; dan geldt alleen de wachttijd.
+        const lastProb = String(prev?.alerted_horizon ?? 14) === alertHz ? num(prev?.alerted_prob) : null;
+        // Eigen dedup i.p.v. de globale cooldown: een sprint van een of twee
+        // weken kan niet 100 dagen wachten. Demping en "gezien" gelden wél.
+        if (lastMs != null && nowMs - lastMs < REALERT_DAYS * DAY && !(lastProb != null && (probOf(c) as number) >= lastProb + REALERT_GAIN)) { blocked++; continue; }
         toSend.push(c);
       }
+      // Weekplafond: hoogstens zoveel meldingen per rollende 7 dagen over álle
+      // aandelen samen, de hoogste kans eerst. Zonder rem kan een onrustige
+      // markt een reeks pings opleveren; dit houdt het signaal schaars.
+      toSend.sort((a, b) => (probOf(b) as number) - (probOf(a) as number));
+      let room = toSend.length;
+      if (maxPerWeek > 0) {
+        const { count, error: cntErr } = await sb.from("xinix_notify_log")
+          .select("id", { count: "exact", head: true })
+          .eq("source", "hippos")
+          .gte("sent_at", new Date(nowMs - WEEK_MS).toISOString());
+        if (cntErr) errors.push(`weekplafond: ${cntErr.message}`);
+        const sentThisWeek = count ?? 0;
+        room = Math.max(0, maxPerWeek - sentThisWeek);
+        weekCapped = Math.max(0, toSend.length - room);
+      }
       const notifyLog: Array<{ ticker: string; source: string; alert_key: string; priority: number }> = [];
-      for (const c of toSend.slice(0, MAX_ALERTS)) {
-        const top = (c.factors as Factor[]).filter((f) => f.mult > 1.05 && f.label !== "Kalibratie").sort((a, b) => b.mult - a.mult).slice(0, 3);
-        const title = `🦛 ${safeTickerDisplay(c.ticker)} · ${Math.round(c.prob)}% kans op +50% in 14 dagen`.slice(0, 120);
+      for (const c of toSend.slice(0, room)) {
+        const prob = probOf(c) as number;
+        const rawProbShown = alertHz === "7" ? c.raw_prob_7d : c.raw_prob;
+        const facts = (alertHz === "7" ? c.factors_7d : c.factors) as Factor[];
+        const top = facts.filter((f) => f.mult > 1.05 && f.label !== "Kalibratie").sort((a, b) => b.mult - a.mult).slice(0, 3);
+        const otherHz = alertHz === "7" ? "14" : "7";
+        const otherProb = alertHz === "7" ? c.prob : c.prob_7d;
+        const title = `🦛 ${safeTickerDisplay(c.ticker)} · ${Math.round(prob)}% kans op +50% in ${alertHz} dagen`.slice(0, 120);
         const lines = [
           `${safeTickerDisplay(c.ticker)}${c.company ? ` · ${c.company}` : ""}`,
-          `🦛 Kans op +50% binnen 14 dagen: ${Math.round(c.prob)}% (model ${Math.round(c.raw_prob)}%, drempel ${Math.round(threshold)}%)`,
+          `🦛 Kans op +50% binnen ${alertHz} dagen: ${Math.round(prob)}% (model ${Math.round(rawProbShown ?? 0)}%, drempel ${Math.round(threshold)}%)`,
+          otherProb != null ? `📆 Ter vergelijking, binnen ${otherHz} dagen: ${Math.round(otherProb)}%` : "",
           `⭐ Sterren: ${ratingStr(c.rating)}`,
           `💲 Koers ${fmtPrice(c.last_close)} · 5d ${fmtPct(c.pct_change_5d)} · 22d ${fmtPct(c.pct_change_22d)}${c.volume_ratio != null ? ` · volume ${c.volume_ratio.toFixed(1)}×` : ""}`,
           `🔗 ${googleFinanceUrl(c.ticker, c.exchange)}`,
@@ -534,12 +673,12 @@ Deno.serve(runBackground("xinix-hippos", async () => {
           "",
           "Waarom:",
           ...top.map((f) => `• ×${f.mult} ${f.label}: ${f.detail}`),
-        ];
+        ].filter((l) => l !== "");
         const r = await sendNtfy(settings.ntfy_server, settings.ntfy_topic, title, lines.join("\n"), 5, ["hippopotamus"], googleFinanceUrl(c.ticker, c.exchange));
         if (r.ok) {
           notified++;
-          notifyLog.push({ ticker: c.ticker, source: "hippos", alert_key: "hippo_50_14d", priority: 5 });
-          const { error } = await sb.from("xinix_hippo_scores").update({ alerted_at: new Date().toISOString(), alerted_prob: c.prob }).eq("ticker", c.ticker);
+          notifyLog.push({ ticker: c.ticker, source: "hippos", alert_key: `hippo_50_${alertHz}d`, priority: 5 });
+          const { error } = await sb.from("xinix_hippo_scores").update({ alerted_at: new Date().toISOString(), alerted_prob: prob, alerted_horizon: Number(alertHz) }).eq("ticker", c.ticker);
           if (error) errors.push(`alert-state ${c.ticker}: ${error.message}`);
         } else errors.push(`${c.ticker}: ${r.error}`);
       }
@@ -550,11 +689,20 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     }
   }
 
-  const top5 = scored.slice(0, 5).map((s) => `${s.ticker} ${s.prob}%`).join(", ");
+  const top5 = scored.slice(0, 5).map((s) => `${s.ticker} ${s.prob}%/${s.prob_7d ?? "—"}%`).join(", ");
   const scanBroken = scanned > 0 && scanErrors >= Math.max(1, Math.ceil(scanned / 2));
+  const p7 = pools["7"];
+  const maxOf = (k: "prob" | "prob_7d") => { const v = scored.map((s) => s[k]).filter((x) => x != null) as number[]; return v.length ? Math.max(...v) : null; };
   return {
     ok: errors.length === 0 && !scanBroken,
-    message: `gescand ${scanned}/${due.length} (fouten ${scanErrors}), gescoord ${scored.length}/${favs.length}, basiskans ${r1(pool.p0 * 100)}%, hoogste ${scored[0]?.prob ?? "—"}%, drempel ${threshold}%, gemeld ${notified}` + (scanErrMsgs.length ? `; yahoo: ${scanErrMsgs.join("; ")}` : "") + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
-    metrics: { scanned, scan_errors: scanErrors, scored: scored.length, favorites: favs.length, tickers_with_history: pool.tickers, base_rate_pct: r1(pool.p0 * 100), days_n: pool.n, hits: pool.hits, max_prob: scored[0]?.prob ?? null, threshold, candidates, blocked, notified, top5, errors: errors.length },
+    message: `gescand ${scanned}/${due.length} (fouten ${scanErrors}), gescoord ${scored.length}/${favs.length}; 14d: basis ${r1(pool.p0 * 100)}% hoogste ${maxOf("prob") ?? "—"}% plafond ${ceilings["14"] != null ? r1(ceilings["14"]!) : "—"}%; 7d: basis ${p7 ? r1(p7.p0 * 100) : "—"}% hoogste ${maxOf("prob_7d") ?? "—"}% plafond ${ceilings["7"] != null ? r1(ceilings["7"]!) : "—"}%; drempel ${threshold}% op ${alertHz}d, gemeld ${notified}` + (scanErrMsgs.length ? `; yahoo: ${scanErrMsgs.join("; ")}` : "") + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
+    metrics: {
+      scanned, scan_errors: scanErrors, scored: scored.length, favorites: favs.length,
+      tickers_with_history: pool.tickers,
+      base_rate_14d: r1(pool.p0 * 100), max_prob_14d: maxOf("prob"), ceiling_14d: ceilings["14"] != null ? r1(ceilings["14"]!) : null, days_14d: pool.n, hits_14d: pool.hits,
+      base_rate_7d: p7 ? r1(p7.p0 * 100) : null, max_prob_7d: maxOf("prob_7d"), ceiling_7d: ceilings["7"] != null ? r1(ceilings["7"]!) : null, days_7d: p7?.n ?? null, hits_7d: p7?.hits ?? null,
+      alert_horizon: Number(alertHz), threshold, max_per_week: maxPerWeek,
+      candidates, blocked, week_capped: weekCapped, notified, top5, errors: errors.length,
+    },
   };
 }));

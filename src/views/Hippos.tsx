@@ -133,8 +133,13 @@ function LiftTables({ calib }: { calib: HippoCalibration }) {
 
 export function HipposView() {
   const [items, setItems] = useState<HippoItem[]>([]);
-  const [calib, setCalib] = useState<HippoCalibration | null>(null);
+  const [calibs, setCalibs] = useState<Record<string, HippoCalibration>>({});
   const [threshold, setThreshold] = useState(80);
+  const [alertHorizon, setAlertHorizon] = useState(14);
+  const [maxPerWeek, setMaxPerWeek] = useState(1);
+  // Welke horizon de kalibratiekaart en de stats tonen. Standaard die waarop
+  // gemeld wordt, want dat is de horizon waar de drempel op slaat.
+  const [shownHz, setShownHz] = useState<"7" | "14">("14");
   const [computedAt, setComputedAt] = useState<string | null>(null);
   const [favCount, setFavCount] = useState(0);
   const [scannedCount, setScannedCount] = useState(0);
@@ -152,8 +157,11 @@ export function HipposView() {
     try {
       const r = await fetchHippoScores();
       setItems(r.items);
-      setCalib(r.calibration);
+      setCalibs(r.calibrations ?? (r.calibration ? { "14": r.calibration } : {}));
       setThreshold(r.threshold);
+      setAlertHorizon(r.alert_horizon ?? 14);
+      setMaxPerWeek(r.max_per_week ?? 1);
+      setShownHz(String(r.alert_horizon ?? 14) === "7" ? "7" : "14");
       setComputedAt(r.computed_at);
       setFavCount(r.favorite_count);
       setScannedCount(r.scanned_count);
@@ -174,21 +182,31 @@ export function HipposView() {
     return items;
   }, [items, scope]);
 
+  // De kans waarop de drempel slaat, per aandeel.
+  const probOf = useCallback(
+    (r: HippoItem) => (alertHorizon === 7 ? r.prob_7d : r.prob),
+    [alertHorizon],
+  );
   const aboveThreshold = useMemo(
-    () => (threshold > 0 ? items.filter((r) => r.prob >= threshold && r.tradeable).length : 0),
-    [items, threshold],
+    () => (threshold > 0 ? items.filter((r) => { const v = probOf(r); return v != null && v >= threshold && r.tradeable; }).length : 0),
+    [items, threshold, probOf],
   );
 
+  const calib = calibs[shownHz] ?? null;
+  const alertCalib = calibs[String(alertHorizon)] ?? null;
   // Het plafond van het model: de hoogste frequentie die ooit in een kansbucket
   // gemeten is. Een gekalibreerde kans kan daar per definitie niet boven komen,
   // dus een drempel erboven zal nooit vuren. Dat hoort de gebruiker te weten
   // vóór hij een drempel kiest, niet pas na maanden stilte.
-  const ceiling = useMemo(() => {
-    const rows = (calib?.calib ?? []).filter((c) => c.n >= 1000 && c.rate_pct != null);
-    if (!rows.length) return null;
-    return Math.max(...rows.map((c) => c.rate_pct as number));
-  }, [calib]);
-  const thresholdUnreachable = threshold > 0 && ceiling != null && threshold > ceiling;
+  const ceilingOf = useCallback((c: HippoCalibration | null) => {
+    if (!c) return null;
+    if (c.ceiling != null) return c.ceiling;
+    const rows = (c.calib ?? []).filter((b) => b.n >= 1000 && b.rate_pct != null);
+    return rows.length ? Math.max(...rows.map((b) => b.rate_pct as number)) : null;
+  }, []);
+  const ceiling = useMemo(() => ceilingOf(calib), [calib, ceilingOf]);
+  const alertCeiling = useMemo(() => ceilingOf(alertCalib), [alertCalib, ceilingOf]);
+  const thresholdUnreachable = threshold > 0 && alertCeiling != null && threshold > alertCeiling;
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -208,15 +226,20 @@ export function HipposView() {
       <CollapsibleIntro title="Hippos — kans op +50% binnen 14 dagen" icon={<GradientTabIcon tab="favorieten" />}>
         <div className="text-sm text-neutral-300 leading-relaxed space-y-2">
           <p>
-            Per favoriet (hartje) de kans dat de koers <strong>binnen 14 dagen minimaal +50%</strong> doet.
-            Komt die kans voor een verhandelbare favoriet op of boven de drempel van{" "}
-            <strong className="text-fog-lime">{threshold}%</strong> (instelbaar bij Instellingen), dan krijg je
-            meteen een ntfy-melding 🦛.
+            Per favoriet (hartje) de kans dat de koers <strong>minimaal +50%</strong> doet, gemeten over twee
+            vensters naast elkaar: <strong>binnen 7 dagen</strong> en <strong>binnen 14 dagen</strong>. Komt de kans
+            op de horizon van <strong className="text-fog-lime">{alertHorizon} dagen</strong> voor een verhandelbare
+            favoriet op of boven de drempel van <strong className="text-fog-lime">{threshold}%</strong>, dan krijg je
+            meteen een ntfy-melding 🦛
+            {maxPerWeek > 0 ? `, hoogstens ${maxPerWeek === 1 ? "één keer" : `${maxPerWeek} keer`} per week` : ""}.
+            Beide instelbaar bij Instellingen.
           </p>
           <p className="text-xs text-neutral-400">
             <strong className="text-neutral-300">Gemeten, niet bedacht.</strong> Van elke favoriet zijn 10 jaar
-            dagkoersen doorgelicht: voor elke handelsdag is gekeken of er in de 10 handelsdagen daarna +50% volgde
-            (en minstens een dag standhield). Per dag zijn vijf kenmerken vastgelegd — 5-daags en 22-daags
+            dagkoersen doorgelicht: voor elke handelsdag is gekeken of er binnen 5 respectievelijk 10 handelsdagen
+            +50% volgde (en minstens een dag standhield). Beide vensters rusten op exact dezelfde dagen en dezelfde
+            kenmerken, dus het verschil tussen 7 en 14 dagen is af te lezen in plaats van te beredeneren. Een korter
+            venster is strenger, dus die kansen liggen per definitie lager. Per dag zijn vijf kenmerken vastgelegd — 5-daags en 22-daags
             rendement, volume t.o.v. het 30-daagse gemiddelde, dagen sinds de vorige +50%-piek en de afstand tot de
             1-jaarstop. Over alle favorieten samen geeft dat een basiskans en per kenmerk een gemeten lift; de eigen
             historie van het aandeel telt mee. De actuele toestand (verse koersen) bepaalt welke lifts nu gelden.
@@ -229,8 +252,8 @@ export function HipposView() {
           </p>
           <p className="text-xs text-neutral-500">
             <strong className="text-neutral-400">Eerlijk over de drempel.</strong> +50% in twee weken is zeldzaam. De
-            basiskans ligt rond {calib ? `${calib.base_rate.toFixed(1)}%` : "een paar procent"} per dag, en de
-            hoogste kans op dit moment is{" "}
+            basiskans over {shownHz} dagen ligt rond {calib ? `${calib.base_rate.toFixed(1)}%` : "een paar procent"} per
+            dag, en de hoogste kans op dit moment is{" "}
             <strong className="text-neutral-300">{calib?.max_prob != null ? `${calib.max_prob.toFixed(0)}%` : "nog onbekend"}</strong>.
             Sub-penny en dode orderboeken (DUN) sturen geen melding: daar is +50% een spread-artefact.
           </p>
@@ -240,10 +263,9 @@ export function HipposView() {
               het hardst roept, gebeurde het historisch in{" "}
               <strong className="text-neutral-300">{ceiling.toFixed(0)}%</strong> van de gevallen. Hoger dan dat kan
               een <em>gemeten</em> kans niet worden, hoe extreem een aandeel er ook bij staat. Een aandeel met 80%
-              zekerheid op +50% binnen twee weken bestaat in deze data dus niet — dat is geen tekortkoming van het
-              model maar een eigenschap van de markt. Wil je meldingen ontvangen, zet de drempel dan onder{" "}
-              {ceiling.toFixed(0)}%; rond de 15% zit je al bij het topje van de verdeling, drie tot vier keer de
-              basiskans.
+              zekerheid op +50% binnen {shownHz} dagen bestaat in deze data dus niet, en dat is geen tekortkoming van
+              het model maar een eigenschap van de markt. Wil je meldingen ontvangen, zet de drempel dan onder{" "}
+              {ceiling.toFixed(0)}%.
             </p>
           )}
         </div>
@@ -254,11 +276,12 @@ export function HipposView() {
           <div className="flex items-start gap-3">
             <div className="text-2xl leading-none">🦛</div>
             <div className="text-sm text-neutral-300 leading-relaxed">
-              <strong className="text-fog-loss">Je drempel van {threshold}% zal nooit vuren.</strong> De hoogste
-              frequentie die ooit in de historie gemeten is, is {ceiling!.toFixed(0)}%. Een gekalibreerde kans komt
-              daar niet boven, dus bij deze instelling krijg je geen enkele melding. Zet de drempel bij{" "}
-              <strong className="text-neutral-200">Instellingen → Hippo-melding vanaf kans</strong> lager, bijvoorbeeld
-              op 15%, om de sterkste kandidaten wél door te laten.
+              <strong className="text-fog-loss">Je drempel van {threshold}% zal nooit vuren.</strong> Op de horizon
+              van {alertHorizon} dagen is de hoogste frequentie die ooit in de historie gemeten is{" "}
+              {alertCeiling!.toFixed(0)}%. Een gekalibreerde kans komt daar niet boven, dus bij deze instelling krijg
+              je geen enkele melding. Zet de drempel bij{" "}
+              <strong className="text-neutral-200">Instellingen → Hippo-melding vanaf kans</strong> lager om de
+              sterkste kandidaten wél door te laten.
             </div>
           </div>
         </Card>
@@ -268,6 +291,22 @@ export function HipposView() {
         <Card className="p-4 space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">Kalibratie: model vs. werkelijkheid</div>
+            <div className="flex items-center gap-1">
+              {(["7", "14"] as const).map((hz) => (
+                <button
+                  key={hz}
+                  type="button"
+                  onClick={() => setShownHz(hz)}
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border transition-colors ${
+                    shownHz === hz ? "border-fog-lime/40 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                  }`}
+                  title={`Kalibratie over een venster van ${hz} dagen`}
+                >
+                  {hz} dagen
+                  {Number(hz) === alertHorizon && <span className="ml-1" title="Hierop wordt gemeld">🦛</span>}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => setShowLifts((v) => !v)}
@@ -285,10 +324,10 @@ export function HipposView() {
         <Stat label="Favorieten" value={favCount} />
         <Stat label="Doorgelicht" value={scannedCount} hint="10 jaar historie gemeten" />
         <Stat label="Gescoord" value={items.length} hint="met verse koers" />
-        <Stat label="Basiskans" value={calib ? `${calib.base_rate.toFixed(1)}%` : "—"} hint="per dag, alle favorieten" />
-        <Stat label="Hoogste" value={calib?.max_prob != null ? `${calib.max_prob.toFixed(0)}%` : "—"} />
-        <Stat label="Plafond" value={ceiling != null ? `${ceiling.toFixed(0)}%` : "—"} hint="hoogst gemeten frequentie ooit" />
-        <Stat label={`≥ ${threshold}%`} value={aboveThreshold} hint="verhandelbaar, melding" />
+        <Stat label={`Basiskans ${shownHz}d`} value={calib ? `${calib.base_rate.toFixed(1)}%` : "—"} hint="per dag, alle favorieten" />
+        <Stat label={`Hoogste ${shownHz}d`} value={calib?.max_prob != null ? `${calib.max_prob.toFixed(0)}%` : "—"} />
+        <Stat label={`Plafond ${shownHz}d`} value={ceiling != null ? `${ceiling.toFixed(0)}%` : "—"} hint="hoogst gemeten frequentie ooit" />
+        <Stat label={`≥ ${threshold}% op ${alertHorizon}d`} value={aboveThreshold} hint="verhandelbaar, melding" />
         <div className="text-xs text-neutral-500">
           {computedAt ? <>Berekend: {fmtDate(computedAt)} {new Date(computedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })} · elke 2 uur</> : "nog niet berekend"}
         </div>
@@ -352,8 +391,13 @@ export function HipposView() {
                   <th className="px-3 py-2 text-center">Sterren</th>
                   <th className="px-3 py-2 text-left">Ticker</th>
                   <th className="px-3 py-2 text-left">Bedrijf</th>
-                  <th className="px-3 py-2 text-right" title="Gekalibreerde kans op +50% binnen 14 dagen">Kans 14d</th>
-                  <th className="px-3 py-2 text-right" title="Modelkans vóór kalibratie">Model</th>
+                  <th className="px-3 py-2 text-right" title="Gekalibreerde kans op +50% binnen 7 dagen">
+                    Kans 7d{alertHorizon === 7 && <span className="ml-1">🦛</span>}
+                  </th>
+                  <th className="px-3 py-2 text-right" title="Gekalibreerde kans op +50% binnen 14 dagen">
+                    Kans 14d{alertHorizon === 14 && <span className="ml-1">🦛</span>}
+                  </th>
+                  <th className="px-3 py-2 text-right" title="Modelkans vóór kalibratie, op de horizon waarop gemeld wordt">Model</th>
                   <th className="px-3 py-2 text-right" title="Eigen basiskans per dag, 10 jaar historie">Eigen</th>
                   <th className="px-3 py-2 text-right" title="Aantal +50%-sprints in 10 jaar">Sprints</th>
                   <th className="px-3 py-2 text-right" title="Tijd sinds de vorige +50%-piek">Laatste</th>
@@ -400,8 +444,8 @@ export function HipposView() {
                             DUN
                           </span>
                         )}
-                        {threshold > 0 && r.prob >= threshold && (
-                          <span className="ml-1.5 align-middle" title="Boven de meldingsdrempel">🦛</span>
+                        {threshold > 0 && (probOf(r) ?? 0) >= threshold && (
+                          <span className="ml-1.5 align-middle" title={`Boven de meldingsdrempel op ${alertHorizon} dagen`}>🦛</span>
                         )}
                       </td>
                       <td className="px-3 py-2 max-w-[220px]">
@@ -418,9 +462,16 @@ export function HipposView() {
                         </button>
                       </td>
                       <td className="px-3 py-2 text-right font-mono tabular-nums">
-                        <span className={probTone(r.prob, threshold)}>{r.prob.toFixed(1)}%</span>
+                        {r.prob_7d != null
+                          ? <span className={probTone(r.prob_7d, alertHorizon === 7 ? threshold : 0)}>{r.prob_7d.toFixed(1)}%</span>
+                          : <span className="text-neutral-600">—</span>}
                       </td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-500">{r.raw_prob.toFixed(1)}%</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">
+                        <span className={probTone(r.prob, alertHorizon === 14 ? threshold : 0)}>{r.prob.toFixed(1)}%</span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-500">
+                        {(alertHorizon === 7 ? r.raw_prob_7d : r.raw_prob)?.toFixed(1) ?? "—"}%
+                      </td>
                       <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-400">
                         {r.own_rate != null ? `${r.own_rate.toFixed(1)}%` : "—"}
                       </td>
@@ -446,16 +497,21 @@ export function HipposView() {
                     </tr>
                     {expanded === r.ticker && (
                       <tr className="bg-ink-3/20">
-                        <td colSpan={18} className="px-6 py-4">
+                        <td colSpan={19} className="px-6 py-4">
                           <div className="space-y-2 max-w-3xl">
-                            <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">Opbouw van de kans</div>
+                            <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">
+                              Opbouw van de kans over {shownHz} dagen
+                            </div>
                             <div className="text-xs text-neutral-400">
-                              Basis {r.base_rate.toFixed(1)}% × eigen historie × de kenmerken hieronder = model{" "}
-                              {r.raw_prob.toFixed(1)}% → gekalibreerd{" "}
-                              <span className={probTone(r.prob, threshold)}>{r.prob.toFixed(1)}%</span>
+                              Basis {((shownHz === "7" ? r.base_rate_7d : r.base_rate) ?? 0).toFixed(1)}% × eigen historie
+                              × de kenmerken hieronder = model{" "}
+                              {((shownHz === "7" ? r.raw_prob_7d : r.raw_prob) ?? 0).toFixed(1)}% → gekalibreerd{" "}
+                              <span className={probTone((shownHz === "7" ? r.prob_7d : r.prob) ?? 0, threshold)}>
+                                {((shownHz === "7" ? r.prob_7d : r.prob) ?? 0).toFixed(1)}%
+                              </span>
                             </div>
                             <ul className="space-y-1">
-                              {r.factors.map((f, k) => (
+                              {(shownHz === "7" ? r.factors_7d ?? [] : r.factors).map((f, k) => (
                                 <li key={k} className="flex items-baseline gap-2 text-xs">
                                   <span
                                     className={`font-mono tabular-nums w-12 shrink-0 text-right ${

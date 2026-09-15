@@ -58,26 +58,37 @@ Deno.serve(async (req) => {
     const [scores, calib, settings, favCount, histCount] = await Promise.all([
       sb.from("xinix_hippo_scores")
         .select(
-          "ticker, rank, prob, raw_prob, base_rate, own_rate, company, sector, exchange, last_close, dollar_volume, " +
+          "ticker, rank, prob, raw_prob, base_rate, own_rate, prob_7d, raw_prob_7d, base_rate_7d, " +
+          "company, sector, exchange, last_close, dollar_volume, " +
           "pct_change_5d, pct_change_22d, volume_ratio, days_since_peak, pct_below_high1y, peak_count, rating, " +
-          "tradeable, factors, flags, scanned_at, alerted_at, alerted_prob, computed_at",
+          "tradeable, factors, factors_7d, flags, scanned_at, alerted_at, alerted_prob, alerted_horizon, computed_at",
         )
         .order("rank", { ascending: true })
         .limit(limit),
-      sb.from("xinix_hippo_calibration").select("computed_at, base_rate, days_n, hits, tickers_scanned, favorites, lifts, calib, max_prob").eq("id", 1).maybeSingle(),
-      sb.from("signal_settings").select("hippo_alert_min_prob").eq("id", 1).maybeSingle(),
+      // Eén kalibratierij per horizon (7 en 14 dagen).
+      sb.from("xinix_hippo_calibration").select("horizon, computed_at, base_rate, days_n, hits, tickers_scanned, favorites, lifts, calib, max_prob, ceiling").order("horizon", { ascending: true }),
+      sb.from("signal_settings").select("hippo_alert_min_prob, hippo_alert_horizon, hippo_alert_max_per_week").eq("id", 1).maybeSingle(),
       sb.from("xinix_favorites").select("ticker", { count: "exact", head: true }),
       sb.from("xinix_hippo_history").select("ticker", { count: "exact", head: true }).eq("ok", true),
     ]);
     if (scores.error) return text(req, scores.error.message, { status: 500 });
 
+    const calRows = (calib.data ?? []) as Array<{ horizon: number; computed_at?: string }>;
+    const byHorizon: Record<string, unknown> = {};
+    for (const row of calRows) byHorizon[String(row.horizon)] = row;
+    const st = settings.data as { hippo_alert_min_prob?: unknown; hippo_alert_horizon?: unknown; hippo_alert_max_per_week?: unknown } | null;
+
     return json(req, {
       items: scores.data ?? [],
-      calibration: calib.data ?? null,
-      threshold: Number((settings.data as { hippo_alert_min_prob?: unknown } | null)?.hippo_alert_min_prob ?? 80),
+      calibrations: byHorizon,
+      // De 14-daagse blijft los meegestuurd zodat een oudere frontend blijft werken.
+      calibration: byHorizon["14"] ?? null,
+      threshold: Number(st?.hippo_alert_min_prob ?? 80),
+      alert_horizon: Number(st?.hippo_alert_horizon ?? 14),
+      max_per_week: Number(st?.hippo_alert_max_per_week ?? 1),
       favorite_count: favCount.count ?? 0,
       scanned_count: histCount.count ?? 0,
-      computed_at: (calib.data as { computed_at?: string } | null)?.computed_at ?? null,
+      computed_at: calRows[0]?.computed_at ?? null,
     });
   } catch (e) {
     return text(req, e instanceof Error ? e.message : String(e), { status: 500 });
