@@ -90,7 +90,10 @@ const HOLD_MULT = 1.2;        // de dag erna nog ≥ +20%, anders een 1-dags dat
 const MIN_PRICE = 0.10;       // sub-dime-koersen zijn ruis (zelfde grens als poefies)
 const MAX_BAR_JUMP = 5;       // bar ≥5× de vorige én meteen terug = data-fout
 const MIN_BARS = 120;
-const BATCH_SIZE = 250;       // ~0,35 s per ticker gemeten; het budget hieronder is de echte grens
+// Yahoo kost ~0,35 s per ticker, maar de echte grens is de CPU-limiet van de
+// edge runtime (2 s per aanroep): een batch van 250 werd na ~160 tickers
+// afgebroken. 100 is gemeten veilig; het tijdsbudget is de tweede vangrail.
+const BATCH_SIZE = 100;
 const RESCAN_DAYS = 30;
 const BUDGET_MS = 95_000;
 const SLEEP_MS = 250;
@@ -271,9 +274,14 @@ function analyze(ticker: string, bars: Bar[], pool: Pooled | null, nowMs: number
   const days: Array<{ feats: Features; hit: boolean; ms: number }> = [];
   let volSum = 0;                                // lopende som van vol[t-30..t-1]
   let lastPeakBefore = -1;
+  // Glijdend maximum over de 252 bars vóór t (monotone deque van indexen),
+  // zodat de 1-jaarstop O(1) per dag kost — de CPU-limiet van de edge
+  // runtime is krap.
+  const dq: number[] = [];
   for (let t = 0; t + FWD_BARS <= n - 1; t++) {
     if (isPeak[t]) lastPeakBefore = t;
     if (t >= 30) volSum -= bars[t - 30].vol;
+    while (dq.length && dq[0] < t - 252) dq.shift();
     const c = bars[t].close;
     if (t >= 30 && c >= MIN_PRICE) {
       let hit = false;
@@ -281,8 +289,7 @@ function analyze(ticker: string, bars: Bar[], pool: Pooled | null, nowMs: number
         if (bars[j].close < c * EVENT_MULT) continue;
         if (j + 1 >= n || bars[j + 1].close >= c * HOLD_MULT) { hit = true; break; }
       }
-      let hi = c;
-      for (let k = Math.max(0, t - 252); k < t; k++) if (bars[k].close > hi) hi = bars[k].close;
+      const hi = dq.length ? Math.max(c, bars[dq[0]].close) : c;
       const avgVol = volSum / 30;
       days.push({
         ms: bars[t].ms, hit,
@@ -296,6 +303,8 @@ function analyze(ticker: string, bars: Bar[], pool: Pooled | null, nowMs: number
       });
     }
     volSum += bars[t].vol;
+    while (dq.length && bars[dq[dq.length - 1]].close <= c) dq.pop();
+    dq.push(t);
   }
 
   for (const d of days) {
