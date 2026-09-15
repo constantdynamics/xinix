@@ -1,0 +1,472 @@
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  fetchHippoScores,
+  triggerHippoScan,
+  getToken,
+  type HippoItem,
+  type HippoCalibration,
+} from "../api";
+import { googleFinanceUrl } from "../tickerLinks";
+import { Card, Button, Stat, CollapsibleIntro, toast } from "../components/ui";
+import { HeartHeader, HeartInline, SeenHeader, SeenInline, StarRating } from "../components/MarkCells";
+import { GradientTabIcon } from "../tabIcons";
+import { PriceChartModal } from "./PriceChartModal";
+
+type Scope = "alles" | "handelbaar" | "gemeld";
+
+function fmtPrice(v: number | null): string {
+  if (v == null) return "—";
+  if (v < 1) return v.toFixed(4);
+  if (v < 10) return v.toFixed(3);
+  return v.toFixed(2);
+}
+function fmtDollarVol(v: number | null): string {
+  if (v == null) return "—";
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(1)} mln`;
+  return `$${Math.round(v / 1e3)}k`;
+}
+function fmtSignedPct(v: number | null): string {
+  if (v == null) return "—";
+  return v < 0 ? `−${Math.abs(v).toFixed(0)}%` : `+${v.toFixed(0)}%`;
+}
+function fmtDays(d: number | null): string {
+  if (d == null) return "nooit";
+  if (d <= 0) return "loopt nu";
+  if (d < 60) return `${d} dagen`;
+  if (d < 400) return `${Math.round(d / 30)} mnd`;
+  return `${(d / 365).toFixed(1)} jaar`;
+}
+function fmtDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
+}
+
+// Kleurband t.o.v. de meldingsdrempel: alles daarboven is "hippo".
+function probTone(p: number, threshold: number): string {
+  if (threshold > 0 && p >= threshold) return "text-fog-lime font-bold";
+  if (p >= 20) return "text-emerald-300 font-semibold";
+  if (p >= 8) return "text-neutral-200";
+  return "text-neutral-400";
+}
+
+/** Modelkans vs. werkelijkheid — het bewijs dat de getoonde kans klopt. */
+function CalibChart({ calib }: { calib: HippoCalibration }) {
+  const rows = (calib.calib ?? []).filter((c) => c.n > 0);
+  if (!rows.length) {
+    return (
+      <div className="text-[11px] text-neutral-500">
+        Nog geen kalibratiedata: die ontstaat bij de eerstvolgende herscan van elke favoriet (per 30 dagen),
+        zodra de eerste lifts gemeten zijn. Tot dan is de getoonde kans de ongekalibreerde modelkans.
+      </div>
+    );
+  }
+  const max = Math.max(...rows.map((c) => Math.max(c.rate_pct ?? 0, c.hi)), 1);
+  return (
+    <div className="space-y-2">
+      <div className="flex items-end gap-2 h-28">
+        {rows.map((c) => (
+          <div key={c.bucket} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+            <div className="text-[10px] font-mono tabular-nums text-fog-lime font-bold">
+              {c.rate_pct != null ? `${c.rate_pct.toFixed(1)}%` : "—"}
+            </div>
+            <div className="w-full flex items-end gap-px" style={{ height: "80px" }}>
+              <div
+                className="flex-1 rounded-t bg-ink-5/70"
+                style={{ height: `${Math.max(3, ((c.lo + c.hi) / 2 / max) * 100)}%` }}
+                title={`model zegt ${c.lo}–${c.hi}%`}
+              />
+              <div
+                className="flex-1 rounded-t bg-gradient-to-t from-fog-pink/30 to-fog-lime/70"
+                style={{ height: `${Math.max(3, ((c.rate_pct ?? 0) / max) * 100)}%` }}
+                title={`${c.hits} van ${c.n} dagen`}
+              />
+            </div>
+            <div className="text-[10px] text-neutral-500 whitespace-nowrap">
+              {c.lo}–{c.hi}%
+            </div>
+            <div className="text-[9px] text-neutral-600 whitespace-nowrap">n={c.n.toLocaleString("nl-NL")}</div>
+          </div>
+        ))}
+      </div>
+      <div className="text-[11px] text-neutral-500 text-center">
+        Grijs = wat het model zei, gekleurd = hoe vaak het écht gebeurde (per kansbucket, over alle historische
+        dagen van alle favorieten). De getoonde kans per aandeel is de gekleurde waarde.
+      </div>
+    </div>
+  );
+}
+
+/** De gemeten lifts per kenmerk, als compacte tabellen. */
+function LiftTables({ calib }: { calib: HippoCalibration }) {
+  const entries = Object.entries(calib.lifts ?? {});
+  if (!entries.length) return null;
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {entries.map(([key, f]) => (
+        <div key={key} className="rounded border border-ink-5/60 p-2">
+          <div className="text-[11px] font-bold text-neutral-300 mb-1">{f.label}</div>
+          <table className="w-full text-[11px]">
+            <tbody>
+              {f.buckets.map((b) => (
+                <tr key={b.bucket} className="border-t border-ink-5/40">
+                  <td className="py-0.5 pr-2 text-neutral-400 whitespace-nowrap">{b.bucket}</td>
+                  <td className="py-0.5 pr-2 text-right font-mono tabular-nums text-neutral-500">
+                    {b.n.toLocaleString("nl-NL")}d
+                  </td>
+                  <td className="py-0.5 pr-2 text-right font-mono tabular-nums text-neutral-300">{b.rate_pct.toFixed(1)}%</td>
+                  <td
+                    className={`py-0.5 text-right font-mono tabular-nums ${
+                      b.lift > 1.05 ? "text-fog-lime" : b.lift < 0.95 ? "text-fog-loss" : "text-neutral-500"
+                    }`}
+                  >
+                    ×{b.lift.toFixed(1)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function HipposView() {
+  const [items, setItems] = useState<HippoItem[]>([]);
+  const [calib, setCalib] = useState<HippoCalibration | null>(null);
+  const [threshold, setThreshold] = useState(80);
+  const [computedAt, setComputedAt] = useState<string | null>(null);
+  const [favCount, setFavCount] = useState(0);
+  const [scannedCount, setScannedCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [scope, setScope] = useState<Scope>("alles");
+  const [showLifts, setShowLifts] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetchHippoScores();
+      setItems(r.items);
+      setCalib(r.calibration);
+      setThreshold(r.threshold);
+      setComputedAt(r.computed_at);
+      setFavCount(r.favorite_count);
+      setScannedCount(r.scanned_count);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    if (scope === "handelbaar") return items.filter((r) => r.tradeable);
+    if (scope === "gemeld") return items.filter((r) => r.alerted_at);
+    return items;
+  }, [items, scope]);
+
+  const aboveThreshold = useMemo(
+    () => (threshold > 0 ? items.filter((r) => r.prob >= threshold && r.tradeable).length : 0),
+    [items, threshold],
+  );
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await triggerHippoScan();
+      toast("Run gestart — scant de volgende batch en herberekent de lijst (± 2 minuten)", "success");
+      setTimeout(() => void load(), 120_000);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Starten mislukt", "error");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <CollapsibleIntro title="Hippos — kans op +50% binnen 14 dagen" icon={<GradientTabIcon tab="favorieten" />}>
+        <div className="text-sm text-neutral-300 leading-relaxed space-y-2">
+          <p>
+            Per favoriet (hartje) de kans dat de koers <strong>binnen 14 dagen minimaal +50%</strong> doet.
+            Komt die kans voor een verhandelbare favoriet op of boven de drempel van{" "}
+            <strong className="text-fog-lime">{threshold}%</strong> (instelbaar bij Instellingen), dan krijg je
+            meteen een ntfy-melding 🦛.
+          </p>
+          <p className="text-xs text-neutral-400">
+            <strong className="text-neutral-300">Gemeten, niet bedacht.</strong> Van elke favoriet zijn 10 jaar
+            dagkoersen doorgelicht: voor elke handelsdag is gekeken of er in de 10 handelsdagen daarna +50% volgde
+            (en minstens een dag standhield). Per dag zijn vijf kenmerken vastgelegd — 5-daags en 22-daags
+            rendement, volume t.o.v. het 30-daagse gemiddelde, dagen sinds de vorige +50%-piek en de afstand tot de
+            1-jaarstop. Over alle favorieten samen geeft dat een basiskans en per kenmerk een gemeten lift; de eigen
+            historie van het aandeel telt mee. De actuele toestand (verse koersen) bepaalt welke lifts nu gelden.
+          </p>
+          <p className="text-xs text-neutral-400">
+            <strong className="text-neutral-300">Gekalibreerd.</strong> Omdat de kenmerken overlappen overdrijft
+            zo'n vermenigvuldiging. Daarom wordt bij elke herscan voor élke historische dag uitgerekend wat het model
+            zou hebben gezegd, en geteld hoe vaak het écht gebeurde. De kans die je hier ziet is die gemeten
+            frequentie — niet wat het model roept. Klik op een rij voor de volledige opbouw.
+          </p>
+          <p className="text-xs text-neutral-500">
+            <strong className="text-neutral-400">Eerlijk over de drempel.</strong> +50% in twee weken is zeldzaam;
+            de basiskans ligt rond{" "}
+            {calib ? `${calib.base_rate.toFixed(1)}%` : "een paar procent"} per dag en de hoogste gekalibreerde kans
+            op dit moment is{" "}
+            <strong className="text-neutral-300">{calib?.max_prob != null ? `${calib.max_prob.toFixed(0)}%` : "nog onbekend"}</strong>.
+            Een drempel van 80% zal daarom zelden of nooit vuren; de lijst laat zien wat er wél haalbaar is, zodat je
+            de drempel bewust kunt kiezen. Sub-penny en dode orderboeken (DUN) sturen geen melding: daar is +50% een
+            spread-artefact.
+          </p>
+        </div>
+      </CollapsibleIntro>
+
+      {calib && (
+        <Card className="p-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">Kalibratie: model vs. werkelijkheid</div>
+            <button
+              type="button"
+              onClick={() => setShowLifts((v) => !v)}
+              className="ml-auto text-[11px] text-fog-lime hover:underline font-semibold"
+            >
+              {showLifts ? "Verberg gemeten lifts" : "Toon gemeten lifts per kenmerk"}
+            </button>
+          </div>
+          <CalibChart calib={calib} />
+          {showLifts && <LiftTables calib={calib} />}
+        </Card>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Stat label="Favorieten" value={favCount} />
+        <Stat label="Doorgelicht" value={scannedCount} hint="10 jaar historie gemeten" />
+        <Stat label="Gescoord" value={items.length} hint="met verse koers" />
+        <Stat label="Basiskans" value={calib ? `${calib.base_rate.toFixed(1)}%` : "—"} hint="per dag, alle favorieten" />
+        <Stat label="Hoogste" value={calib?.max_prob != null ? `${calib.max_prob.toFixed(0)}%` : "—"} />
+        <Stat label={`≥ ${threshold}%`} value={aboveThreshold} hint="verhandelbaar, melding" />
+        <div className="text-xs text-neutral-500">
+          {computedAt ? <>Berekend: {fmtDate(computedAt)} {new Date(computedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })} · elke 2 uur</> : "nog niet berekend"}
+        </div>
+        {getToken() && (
+          <div className="ml-auto">
+            <Button size="sm" variant="secondary" onClick={handleRefresh} disabled={refreshing}>
+              {refreshing ? "Bezig…" : "Run nu"}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold mr-1">Toon:</span>
+        {(["alles", "handelbaar", "gemeld"] as Scope[]).map((s) => (
+          <button
+            key={s}
+            onClick={() => setScope(s)}
+            className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+              scope === s ? "border-fog-lime/40 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+            }`}
+            title={
+              s === "handelbaar"
+                ? "Verbergt sub-penny aandelen en dode orderboeken"
+                : s === "gemeld"
+                  ? "Favorieten waarvoor ooit een hippo-melding is verstuurd"
+                  : "Alle favorieten met historie en koers"
+            }
+          >
+            {s === "alles" ? "Alle favorieten" : s === "handelbaar" ? "Handelbaar" : "🦛 Gemeld"}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <Card className="p-10 text-center text-sm text-neutral-400">Ranglijst laden…</Card>
+      ) : error ? (
+        <Card className="p-10 text-center space-y-3">
+          <div className="text-4xl">⚠️</div>
+          <div className="text-sm font-semibold text-neutral-300">Laden mislukt</div>
+          <div className="text-xs text-neutral-500">{error}</div>
+        </Card>
+      ) : items.length === 0 ? (
+        <Card className="p-10 text-center space-y-3">
+          <div className="text-4xl">🦛</div>
+          <div className="text-sm font-semibold text-neutral-300">Nog geen ranglijst</div>
+          <div className="text-xs text-neutral-500 max-w-md mx-auto leading-relaxed">
+            De scan draait elke 2 uur en licht per run ± 100 favorieten door; na de eerste ronde verschijnt hier
+            de lijst. Gebruik &ldquo;Run nu&rdquo; om een batch direct te starten.
+          </div>
+        </Card>
+      ) : (
+        <Card className="p-0 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-ink-5 bg-ink-3/40 text-[10px] uppercase tracking-wider text-neutral-500 font-bold">
+                <tr>
+                  <th className="px-2 py-2 text-right">#</th>
+                  <SeenHeader />
+                  <HeartHeader />
+                  <th className="px-3 py-2 text-center">Sterren</th>
+                  <th className="px-3 py-2 text-left">Ticker</th>
+                  <th className="px-3 py-2 text-left">Bedrijf</th>
+                  <th className="px-3 py-2 text-right" title="Gekalibreerde kans op +50% binnen 14 dagen">Kans 14d</th>
+                  <th className="px-3 py-2 text-right" title="Modelkans vóór kalibratie">Model</th>
+                  <th className="px-3 py-2 text-right" title="Eigen basiskans per dag, 10 jaar historie">Eigen</th>
+                  <th className="px-3 py-2 text-right" title="Aantal +50%-sprints in 10 jaar">Sprints</th>
+                  <th className="px-3 py-2 text-right" title="Tijd sinds de vorige +50%-piek">Laatste</th>
+                  <th className="px-3 py-2 text-right">5d</th>
+                  <th className="px-3 py-2 text-right">22d</th>
+                  <th className="px-3 py-2 text-right" title="Volume t.o.v. het 30-daagse gemiddelde">Vol</th>
+                  <th className="px-3 py-2 text-right" title="Onder de 1-jaarstop">vs 1j-top</th>
+                  <th className="px-3 py-2 text-right">$vol/dag</th>
+                  <th className="px-3 py-2 text-right">Koers</th>
+                  <th className="px-3 py-2 text-right" title="Laatste hippo-melding">Gemeld</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-5/40">
+                {filtered.map((r, i) => (
+                  <Fragment key={r.ticker}>
+                    <tr
+                      className="cursor-pointer hover:bg-ink-3/30 transition-colors"
+                      onClick={() => setExpanded(expanded === r.ticker ? null : r.ticker)}
+                    >
+                      <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-500 text-xs">{i + 1}</td>
+                      <td className="px-2 py-2 text-center align-middle" onClick={(e) => e.stopPropagation()}>
+                        <SeenInline ticker={r.ticker} />
+                      </td>
+                      <td className="px-2 py-2 text-center align-middle" onClick={(e) => e.stopPropagation()}>
+                        <HeartInline ticker={r.ticker} />
+                      </td>
+                      <td className="px-3 py-2 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <StarRating ticker={r.ticker} />
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <a
+                          href={googleFinanceUrl(r.ticker, r.exchange)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-mono font-semibold tab-accent-text hover:underline"
+                        >
+                          {r.ticker}
+                        </a>
+                        {!r.tradeable && (
+                          <span
+                            className="ml-1.5 px-1 py-0.5 rounded bg-fog-loss/15 text-fog-loss text-[9px] font-bold align-middle"
+                            title="Sub-penny of nauwelijks omzet — geen melding, een sprong is hier vaak niet te verzilveren"
+                          >
+                            DUN
+                          </span>
+                        )}
+                        {threshold > 0 && r.prob >= threshold && (
+                          <span className="ml-1.5 align-middle" title="Boven de meldingsdrempel">🦛</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 max-w-[220px]">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setChartFor({ ticker: r.ticker, company: r.company ?? r.ticker, exchange: r.exchange });
+                          }}
+                          className="text-left text-neutral-200 hover:text-fog-pink hover:underline transition-colors truncate block w-full"
+                          title={`Bekijk koersgrafiek van ${r.company ?? r.ticker}`}
+                        >
+                          {r.company ?? "—"}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">
+                        <span className={probTone(r.prob, threshold)}>{r.prob.toFixed(1)}%</span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-500">{r.raw_prob.toFixed(1)}%</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-400">
+                        {r.own_rate != null ? `${r.own_rate.toFixed(1)}%` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-300">{r.peak_count}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-300 whitespace-nowrap">{fmtDays(r.days_since_peak)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">
+                        <span className={r.pct_change_5d != null && r.pct_change_5d < 0 ? "text-fog-loss" : "text-fog-lime"}>{fmtSignedPct(r.pct_change_5d)}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums">
+                        <span className={r.pct_change_22d != null && r.pct_change_22d < 0 ? "text-fog-loss" : "text-fog-lime"}>{fmtSignedPct(r.pct_change_22d)}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-300">
+                        {r.volume_ratio != null ? `${r.volume_ratio.toFixed(1)}×` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-fog-loss">
+                        {r.pct_below_high1y != null ? `−${Math.round(r.pct_below_high1y)}%` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-400 whitespace-nowrap">{fmtDollarVol(r.dollar_volume)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-200">{fmtPrice(r.last_close)}</td>
+                      <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-500 whitespace-nowrap">
+                        {r.alerted_at ? `${fmtDate(r.alerted_at)} (${Math.round(r.alerted_prob ?? 0)}%)` : "—"}
+                      </td>
+                    </tr>
+                    {expanded === r.ticker && (
+                      <tr className="bg-ink-3/20">
+                        <td colSpan={18} className="px-6 py-4">
+                          <div className="space-y-2 max-w-3xl">
+                            <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">Opbouw van de kans</div>
+                            <div className="text-xs text-neutral-400">
+                              Basis {r.base_rate.toFixed(1)}% × eigen historie × de kenmerken hieronder = model{" "}
+                              {r.raw_prob.toFixed(1)}% → gekalibreerd{" "}
+                              <span className={probTone(r.prob, threshold)}>{r.prob.toFixed(1)}%</span>
+                            </div>
+                            <ul className="space-y-1">
+                              {r.factors.map((f, k) => (
+                                <li key={k} className="flex items-baseline gap-2 text-xs">
+                                  <span
+                                    className={`font-mono tabular-nums w-12 shrink-0 text-right ${
+                                      f.mult > 1.05 ? "text-fog-lime" : f.mult < 0.95 ? "text-fog-loss" : "text-neutral-600"
+                                    }`}
+                                  >
+                                    {f.mult === 1 ? "—" : `×${f.mult}`}
+                                  </span>
+                                  <span className="text-neutral-300 font-semibold w-40 shrink-0">{f.label}</span>
+                                  <span className="text-neutral-400">{f.detail}</span>
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="text-[11px] text-neutral-500 pt-1">
+                              Historie gemeten op {fmtDate(r.scanned_at)}; herscan per 30 dagen. Koers en kenmerken zijn van de laatste koersupdate.
+                            </div>
+                            {r.flags.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                {r.flags.map((fl) => (
+                                  <span
+                                    key={fl}
+                                    className={`px-1.5 py-0.5 rounded text-[10px] border font-semibold ${
+                                      fl === "sprint loopt nu"
+                                        ? "border-fog-lime/40 text-fog-lime bg-fog-lime/10"
+                                        : "border-fog-loss/40 text-fog-loss bg-fog-loss/10"
+                                    }`}
+                                  >
+                                    {fl}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {chartFor && (
+        <PriceChartModal ticker={chartFor.ticker} company={chartFor.company} exchange={chartFor.exchange} onClose={() => setChartFor(null)} />
+      )}
+    </div>
+  );
+}
