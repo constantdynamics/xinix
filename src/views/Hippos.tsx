@@ -179,6 +179,17 @@ export function HipposView() {
     [items, threshold],
   );
 
+  // Het plafond van het model: de hoogste frequentie die ooit in een kansbucket
+  // gemeten is. Een gekalibreerde kans kan daar per definitie niet boven komen,
+  // dus een drempel erboven zal nooit vuren. Dat hoort de gebruiker te weten
+  // vóór hij een drempel kiest, niet pas na maanden stilte.
+  const ceiling = useMemo(() => {
+    const rows = (calib?.calib ?? []).filter((c) => c.n >= 1000 && c.rate_pct != null);
+    if (!rows.length) return null;
+    return Math.max(...rows.map((c) => c.rate_pct as number));
+  }, [calib]);
+  const thresholdUnreachable = threshold > 0 && ceiling != null && threshold > ceiling;
+
   async function handleRefresh() {
     setRefreshing(true);
     try {
@@ -217,17 +228,41 @@ export function HipposView() {
             frequentie — niet wat het model roept. Klik op een rij voor de volledige opbouw.
           </p>
           <p className="text-xs text-neutral-500">
-            <strong className="text-neutral-400">Eerlijk over de drempel.</strong> +50% in twee weken is zeldzaam;
-            de basiskans ligt rond{" "}
-            {calib ? `${calib.base_rate.toFixed(1)}%` : "een paar procent"} per dag en de hoogste gekalibreerde kans
-            op dit moment is{" "}
+            <strong className="text-neutral-400">Eerlijk over de drempel.</strong> +50% in twee weken is zeldzaam. De
+            basiskans ligt rond {calib ? `${calib.base_rate.toFixed(1)}%` : "een paar procent"} per dag, en de
+            hoogste kans op dit moment is{" "}
             <strong className="text-neutral-300">{calib?.max_prob != null ? `${calib.max_prob.toFixed(0)}%` : "nog onbekend"}</strong>.
-            Een drempel van 80% zal daarom zelden of nooit vuren; de lijst laat zien wat er wél haalbaar is, zodat je
-            de drempel bewust kunt kiezen. Sub-penny en dode orderboeken (DUN) sturen geen melding: daar is +50% een
-            spread-artefact.
+            Sub-penny en dode orderboeken (DUN) sturen geen melding: daar is +50% een spread-artefact.
           </p>
+          {ceiling != null && (
+            <p className="text-xs text-neutral-500">
+              <strong className="text-neutral-400">Er bestaat een plafond.</strong> Zelfs in de groep waar het model
+              het hardst roept, gebeurde het historisch in{" "}
+              <strong className="text-neutral-300">{ceiling.toFixed(0)}%</strong> van de gevallen. Hoger dan dat kan
+              een <em>gemeten</em> kans niet worden, hoe extreem een aandeel er ook bij staat. Een aandeel met 80%
+              zekerheid op +50% binnen twee weken bestaat in deze data dus niet — dat is geen tekortkoming van het
+              model maar een eigenschap van de markt. Wil je meldingen ontvangen, zet de drempel dan onder{" "}
+              {ceiling.toFixed(0)}%; rond de 15% zit je al bij het topje van de verdeling, drie tot vier keer de
+              basiskans.
+            </p>
+          )}
         </div>
       </CollapsibleIntro>
+
+      {thresholdUnreachable && (
+        <Card className="p-4 border-fog-loss/40 bg-fog-loss/5">
+          <div className="flex items-start gap-3">
+            <div className="text-2xl leading-none">🦛</div>
+            <div className="text-sm text-neutral-300 leading-relaxed">
+              <strong className="text-fog-loss">Je drempel van {threshold}% zal nooit vuren.</strong> De hoogste
+              frequentie die ooit in de historie gemeten is, is {ceiling!.toFixed(0)}%. Een gekalibreerde kans komt
+              daar niet boven, dus bij deze instelling krijg je geen enkele melding. Zet de drempel bij{" "}
+              <strong className="text-neutral-200">Instellingen → Hippo-melding vanaf kans</strong> lager, bijvoorbeeld
+              op 15%, om de sterkste kandidaten wél door te laten.
+            </div>
+          </div>
+        </Card>
+      )}
 
       {calib && (
         <Card className="p-4 space-y-3">
@@ -252,6 +287,7 @@ export function HipposView() {
         <Stat label="Gescoord" value={items.length} hint="met verse koers" />
         <Stat label="Basiskans" value={calib ? `${calib.base_rate.toFixed(1)}%` : "—"} hint="per dag, alle favorieten" />
         <Stat label="Hoogste" value={calib?.max_prob != null ? `${calib.max_prob.toFixed(0)}%` : "—"} />
+        <Stat label="Plafond" value={ceiling != null ? `${ceiling.toFixed(0)}%` : "—"} hint="hoogst gemeten frequentie ooit" />
         <Stat label={`≥ ${threshold}%`} value={aboveThreshold} hint="verhandelbaar, melding" />
         <div className="text-xs text-neutral-500">
           {computedAt ? <>Berekend: {fmtDate(computedAt)} {new Date(computedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })} · elke 2 uur</> : "nog niet berekend"}
