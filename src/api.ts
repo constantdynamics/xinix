@@ -474,6 +474,10 @@ export interface HippoItem {
   raw_prob: number;
   /** Gepoolde basiskans (%) per dag over alle favorieten. */
   base_rate: number;
+  /** Dezelfde drie, maar gemeten op een venster van 7 dagen. */
+  prob_7d: number | null;
+  raw_prob_7d: number | null;
+  base_rate_7d: number | null;
   /** Eigen basiskans (%) van dit aandeel, gekrompen naar de gepoolde. */
   own_rate: number | null;
   company: string | null;
@@ -490,10 +494,12 @@ export interface HippoItem {
   rating: number | null;
   tradeable: boolean;
   factors: RocketFactor[];
+  factors_7d: RocketFactor[];
   flags: string[];
   scanned_at: string | null;
   alerted_at: string | null;
   alerted_prob: number | null;
+  alerted_horizon: number | null;
   computed_at: string;
 }
 export interface HippoLiftBucket {
@@ -512,6 +518,8 @@ export interface HippoCalibBucket {
   rate_pct: number | null;
 }
 export interface HippoCalibration {
+  /** 7 of 14 dagen. */
+  horizon: number;
   computed_at: string;
   base_rate: number;
   days_n: number;
@@ -521,12 +529,20 @@ export interface HippoCalibration {
   lifts: Record<string, { label: string; buckets: HippoLiftBucket[] }>;
   calib: HippoCalibBucket[];
   max_prob: number | null;
+  /** Hoogste frequentie die ooit in een kansbucket gemeten is; het plafond. */
+  ceiling: number | null;
 }
 export interface HippoResponse {
   items: HippoItem[];
+  /** Kalibratie per horizon, met "7" en "14" als sleutel. */
+  calibrations: Record<string, HippoCalibration>;
   calibration: HippoCalibration | null;
   /** Meldingsdrempel (%) uit de instellingen. */
   threshold: number;
+  /** Op welke horizon de drempel geldt: 7 of 14 dagen. */
+  alert_horizon: number;
+  /** Maximaal aantal meldingen per rollende 7 dagen; 0 = geen plafond. */
+  max_per_week: number;
   favorite_count: number;
   scanned_count: number;
   computed_at: string | null;

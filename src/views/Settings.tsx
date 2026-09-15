@@ -245,6 +245,31 @@ export function SettingsView({ data }: { data?: Dashboard }) {
           </p>
         </Field>
 
+        <Field label="Hippo-horizon (waar de drempel op slaat)">
+          <div className="flex items-center gap-2">
+            {[7, 14].map((hz) => (
+              <button
+                key={hz}
+                type="button"
+                onClick={() => setS({ ...s, hippo_alert_horizon: hz })}
+                className={`px-3 py-1.5 rounded text-sm font-semibold border transition-colors ${
+                  (s.hippo_alert_horizon ?? 14) === hz
+                    ? "border-fog-lime/40 text-fog-lime bg-fog-lime/10"
+                    : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                {hz} dagen
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Beide vensters worden altijd gemeten en getoond; deze keuze bepaalt alleen op welke van de twee de
+            meldingsdrempel slaat. Let op dat 7 dagen <strong className="text-neutral-300">strenger</strong> is: dezelfde
+            sprong van 50% moet in de helft van de tijd gebeuren, dus die kansen liggen structureel lager en het
+            plafond ligt er ook lager. Een sprint die binnen een week loopt is wel beter te verhandelen.
+          </p>
+        </Field>
+
         <Field label="Hippo-melding vanaf kans (%, 0 = uit)">
           <Input
             type="number"
@@ -272,6 +297,29 @@ export function SettingsView({ data }: { data?: Dashboard }) {
             tenzij de kans sindsdien 10 punten hoger ligt. Kijk op het tabblad
             welke kansen het model in de praktijk haalt voordat je de drempel
             kiest.
+          </p>
+        </Field>
+
+        <Field label="Maximaal aantal hippo-meldingen per week (0 = geen plafond)">
+          <Input
+            type="number"
+            min={0}
+            max={50}
+            step={1}
+            value={s.hippo_alert_max_per_week ?? 1}
+            onChange={(e) =>
+              setS({
+                ...s,
+                hippo_alert_max_per_week:
+                  e.target.value === "" ? 0 : Number(e.target.value),
+              })
+            }
+            className="w-full"
+          />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Over álle aandelen samen, in een rollend venster van 7 dagen. Omdat hippo-meldingen buiten de gewone
+            afkoelperiode vallen, kan een onrustige markt anders een reeks pings opleveren. Bij meerdere kandidaten
+            wint de hoogste kans; de rest komt later vanzelf weer langs als de kans standhoudt.
           </p>
         </Field>
 
