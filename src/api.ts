@@ -474,10 +474,13 @@ export interface HippoItem {
   raw_prob: number;
   /** Gepoolde basiskans (%) per dag over alle favorieten. */
   base_rate: number;
-  /** Dezelfde drie, maar gemeten op een venster van 7 dagen. */
+  /** Dezelfde drie, gemeten op een venster van 7 respectievelijk 21 dagen. */
   prob_7d: number | null;
   raw_prob_7d: number | null;
   base_rate_7d: number | null;
+  prob_21d: number | null;
+  raw_prob_21d: number | null;
+  base_rate_21d: number | null;
   /** Eigen basiskans (%) van dit aandeel, gekrompen naar de gepoolde. */
   own_rate: number | null;
   company: string | null;
@@ -497,6 +500,7 @@ export interface HippoItem {
   is_favorite: boolean;
   factors: RocketFactor[];
   factors_7d: RocketFactor[];
+  factors_21d: RocketFactor[];
   flags: string[];
   scanned_at: string | null;
   alerted_at: string | null;
@@ -560,12 +564,12 @@ export interface HippoTrackRecord {
 }
 export interface HippoResponse {
   items: HippoItem[];
-  /** Kalibratie per horizon, met "7" en "14" als sleutel. */
+  /** Kalibratie per horizon, met "7", "14" en "21" als sleutel. */
   calibrations: Record<string, HippoCalibration>;
   calibration: HippoCalibration | null;
   /** Meldingsdrempel (%) uit de instellingen. */
   threshold: number;
-  /** Op welke horizon de drempel geldt: 7 of 14 dagen. */
+  /** Op welke horizon de drempel geldt: 7, 14 of 21 dagen. */
   alert_horizon: number;
   /** Maximaal aantal meldingen per rollende 7 dagen; 0 = geen plafond. */
   max_per_week: number;

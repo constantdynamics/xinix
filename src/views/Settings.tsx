@@ -247,7 +247,7 @@ export function SettingsView({ data }: { data?: Dashboard }) {
 
         <Field label="Hippo-horizon (waar de drempel op slaat)">
           <div className="flex items-center gap-2">
-            {[7, 14].map((hz) => (
+            {[7, 14, 21].map((hz) => (
               <button
                 key={hz}
                 type="button"
@@ -263,10 +263,11 @@ export function SettingsView({ data }: { data?: Dashboard }) {
             ))}
           </div>
           <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
-            Beide vensters worden altijd gemeten en getoond; deze keuze bepaalt alleen op welke van de twee de
-            meldingsdrempel slaat. Let op dat 7 dagen <strong className="text-neutral-300">strenger</strong> is: dezelfde
-            sprong van 50% moet in de helft van de tijd gebeuren, dus die kansen liggen structureel lager en het
-            plafond ligt er ook lager. Een sprint die binnen een week loopt is wel beter te verhandelen.
+            Alle drie de vensters worden altijd gemeten en getoond; deze keuze bepaalt alleen op welke ervan de
+            meldingsdrempel slaat. Een <strong className="text-neutral-300">korter</strong> venster is strenger:
+            dezelfde sprong van 50% moet in minder tijd gebeuren, dus die kansen liggen structureel lager en het
+            plafond ligt er ook lager. Een langer venster geeft ruimere kansen, maar een sprint die binnen een week
+            loopt is wel beter te verhandelen dan een die drie weken de tijd krijgt.
           </p>
         </Field>
 

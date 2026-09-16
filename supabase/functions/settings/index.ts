@@ -59,10 +59,11 @@ Deno.serve(async (req) => {
       const n = Number(update.hippo_alert_min_prob);
       update.hippo_alert_min_prob = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
     }
-    // Alleen de twee gemeten horizonnen; iets anders zou de check-constraint
+    // Alleen de drie gemeten horizonnen; iets anders zou de check-constraint
     // raken en de hele opslag laten falen.
     if ("hippo_alert_horizon" in update) {
-      update.hippo_alert_horizon = Number(update.hippo_alert_horizon) === 7 ? 7 : 14;
+      const hz = Number(update.hippo_alert_horizon);
+      update.hippo_alert_horizon = hz === 7 || hz === 21 ? hz : 14;
     }
     // NOT NULL-kolom; 0 = geen weekplafond.
     if ("hippo_alert_max_per_week" in update) {

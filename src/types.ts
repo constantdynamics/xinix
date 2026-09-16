@@ -215,7 +215,7 @@ export interface Settings {
   limit_suggest_pct: number;
   /** Hippos: melding zodra de kans op +50% minimaal dit % is. 0 = uit. */
   hippo_alert_min_prob: number;
-  /** Hippos: op welke horizon die drempel geldt, 7 of 14 dagen. */
+  /** Hippos: op welke horizon die drempel geldt, 7, 14 of 21 dagen. */
   hippo_alert_horizon: number;
   /** Hippos: maximaal aantal meldingen per rollende 7 dagen. 0 = geen plafond. */
   hippo_alert_max_per_week: number;

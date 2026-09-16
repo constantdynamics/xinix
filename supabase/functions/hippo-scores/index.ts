@@ -1,6 +1,6 @@
-// hippo-scores — leesbare uitvoer van xinix-hippo-background: per favoriet de
-// gekalibreerde kans op +50% binnen 14 dagen, plus de gemeten lifts en de
-// kalibratietabel waarop die kans rust.
+// hippo-scores — leesbare uitvoer van xinix-hippo-background: per aandeel de
+// gekalibreerde kans op +50% binnen 7, 14 of 21 dagen, plus de gemeten lifts en
+// de kalibratietabel waarop die kans rust.
 //
 // Publiek leesbaar (net als rocket-scores): geen geheimen, alleen scores.
 // Client + CORS staan hier inline omdat de functie-deploy relatieve imports
@@ -61,6 +61,7 @@ Deno.serve(async (req) => {
     let scoreQuery = sb.from("xinix_hippo_scores")
         .select(
           "ticker, rank, prob, raw_prob, base_rate, own_rate, prob_7d, raw_prob_7d, base_rate_7d, " +
+          "prob_21d, raw_prob_21d, base_rate_21d, factors_21d, " +
           "company, sector, exchange, last_close, dollar_volume, " +
           "pct_change_5d, pct_change_22d, volume_ratio, days_since_peak, pct_below_high1y, peak_count, rating, " +
           "tradeable, is_favorite, factors, factors_7d, flags, scanned_at, alerted_at, alerted_prob, alerted_horizon, computed_at",
@@ -71,7 +72,7 @@ Deno.serve(async (req) => {
 
     const [scores, calib, settings, favCount, histCount, track, scoredCount] = await Promise.all([
       scoreQuery,
-      // Eén kalibratierij per horizon (7 en 14 dagen).
+      // Eén kalibratierij per horizon (7, 14 en 21 dagen).
       sb.from("xinix_hippo_calibration").select("horizon, computed_at, base_rate, days_n, hits, tickers_scanned, favorites, lifts, calib, max_prob, ceiling").order("horizon", { ascending: true }),
       sb.from("signal_settings").select("hippo_alert_min_prob, hippo_alert_horizon, hippo_alert_max_per_week").eq("id", 1).maybeSingle(),
       sb.from("xinix_favorites").select("ticker", { count: "exact", head: true }),
