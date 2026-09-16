@@ -16,6 +16,9 @@ import { PriceChartModal } from "./PriceChartModal";
 // De ranglijst beslaat inmiddels de hele watchlist; favorieten blijft het
 // standaardbeeld, want dat is waar dit tabblad over gaat.
 type Scope = "favorieten" | "alles" | "handelbaar" | "gemeld";
+// De gemeten vensters, in oplopende lengte.
+type Hz = "7" | "14" | "21";
+const HORIZONS: Hz[] = ["7", "14", "21"];
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
@@ -139,7 +142,7 @@ function LiftTables({ calib }: { calib: HippoCalibration }) {
  * De kalibratie hierboven is gemeten op de eigen historie; dit is het enige
  * cijfer waar achteraf niet meer aan te sleutelen valt.
  */
-function TrackRecordCard({ track, shownHz }: { track: HippoTrackRecord; shownHz: "7" | "14" }) {
+function TrackRecordCard({ track, shownHz }: { track: HippoTrackRecord; shownHz: Hz }) {
   const h = track.horizons?.[shownHz];
   const sinds = track.since
     ? new Date(track.since).toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" })
@@ -214,7 +217,7 @@ export function HipposView() {
   const [maxPerWeek, setMaxPerWeek] = useState(1);
   // Welke horizon de kalibratiekaart en de stats tonen. Standaard die waarop
   // gemeld wordt, want dat is de horizon waar de drempel op slaat.
-  const [shownHz, setShownHz] = useState<"7" | "14">("14");
+  const [shownHz, setShownHz] = useState<Hz>("14");
   const [computedAt, setComputedAt] = useState<string | null>(null);
   const [favCount, setFavCount] = useState(0);
   const [scannedCount, setScannedCount] = useState(0);
@@ -238,7 +241,8 @@ export function HipposView() {
       setThreshold(r.threshold);
       setAlertHorizon(r.alert_horizon ?? 14);
       setMaxPerWeek(r.max_per_week ?? 1);
-      setShownHz(String(r.alert_horizon ?? 14) === "7" ? "7" : "14");
+      const hz = String(r.alert_horizon ?? 14);
+      setShownHz(HORIZONS.includes(hz as Hz) ? (hz as Hz) : "14");
       setComputedAt(r.computed_at);
       setFavCount(r.favorite_count);
       setScannedCount(r.scanned_count);
@@ -262,9 +266,14 @@ export function HipposView() {
   }, [items, scope]);
 
   // De kans waarop de drempel slaat, per aandeel.
+  // De 14-daagse staat in de kale kolom, de andere achter hun achtervoegsel.
+  const probFor = useCallback(
+    (r: HippoItem, hz: Hz) => (hz === "7" ? r.prob_7d : hz === "21" ? r.prob_21d : r.prob),
+    [],
+  );
   const probOf = useCallback(
-    (r: HippoItem) => (alertHorizon === 7 ? r.prob_7d : r.prob),
-    [alertHorizon],
+    (r: HippoItem) => probFor(r, String(alertHorizon) as Hz),
+    [alertHorizon, probFor],
   );
   const aboveThreshold = useMemo(
     () => (threshold > 0 ? items.filter((r) => { const v = probOf(r); return v != null && v >= threshold && r.tradeable; }).length : 0),
@@ -305,8 +314,8 @@ export function HipposView() {
       <CollapsibleIntro title="Hippos — kans op +50% binnen 14 dagen" icon={<GradientTabIcon tab="favorieten" />}>
         <div className="text-sm text-neutral-300 leading-relaxed space-y-2">
           <p>
-            Voor elk aandeel op de watchlist de kans dat de koers <strong>minimaal +50%</strong> doet, gemeten over twee
-            vensters naast elkaar: <strong>binnen 7 dagen</strong> en <strong>binnen 14 dagen</strong>. Komt de kans
+            Voor elk aandeel op de watchlist de kans dat de koers <strong>minimaal +50%</strong> doet, gemeten over drie
+            vensters naast elkaar: <strong>7</strong>, <strong>14</strong> en <strong>21 dagen</strong>. Komt de kans
             op de horizon van <strong className="text-fog-lime">{alertHorizon} dagen</strong> voor een verhandelbare
             <strong> favoriet</strong> op of boven de drempel van <strong className="text-fog-lime">{threshold}%</strong>, dan krijg je
             meteen een ntfy-melding 🦛
@@ -315,10 +324,10 @@ export function HipposView() {
           </p>
           <p className="text-xs text-neutral-400">
             <strong className="text-neutral-300">Gemeten, niet bedacht.</strong> Van elk doorgelicht aandeel zijn 10 jaar
-            dagkoersen doorgelicht: voor elke handelsdag is gekeken of er binnen 5 respectievelijk 10 handelsdagen
-            +50% volgde (en minstens een dag standhield). Beide vensters rusten op exact dezelfde dagen en dezelfde
-            kenmerken, dus het verschil tussen 7 en 14 dagen is af te lezen in plaats van te beredeneren. Een korter
-            venster is strenger, dus die kansen liggen per definitie lager. Per dag zijn vijf kenmerken vastgelegd — 5-daags en 22-daags
+            dagkoersen doorgelicht: voor elke handelsdag is gekeken of er binnen 5, 10 of 15 handelsdagen +50% volgde
+            (en minstens een dag standhield). Alle drie de vensters rusten op exact dezelfde dagen en dezelfde
+            kenmerken, dus het verschil is af te lezen in plaats van te beredeneren. Een langer venster is soepeler:
+            de koers krijgt meer tijd voor diezelfde +50%, dus die kansen liggen hoger. Per dag zijn vijf kenmerken vastgelegd — 5-daags en 22-daags
             rendement, volume t.o.v. het 30-daagse gemiddelde, dagen sinds de vorige +50%-piek en de afstand tot de
             1-jaarstop. Over alle favorieten samen geeft dat een basiskans en per kenmerk een gemeten lift; de eigen
             historie van het aandeel telt mee. De actuele toestand (verse koersen) bepaalt welke lifts nu gelden.
@@ -371,7 +380,7 @@ export function HipposView() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">Kalibratie: model vs. werkelijkheid</div>
             <div className="flex items-center gap-1">
-              {(["7", "14"] as const).map((hz) => (
+              {HORIZONS.map((hz) => (
                 <button
                   key={hz}
                   type="button"
@@ -474,12 +483,11 @@ export function HipposView() {
                   <th className="px-3 py-2 text-center">Sterren</th>
                   <th className="px-3 py-2 text-left">Ticker</th>
                   <th className="px-3 py-2 text-left">Bedrijf</th>
-                  <th className="px-3 py-2 text-right" title="Gekalibreerde kans op +50% binnen 7 dagen">
-                    Kans 7d{alertHorizon === 7 && <span className="ml-1">🦛</span>}
-                  </th>
-                  <th className="px-3 py-2 text-right" title="Gekalibreerde kans op +50% binnen 14 dagen">
-                    Kans 14d{alertHorizon === 14 && <span className="ml-1">🦛</span>}
-                  </th>
+                  {HORIZONS.map((hz) => (
+                    <th key={hz} className="px-3 py-2 text-right" title={`Gekalibreerde kans op +50% binnen ${hz} dagen`}>
+                      Kans {hz}d{String(alertHorizon) === hz && <span className="ml-1">🦛</span>}
+                    </th>
+                  ))}
                   <th className="px-3 py-2 text-right" title="Modelkans vóór kalibratie, op de horizon waarop gemeld wordt">Model</th>
                   <th className="px-3 py-2 text-right" title="Eigen basiskans per dag, 10 jaar historie">Eigen</th>
                   <th className="px-3 py-2 text-right" title="Aantal +50%-sprints in 10 jaar">Sprints</th>
@@ -551,16 +559,18 @@ export function HipposView() {
                           {r.company ?? "—"}
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">
-                        {r.prob_7d != null
-                          ? <span className={probTone(r.prob_7d, alertHorizon === 7 ? threshold : 0)}>{r.prob_7d.toFixed(1)}%</span>
-                          : <span className="text-neutral-600">—</span>}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono tabular-nums">
-                        <span className={probTone(r.prob, alertHorizon === 14 ? threshold : 0)}>{r.prob.toFixed(1)}%</span>
-                      </td>
+                      {HORIZONS.map((hz) => {
+                        const v = probFor(r, hz);
+                        return (
+                          <td key={hz} className="px-3 py-2 text-right font-mono tabular-nums">
+                            {v != null
+                              ? <span className={probTone(v, String(alertHorizon) === hz ? threshold : 0)}>{v.toFixed(1)}%</span>
+                              : <span className="text-neutral-600">—</span>}
+                          </td>
+                        );
+                      })}
                       <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-500">
-                        {(alertHorizon === 7 ? r.raw_prob_7d : r.raw_prob)?.toFixed(1) ?? "—"}%
+                        {(alertHorizon === 7 ? r.raw_prob_7d : alertHorizon === 21 ? r.raw_prob_21d : r.raw_prob)?.toFixed(1) ?? "—"}%
                       </td>
                       <td className="px-3 py-2 text-right font-mono tabular-nums text-neutral-400">
                         {r.own_rate != null ? `${r.own_rate.toFixed(1)}%` : "—"}
@@ -587,21 +597,21 @@ export function HipposView() {
                     </tr>
                     {expanded === r.ticker && (
                       <tr className="bg-ink-3/20">
-                        <td colSpan={19} className="px-6 py-4">
+                        <td colSpan={20} className="px-6 py-4">
                           <div className="space-y-2 max-w-3xl">
                             <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">
                               Opbouw van de kans over {shownHz} dagen
                             </div>
                             <div className="text-xs text-neutral-400">
-                              Basis {((shownHz === "7" ? r.base_rate_7d : r.base_rate) ?? 0).toFixed(1)}% × eigen historie
+                              Basis {((shownHz === "7" ? r.base_rate_7d : shownHz === "21" ? r.base_rate_21d : r.base_rate) ?? 0).toFixed(1)}% × eigen historie
                               × de kenmerken hieronder = model{" "}
-                              {((shownHz === "7" ? r.raw_prob_7d : r.raw_prob) ?? 0).toFixed(1)}% → gekalibreerd{" "}
-                              <span className={probTone((shownHz === "7" ? r.prob_7d : r.prob) ?? 0, threshold)}>
-                                {((shownHz === "7" ? r.prob_7d : r.prob) ?? 0).toFixed(1)}%
+                              {((shownHz === "7" ? r.raw_prob_7d : shownHz === "21" ? r.raw_prob_21d : r.raw_prob) ?? 0).toFixed(1)}% → gekalibreerd{" "}
+                              <span className={probTone(probFor(r, shownHz) ?? 0, threshold)}>
+                                {(probFor(r, shownHz) ?? 0).toFixed(1)}%
                               </span>
                             </div>
                             <ul className="space-y-1">
-                              {(shownHz === "7" ? r.factors_7d ?? [] : r.factors).map((f, k) => (
+                              {(shownHz === "7" ? r.factors_7d ?? [] : shownHz === "21" ? r.factors_21d ?? [] : r.factors).map((f, k) => (
                                 <li key={k} className="flex items-baseline gap-2 text-xs">
                                   <span
                                     className={`font-mono tabular-nums w-12 shrink-0 text-right ${

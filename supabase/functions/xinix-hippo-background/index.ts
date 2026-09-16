@@ -1,22 +1,24 @@
-// xinix-hippo-background — "Hippos": welke favorieten hebben nú de grootste kans
-// om binnen 14 dagen minimaal +50% te stijgen? Stuurt een ntfy-melding zodra
-// die kans boven signal_settings.hippo_alert_min_prob komt (standaard 80%).
+// xinix-hippo-background — "Hippos": welke aandelen uit de watchlist hebben nú
+// de grootste kans om binnen 7, 14 of 21 dagen minimaal +50% te stijgen? Stuurt
+// een ntfy-melding zodra die kans voor een favoriet boven
+// signal_settings.hippo_alert_min_prob komt, op de ingestelde horizon.
 //
 // ── Hoe de kans wordt gemeten ────────────────────────────────────────────────
 // De gebeurtenis: vanaf een handelsdag t haalt de slotkoers binnen de horizon
 // minimaal +50%, en de dag ná dat moment staat de koers nog ≥ +20% (anders is
-// het een 1-dags data-piek). Twee horizonnen worden náást elkaar gemeten:
-// 5 handelsdagen (≈ 7 kalenderdagen) en 10 handelsdagen (≈ 14). Beide op exact
+// het een 1-dags data-piek). Drie horizonnen worden náást elkaar gemeten:
+// 5, 10 en 15 handelsdagen (≈ 7, 14 en 21 kalenderdagen). Alle drie op exact
 // dezelfde dagen en met exact dezelfde kenmerken, zodat het verschil af te lezen
 // is in plaats van te beredeneren; alleen de uitkomst verschilt. Een korter
 // venster is strenger, dus die kansen liggen per definitie lager.
 //
-// 1. Scan (gebudgetteerd, ~100 favorieten per run, herscan per 30 dagen):
-//    10 jaar dagkoersen per favoriet bij Yahoo. Per dag: gebeurde het? Plus
-//    vijf toestandskenmerken van die dag, in buckets. Per bucket tellen we
+// 1. Scan (gebudgetteerd, ~50 tickers per run; favorieten elke 30 dagen, de
+//    rest elke 90):
+//    10 jaar dagkoersen per ticker bij Yahoo. Per dag: gebeurde het? Plus
+//    acht toestandskenmerken van die dag, in buckets. Per bucket tellen we
 //    n en treffers. Alleen tellingen worden opgeslagen, geen koersen.
 // 2. Score (elke run, op verse koersen uit signal_price_summary):
-//    basiskans p0 = alle treffers / alle dagen over alle favorieten.
+//    basiskans p0 = alle treffers / alle dagen over alle gescande tickers.
 //    Per bucket een lift = gemeten kans in die bucket / p0 (gekrompen naar 1
 //    bij weinig waarnemingen). Eigen historie van het aandeel telt als extra
 //    lift. Modelkans = odds(p0) × eigen-lift × Π bucket-lifts.
@@ -95,20 +97,26 @@ interface Horizon { key: string; bars: number; days: number }
 const HORIZONS: Horizon[] = [
   { key: "7",  bars: 5,  days: 7 },
   { key: "14", bars: 10, days: 14 },
+  { key: "21", bars: 15, days: 21 },
 ];
 // Alle horizonnen worden op dezelfde dagen gemeten (het grootste venster moet
-// volledig beschikbaar zijn), anders vergelijk je twee verschillende steekproeven.
+// volledig beschikbaar zijn), anders vergelijk je verschillende steekproeven.
 const MAX_FWD_BARS = Math.max(...HORIZONS.map((h) => h.bars));
+const LAST_HORIZON = HORIZONS[HORIZONS.length - 1];   // wikkelt als laatste af
 const DEFAULT_HORIZON = "14";     // de horizon die de losse kolommen spiegelen
-const PEAK_BARS = MAX_FWD_BARS;   // definitie van een "+50%-piek" voor het since-kenmerk
+// Wat telt als "+50%-piek" voor het since-kenmerk. Bewust vastgezet op 10 bars
+// en niet gekoppeld aan het langste venster: anders verandert de betekenis van
+// een bestaand kenmerk zodra er een horizon bij komt.
+const PEAK_BARS = 10;
 const HOLD_MULT = 1.2;        // de dag erna nog ≥ +20%, anders een 1-dags data-piek
 const MIN_PRICE = 0.10;       // sub-dime-koersen zijn ruis (zelfde grens als poefies)
 const MAX_BAR_JUMP = 5;       // bar ≥5× de vorige én meteen terug = data-fout
 const MIN_BARS = 120;
 // Yahoo kost ~0,35 s per ticker, maar de echte grens is de CPU-limiet van de
 // edge runtime: een batch van 250 werd na ~160 tickers afgebroken. 100 was
-// gemeten veilig met één horizon; met twee verdubbelt de kalibratielus, dus 75.
-const BATCH_SIZE = 75;
+// gemeten veilig met één horizon; elke extra horizon is een extra kalibratielus
+// per ticker, dus bij drie horizonnen 50.
+const BATCH_SIZE = 50;
 // Favorieten gaan elke maand opnieuw door de meting, de rest elk kwartaal:
 // 641 / 30 + 3100 / 90 is ongeveer 56 per dag, ruim binnen wat de cron aankan.
 const RESCAN_DAYS_FAV = 30;
@@ -129,7 +137,7 @@ const REALERT_GAIN = 10;      // … als de kans ≥10 punten hoger is dan bij d
 const WEEK_MS = 7 * 86400000; // rollend venster voor het weekplafond
 const DAY = 86400000;
 
-// Vijf toestandskenmerken, elk in buckets. De bucket-sleutel is de index in de
+// Acht toestandskenmerken, elk in buckets. De bucket-sleutel is de index in de
 // randen-lijst; het label wordt daaruit afgeleid zodat UI en backend nooit
 // uit de pas lopen.
 interface FeatureDef { key: string; label: string; edges: number[]; unit: string; nullLabel?: string }
@@ -172,7 +180,7 @@ function bump(c: Counts, key: string, hit: boolean) { const e = c[key] ?? (c[key
 
 // ── Gepoolde lifts uit alle histories ────────────────────────────────────────
 interface Pooled {
-  hz: string;                       // "7" of "14"
+  hz: string;                       // "7", "14" of "21"
   p0: number;                       // fractie
   n: number; hits: number; tickers: number;
   lifts: Record<string, Record<string, { n: number; h: number; rate: number; lift: number }>>;
@@ -332,8 +340,8 @@ function analyze(ticker: string, bars: Bar[], pools: Record<string, Pooled | nul
   if (n < MIN_BARS) { row.ok = false; row.error = `te weinig historie (${n} dagen)`; return row; }
 
   // Piekdagen: dag j waarop de koers ≥ +50% staat t.o.v. een van de dagen ervoor.
-  // Horizon-onafhankelijk, zodat het since-kenmerk voor beide horizonnen gelijk is
-  // en alleen de uitkomst verschilt.
+  // Horizon-onafhankelijk, zodat het since-kenmerk voor alle horizonnen gelijk
+  // is en alleen de uitkomst verschilt.
   const isPeak = new Array<boolean>(n).fill(false);
   for (let j = 1; j < n; j++) {
     for (let k = 1; k <= PEAK_BARS && j - k >= 0; k++) {
@@ -347,9 +355,9 @@ function analyze(ticker: string, bars: Bar[], pools: Record<string, Pooled | nul
   row.peak_count = peakCount;
   row.last_peak_date = lastPeakIdx >= 0 ? bars[lastPeakIdx].date : null;
 
-  // Per dag: de vijf kenmerken op die dag + per horizon of de gebeurtenis volgde.
+  // Per dag: de acht kenmerken op die dag + per horizon of de gebeurtenis volgde.
   // Alleen dagen waar het gróótste venster volledig beschikbaar is tellen mee,
-  // zodat beide horizonnen op exact dezelfde steekproef rusten.
+  // zodat alle horizonnen op exact dezelfde steekproef rusten.
   const twoYearsAgo = nowMs - 730 * DAY;
   const days: Array<{ feats: Features; hits: Record<string, boolean>; ms: number }> = [];
   let volSum = 0;                                // lopende som van vol[t-30..t-1]
@@ -471,18 +479,20 @@ interface Factor { label: string; detail: string; mult: number }
 // wel terugkijkend op dezelfde data waar de lifts uit komen. Het track record
 // kijkt vooruit: leg vast wat het model vandaag zei, en kijk later wat er
 // gebeurde. Daar valt achteraf niets meer aan te sleutelen.
-interface Prediction {
+// De kolommen heten prob_7d / touched_14d / resolved_21d enzovoort; die namen
+// worden uit de horizon-sleutel afgeleid, zodat een extra venster alleen een
+// migratie kost en geen code.
+type Prediction = Record<string, unknown> & {
   ticker: string; made_on: string; made_at: string; entry_close: number;
-  prob_7d: number | null; prob_14d: number | null;
-  raw_prob_7d: number | null; raw_prob_14d: number | null;
-  rating: number | null; tradeable: boolean;
   max_close: number; max_close_at: string | null;
   touched_at: string | null; held_at: string | null;
-  touched_7d: boolean | null; held_7d: boolean | null;
-  touched_14d: boolean | null; held_14d: boolean | null;
-  resolved_7d: boolean; resolved_14d: boolean;
   updated_at: string;
-}
+};
+const probCol = (hz: string) => `prob_${hz}d`;
+const rawProbCol = (hz: string) => `raw_prob_${hz}d`;
+const touchedCol = (hz: string) => `touched_${hz}d`;
+const heldCol = (hz: string) => `held_${hz}d`;
+const resolvedCol = (hz: string) => `resolved_${hz}d`;
 const TOUCH_MULT = EVENT_MULT;   // +50% aangeraakt
 const HELD_MIN = HOLD_MULT;      // en daarna nog ≥ +20%: dezelfde eis als in de historie
 
@@ -509,13 +519,13 @@ function advancePrediction(p: Prediction, close: number | null, nowMs: number, n
   // Afwikkelen zodra de horizon voorbij is. Een aanraking telt alleen mee als
   // hij binnen het venster viel; standhouden mag één dag later nog.
   for (const hz of HORIZONS) {
-    const resolvedKey = hz.key === "7" ? "resolved_7d" : "resolved_14d";
-    if (out[resolvedKey as "resolved_7d" | "resolved_14d"]) continue;
+    if (out[resolvedCol(hz.key)]) continue;
     if (nowMs < madeMs + hz.days * DAY) continue;
     const touched = out.touched_at != null && Date.parse(out.touched_at) <= madeMs + hz.days * DAY;
     const held = touched && out.held_at != null && Date.parse(out.held_at) <= madeMs + (hz.days + 1) * DAY;
-    if (hz.key === "7") { out.touched_7d = touched; out.held_7d = held; out.resolved_7d = true; }
-    else { out.touched_14d = touched; out.held_14d = held; out.resolved_14d = true; }
+    out[touchedCol(hz.key)] = touched;
+    out[heldCol(hz.key)] = held;
+    out[resolvedCol(hz.key)] = true;
     changed = true;
   }
 
@@ -657,7 +667,6 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     }
     const main14 = per[DEFAULT_HORIZON];
     if (!main14) continue;
-    const main7 = per["7"];
 
     const dollarVol = avgVol != null ? avgVol * lastClose : null;
     const flags: string[] = [];
@@ -667,12 +676,23 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     if (r5 != null && r5 >= 50) flags.push("sprint loopt nu");
     if (p.updated_at && nowMs - Date.parse(p.updated_at) > 7 * DAY) flags.push("koers ouder dan een week");
 
-    scored.push({
+    // De 14-daagse staat in de kale kolommen (prob, raw_prob, ...); de andere
+    // horizonnen krijgen hun eigen achtervoegsel.
+    const row: Record<string, unknown> = {
       ticker: f.ticker,
       prob: r1(main14.prob), raw_prob: r1(main14.raw), base_rate: r1(main14.base), own_rate: r1(main14.ownRate),
       factors: main14.factors,
-      prob_7d: main7 ? r1(main7.prob) : null, raw_prob_7d: main7 ? r1(main7.raw) : null,
-      base_rate_7d: main7 ? r1(main7.base) : null, factors_7d: main7 ? main7.factors : [],
+    };
+    for (const hz of HORIZONS) {
+      if (hz.key === DEFAULT_HORIZON) continue;
+      const v = per[hz.key];
+      row[`prob_${hz.key}d`] = v ? r1(v.prob) : null;
+      row[`raw_prob_${hz.key}d`] = v ? r1(v.raw) : null;
+      row[`base_rate_${hz.key}d`] = v ? r1(v.base) : null;
+      row[`factors_${hz.key}d`] = v ? v.factors : [];
+    }
+    scored.push({
+      ...row,
       company: t?.company ?? null, sector: t?.yahoo_sector ?? t?.sector ?? null, exchange: t?.exchange ?? null,
       last_close: lastClose, dollar_volume: dollarVol != null ? Math.round(dollarVol) : null,
       pct_change_5d: r5, pct_change_22d: r22, volume_ratio: vol != null ? r1(vol) : null,
@@ -687,7 +707,10 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     r.rank = i + 1;
     // De opbouw is het zwaarste veld; buiten de kopgroep en zonder hartje
     // bewaren we hem niet, anders schrijft elke run tientallen megabytes weg.
-    if (i >= TOP_FACTORS && !r.is_favorite) { r.factors = []; r.factors_7d = []; }
+    if (i >= TOP_FACTORS && !r.is_favorite) {
+      r.factors = [];
+      for (const hz of HORIZONS) if (hz.key !== DEFAULT_HORIZON) r[`factors_${hz.key}d`] = [];
+    }
   });
 
   for (let i = 0; i < scored.length; i += 500) {
@@ -709,7 +732,8 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     const calibOut = Object.entries(pl.calib).sort(([a], [b]) => Number(a) - Number(b)).map(([k, v]) => ({ bucket: k, ...calibRange(k), n: v.n, hits: v.h, rate_pct: v.n ? r1((100 * v.h) / v.n) : null }));
     const ceil = ceilingOf(pl);
     ceilings[hz.key] = ceil;
-    const probs = scored.map((s) => (hz.key === "7" ? s.prob_7d : s.prob)).filter((x: number | null) => x != null) as number[];
+    const col = hz.key === DEFAULT_HORIZON ? "prob" : `prob_${hz.key}d`;
+    const probs = scored.map((s) => s[col]).filter((x: number | null) => x != null) as number[];
     calibRows.push({
       horizon: Number(hz.key), computed_at: runStart, base_rate: r1(pl.p0 * 100),
       days_n: pl.n, hits: pl.hits, tickers_scanned: pl.tickers, favorites: favs.length,
@@ -731,14 +755,14 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const nowIso = new Date(nowMs).toISOString();
   const today = nowIso.slice(0, 10);
   try {
-    const open = await fetchAll<Prediction>(sb, "xinix_hippo_predictions", "*", (q: any) => q.eq("resolved_14d", false));
+    const open = await fetchAll<Prediction>(sb, "xinix_hippo_predictions", "*", (q: any) => q.eq(resolvedCol(LAST_HORIZON.key), false));
     const changed: Prediction[] = [];
     for (const pred of open) {
       const px = prBy.get(pred.ticker);
       const next = advancePrediction(pred, num(px?.last_close), nowMs, nowIso);
       if (!next) continue;
       changed.push(next);
-      if (next.resolved_14d && !pred.resolved_14d) predResolved++;
+      if (next[resolvedCol(LAST_HORIZON.key)] && !pred[resolvedCol(LAST_HORIZON.key)]) predResolved++;
     }
     for (let i = 0; i < changed.length; i += 500) {
       const { error } = await sb.from("xinix_hippo_predictions").upsert(changed.slice(i, i + 500), { onConflict: "ticker,made_on" });
@@ -750,12 +774,19 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     // de eerste staan, zodat het track record niet stiekem wordt bijgesteld.
     // Track record beperkt zich tot favorieten: dat houdt de tabel hanteerbaar
     // en het zijn de aandelen waar een melding over kan gaan.
-    const fresh = scored.filter((sc) => sc.is_favorite).map((sc) => ({
-      ticker: sc.ticker, made_on: today, made_at: nowIso, entry_close: sc.last_close,
-      prob_7d: sc.prob_7d, prob_14d: sc.prob, raw_prob_7d: sc.raw_prob_7d, raw_prob_14d: sc.raw_prob,
-      rating: sc.rating, tradeable: sc.tradeable,
-      max_close: sc.last_close, max_close_at: nowIso, updated_at: nowIso,
-    }));
+    const fresh = scored.filter((sc) => sc.is_favorite).map((sc) => {
+      const p: Record<string, unknown> = {
+        ticker: sc.ticker, made_on: today, made_at: nowIso, entry_close: sc.last_close,
+        rating: sc.rating, tradeable: sc.tradeable,
+        max_close: sc.last_close, max_close_at: nowIso, updated_at: nowIso,
+      };
+      for (const hz of HORIZONS) {
+        const isDefault = hz.key === DEFAULT_HORIZON;
+        p[probCol(hz.key)] = isDefault ? sc.prob : sc[`prob_${hz.key}d`];
+        p[rawProbCol(hz.key)] = isDefault ? sc.raw_prob : sc[`raw_prob_${hz.key}d`];
+      }
+      return p;
+    });
     for (let i = 0; i < fresh.length; i += 500) {
       const batch = fresh.slice(i, i + 500);
       const { error } = await sb.from("xinix_hippo_predictions").upsert(batch, { onConflict: "ticker,made_on", ignoreDuplicates: true });
@@ -773,7 +804,9 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const threshold = num(settings?.hippo_alert_min_prob) ?? 80;
   const alertHz = String(num(settings?.hippo_alert_horizon) ?? 14);
   const maxPerWeek = Math.max(0, num(settings?.hippo_alert_max_per_week) ?? 1);
-  const probOf = (s: any): number | null => (alertHz === "7" ? s.prob_7d : s.prob);
+  const probOf = (s: any): number | null => (alertHz === DEFAULT_HORIZON ? s.prob : s[`prob_${alertHz}d`]);
+  const rawOf = (s: any): number | null => (alertHz === DEFAULT_HORIZON ? s.raw_prob : s[`raw_prob_${alertHz}d`]);
+  const factorsOf = (s: any): Factor[] => (alertHz === DEFAULT_HORIZON ? s.factors : s[`factors_${alertHz}d`]) ?? [];
   if (settings?.ntfy_topic && threshold > 0 && !inQuietHours(settings)) {
     // Alleen favorieten kunnen een melding krijgen: een ping over een aandeel
     // dat je nooit hebt bekeken is ruis, geen signaal.
@@ -819,16 +852,18 @@ Deno.serve(runBackground("xinix-hippos", async () => {
       const notifyLog: Array<{ ticker: string; source: string; alert_key: string; priority: number }> = [];
       for (const c of toSend.slice(0, room)) {
         const prob = probOf(c) as number;
-        const rawProbShown = alertHz === "7" ? c.raw_prob_7d : c.raw_prob;
-        const facts = (alertHz === "7" ? c.factors_7d : c.factors) as Factor[];
-        const top = facts.filter((f) => f.mult > 1.05 && f.label !== "Kalibratie").sort((a, b) => b.mult - a.mult).slice(0, 3);
-        const otherHz = alertHz === "7" ? "14" : "7";
-        const otherProb = alertHz === "7" ? c.prob : c.prob_7d;
+        const rawProbShown = rawOf(c);
+        const top = factorsOf(c).filter((f) => f.mult > 1.05 && f.label !== "Kalibratie").sort((a, b) => b.mult - a.mult).slice(0, 3);
+        // De andere vensters ter vergelijking, zodat te zien is of de sprint
+        // snel of juist traag verwacht wordt.
+        const others = HORIZONS.filter((h) => h.key !== alertHz)
+          .map((h) => ({ hz: h.key, p: h.key === DEFAULT_HORIZON ? c.prob : c[`prob_${h.key}d`] }))
+          .filter((x) => x.p != null);
         const title = `🦛 ${safeTickerDisplay(c.ticker)} · ${Math.round(prob)}% kans op +50% in ${alertHz} dagen`.slice(0, 120);
         const lines = [
           `${safeTickerDisplay(c.ticker)}${c.company ? ` · ${c.company}` : ""}`,
           `🦛 Kans op +50% binnen ${alertHz} dagen: ${Math.round(prob)}% (model ${Math.round(rawProbShown ?? 0)}%, drempel ${Math.round(threshold)}%)`,
-          otherProb != null ? `📆 Ter vergelijking, binnen ${otherHz} dagen: ${Math.round(otherProb)}%` : "",
+          others.length ? `📆 Ter vergelijking: ${others.map((o) => `${o.hz}d ${Math.round(o.p as number)}%`).join(" · ")}` : "",
           `⭐ Sterren: ${ratingStr(c.rating)}`,
           `💲 Koers ${fmtPrice(c.last_close)} · 5d ${fmtPct(c.pct_change_5d)} · 22d ${fmtPct(c.pct_change_22d)}${c.volume_ratio != null ? ` · volume ${c.volume_ratio.toFixed(1)}×` : ""}`,
           `🔗 ${googleFinanceUrl(c.ticker, c.exchange)}`,
@@ -853,18 +888,29 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     }
   }
 
-  const top5 = scored.slice(0, 5).map((s) => `${s.ticker} ${s.prob}%/${s.prob_7d ?? "—"}%`).join(", ");
   const scanBroken = scanned > 0 && scanErrors >= Math.max(1, Math.ceil(scanned / 2));
-  const p7 = pools["7"];
-  const maxOf = (k: "prob" | "prob_7d") => { const v = scored.map((s) => s[k]).filter((x) => x != null) as number[]; return v.length ? Math.max(...v) : null; };
+  // De 14-daagse staat in de kale kolom, de rest achter zijn achtervoegsel.
+  const colOf = (hz: string) => (hz === DEFAULT_HORIZON ? "prob" : `prob_${hz}d`);
+  const maxOf = (hz: string) => { const v = scored.map((s) => s[colOf(hz)]).filter((x) => x != null) as number[]; return v.length ? Math.max(...v) : null; };
+  const top5 = scored.slice(0, 5).map((s) => `${s.ticker} ${HORIZONS.map((h) => s[colOf(h.key)] ?? "—").join("/")}`).join(", ");
+  const perHz = HORIZONS.map((h) => {
+    const pl = pools[h.key];
+    return `${h.key}d: basis ${pl ? r1(pl.p0 * 100) : "—"}% hoogste ${maxOf(h.key) ?? "—"}% plafond ${ceilings[h.key] != null ? r1(ceilings[h.key]!) : "—"}%`;
+  }).join("; ");
   return {
     ok: errors.length === 0 && !scanBroken,
-    message: `gescand ${scanned}/${due.length} (fouten ${scanErrors}), gescoord ${scored.length}/${universe.length} (${favs.length} favoriet); 14d: basis ${r1(pool.p0 * 100)}% hoogste ${maxOf("prob") ?? "—"}% plafond ${ceilings["14"] != null ? r1(ceilings["14"]!) : "—"}%; 7d: basis ${p7 ? r1(p7.p0 * 100) : "—"}% hoogste ${maxOf("prob_7d") ?? "—"}% plafond ${ceilings["7"] != null ? r1(ceilings["7"]!) : "—"}%; drempel ${threshold}% op ${alertHz}d, gemeld ${notified}` + (scanErrMsgs.length ? `; yahoo: ${scanErrMsgs.join("; ")}` : "") + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
+    message: `gescand ${scanned}/${due.length} (fouten ${scanErrors}), gescoord ${scored.length}/${universe.length} (${favs.length} favoriet); ${perHz}; drempel ${threshold}% op ${alertHz}d, gemeld ${notified}; track record +${predNew}/${predResolved} afgewikkeld` + (scanErrMsgs.length ? `; yahoo: ${scanErrMsgs.join("; ")}` : "") + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
     metrics: {
       scanned, scan_errors: scanErrors, scored: scored.length, universe: universe.length, favorites: favs.length,
       tickers_with_history: pool.tickers,
-      base_rate_14d: r1(pool.p0 * 100), max_prob_14d: maxOf("prob"), ceiling_14d: ceilings["14"] != null ? r1(ceilings["14"]!) : null, days_14d: pool.n, hits_14d: pool.hits,
-      base_rate_7d: p7 ? r1(p7.p0 * 100) : null, max_prob_7d: maxOf("prob_7d"), ceiling_7d: ceilings["7"] != null ? r1(ceilings["7"]!) : null, days_7d: p7?.n ?? null, hits_7d: p7?.hits ?? null,
+      horizons: Object.fromEntries(HORIZONS.map((h) => {
+        const pl = pools[h.key];
+        return [h.key, {
+          base_rate: pl ? r1(pl.p0 * 100) : null, max_prob: maxOf(h.key),
+          ceiling: ceilings[h.key] != null ? r1(ceilings[h.key]!) : null,
+          days: pl?.n ?? null, hits: pl?.hits ?? null,
+        }];
+      })),
       alert_horizon: Number(alertHz), threshold, max_per_week: maxPerWeek,
       candidates, blocked, week_capped: weekCapped, notified, top5, errors: errors.length,
       pred_new: predNew, pred_updated: predUpdated, pred_resolved: predResolved,
