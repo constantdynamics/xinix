@@ -13,7 +13,9 @@ import { HeartHeader, HeartInline, SeenHeader, SeenInline, StarRating } from "..
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
 
-type Scope = "alles" | "handelbaar" | "gemeld";
+// De ranglijst beslaat inmiddels de hele watchlist; favorieten blijft het
+// standaardbeeld, want dat is waar dit tabblad over gaat.
+type Scope = "favorieten" | "alles" | "handelbaar" | "gemeld";
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
@@ -218,7 +220,8 @@ export function HipposView() {
   const [scannedCount, setScannedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [scope, setScope] = useState<Scope>("alles");
+  const [scope, setScope] = useState<Scope>("favorieten");
+  const [scoredCount, setScoredCount] = useState(0);
   const [showLifts, setShowLifts] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
@@ -239,6 +242,7 @@ export function HipposView() {
       setComputedAt(r.computed_at);
       setFavCount(r.favorite_count);
       setScannedCount(r.scanned_count);
+      setScoredCount(r.scored_count ?? r.items.length);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -251,6 +255,7 @@ export function HipposView() {
   }, [load]);
 
   const filtered = useMemo(() => {
+    if (scope === "favorieten") return items.filter((r) => r.is_favorite);
     if (scope === "handelbaar") return items.filter((r) => r.tradeable);
     if (scope === "gemeld") return items.filter((r) => r.alerted_at);
     return items;
@@ -300,16 +305,16 @@ export function HipposView() {
       <CollapsibleIntro title="Hippos — kans op +50% binnen 14 dagen" icon={<GradientTabIcon tab="favorieten" />}>
         <div className="text-sm text-neutral-300 leading-relaxed space-y-2">
           <p>
-            Per favoriet (hartje) de kans dat de koers <strong>minimaal +50%</strong> doet, gemeten over twee
+            Voor elk aandeel op de watchlist de kans dat de koers <strong>minimaal +50%</strong> doet, gemeten over twee
             vensters naast elkaar: <strong>binnen 7 dagen</strong> en <strong>binnen 14 dagen</strong>. Komt de kans
             op de horizon van <strong className="text-fog-lime">{alertHorizon} dagen</strong> voor een verhandelbare
-            favoriet op of boven de drempel van <strong className="text-fog-lime">{threshold}%</strong>, dan krijg je
+            <strong> favoriet</strong> op of boven de drempel van <strong className="text-fog-lime">{threshold}%</strong>, dan krijg je
             meteen een ntfy-melding 🦛
             {maxPerWeek > 0 ? `, hoogstens ${maxPerWeek === 1 ? "één keer" : `${maxPerWeek} keer`} per week` : ""}.
             Beide instelbaar bij Instellingen.
           </p>
           <p className="text-xs text-neutral-400">
-            <strong className="text-neutral-300">Gemeten, niet bedacht.</strong> Van elke favoriet zijn 10 jaar
+            <strong className="text-neutral-300">Gemeten, niet bedacht.</strong> Van elk doorgelicht aandeel zijn 10 jaar
             dagkoersen doorgelicht: voor elke handelsdag is gekeken of er binnen 5 respectievelijk 10 handelsdagen
             +50% volgde (en minstens een dag standhield). Beide vensters rusten op exact dezelfde dagen en dezelfde
             kenmerken, dus het verschil tussen 7 en 14 dagen is af te lezen in plaats van te beredeneren. Een korter
@@ -399,7 +404,7 @@ export function HipposView() {
       <div className="flex flex-wrap items-center gap-3">
         <Stat label="Favorieten" value={favCount} />
         <Stat label="Doorgelicht" value={scannedCount} hint="10 jaar historie gemeten" />
-        <Stat label="Gescoord" value={items.length} hint="met verse koers" />
+        <Stat label="Gescoord" value={scoredCount || items.length} hint="hele watchlist, met verse koers" />
         <Stat label={`Basiskans ${shownHz}d`} value={calib ? `${calib.base_rate.toFixed(1)}%` : "—"} hint="per dag, alle favorieten" />
         <Stat label={`Hoogste ${shownHz}d`} value={calib?.max_prob != null ? `${calib.max_prob.toFixed(0)}%` : "—"} />
         <Stat label={`Plafond ${shownHz}d`} value={ceiling != null ? `${ceiling.toFixed(0)}%` : "—"} hint="hoogst gemeten frequentie ooit" />
@@ -418,7 +423,7 @@ export function HipposView() {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold mr-1">Toon:</span>
-        {(["alles", "handelbaar", "gemeld"] as Scope[]).map((s) => (
+        {(["favorieten", "alles", "handelbaar", "gemeld"] as Scope[]).map((s) => (
           <button
             key={s}
             onClick={() => setScope(s)}
@@ -426,14 +431,16 @@ export function HipposView() {
               scope === s ? "border-fog-lime/40 text-fog-lime bg-fog-lime/10" : "border-ink-5 text-neutral-400 hover:text-neutral-200"
             }`}
             title={
-              s === "handelbaar"
-                ? "Verbergt sub-penny aandelen en dode orderboeken"
-                : s === "gemeld"
-                  ? "Favorieten waarvoor ooit een hippo-melding is verstuurd"
-                  : "Alle favorieten met historie en koers"
+              s === "favorieten"
+                ? "Alleen aandelen met een hartje — de enige die een melding kunnen krijgen"
+                : s === "handelbaar"
+                  ? "Verbergt sub-penny aandelen en dode orderboeken"
+                  : s === "gemeld"
+                    ? "Aandelen waarvoor ooit een hippo-melding is verstuurd"
+                    : "De hele watchlist, ook zonder hartje"
             }
           >
-            {s === "alles" ? "Alle favorieten" : s === "handelbaar" ? "Handelbaar" : "🦛 Gemeld"}
+            {s === "favorieten" ? "♥ Favorieten" : s === "alles" ? "Hele watchlist" : s === "handelbaar" ? "Handelbaar" : "🦛 Gemeld"}
           </button>
         ))}
       </div>
@@ -521,7 +528,14 @@ export function HipposView() {
                           </span>
                         )}
                         {threshold > 0 && (probOf(r) ?? 0) >= threshold && (
-                          <span className="ml-1.5 align-middle" title={`Boven de meldingsdrempel op ${alertHorizon} dagen`}>🦛</span>
+                          <span
+                            className="ml-1.5 align-middle"
+                            title={r.is_favorite
+                              ? `Boven de meldingsdrempel op ${alertHorizon} dagen`
+                              : `Boven de drempel, maar zonder hartje gaat er geen melding uit`}
+                          >
+                            {r.is_favorite ? "🦛" : "🦛\u200A?"}
+                          </span>
                         )}
                       </td>
                       <td className="px-3 py-2 max-w-[220px]">
