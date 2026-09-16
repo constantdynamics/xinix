@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(1, Math.trunc(limitRaw)), MAX_LIMIT) : 700;
 
     const sb = getServiceClient();
-    const [scores, calib, settings, favCount, histCount] = await Promise.all([
+    const [scores, calib, settings, favCount, histCount, track] = await Promise.all([
       sb.from("xinix_hippo_scores")
         .select(
           "ticker, rank, prob, raw_prob, base_rate, own_rate, prob_7d, raw_prob_7d, base_rate_7d, " +
@@ -70,6 +70,10 @@ Deno.serve(async (req) => {
       sb.from("signal_settings").select("hippo_alert_min_prob, hippo_alert_horizon, hippo_alert_max_per_week").eq("id", 1).maybeSingle(),
       sb.from("xinix_favorites").select("ticker", { count: "exact", head: true }),
       sb.from("xinix_hippo_history").select("ticker", { count: "exact", head: true }).eq("ok", true),
+      // Track record: wat voorspelde het model, en kwam het uit? Aggregeren
+      // gebeurt in de database, want het gaat om tellingen en niet om de
+      // duizenden losse voorspellingen.
+      sb.rpc("xinix_hippo_track_record"),
     ]);
     if (scores.error) return text(req, scores.error.message, { status: 500 });
 
@@ -86,6 +90,7 @@ Deno.serve(async (req) => {
       threshold: Number(st?.hippo_alert_min_prob ?? 80),
       alert_horizon: Number(st?.hippo_alert_horizon ?? 14),
       max_per_week: Number(st?.hippo_alert_max_per_week ?? 1),
+      track_record: track.error ? null : (track.data ?? null),
       favorite_count: favCount.count ?? 0,
       scanned_count: histCount.count ?? 0,
       computed_at: calRows[0]?.computed_at ?? null,

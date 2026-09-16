@@ -5,6 +5,7 @@ import {
   getToken,
   type HippoItem,
   type HippoCalibration,
+  type HippoTrackRecord,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Stat, CollapsibleIntro, toast } from "../components/ui";
@@ -131,9 +132,81 @@ function LiftTables({ calib }: { calib: HippoCalibration }) {
   );
 }
 
+/**
+ * Track record: wat het model vooraf zei, en wat er daarna werkelijk gebeurde.
+ * De kalibratie hierboven is gemeten op de eigen historie; dit is het enige
+ * cijfer waar achteraf niet meer aan te sleutelen valt.
+ */
+function TrackRecordCard({ track, shownHz }: { track: HippoTrackRecord; shownHz: "7" | "14" }) {
+  const h = track.horizons?.[shownHz];
+  const sinds = track.since
+    ? new Date(track.since).toLocaleDateString("nl-NL", { day: "numeric", month: "long", year: "numeric" })
+    : null;
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex flex-wrap items-baseline gap-3">
+        <div className="text-[11px] uppercase tracking-wider text-neutral-500 font-bold">
+          Track record over {shownHz} dagen
+        </div>
+        <div className="text-[11px] text-neutral-500">
+          {sinds ? `bijgehouden sinds ${sinds}` : "start vandaag"} · {track.open.toLocaleString("nl-NL")} lopend
+        </div>
+      </div>
+
+      {!h || h.n === 0 ? (
+        <div className="text-[11px] text-neutral-500 leading-relaxed">
+          Nog geen afgewikkelde voorspellingen. Elke dag wordt per aandeel de kans van dat moment vastgelegd met de
+          koers erbij; na {shownHz} dagen valt het oordeel. De eerste uitkomsten verschijnen hier dus over{" "}
+          {shownHz} dagen. Tot die tijd is de kalibratie hierboven het enige bewijs, en dat is terugkijkend.
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-3">
+            <Stat label="Afgewikkeld" value={h.n.toLocaleString("nl-NL")} />
+            <Stat label="Voorspeld" value={h.avg_prob != null ? `${h.avg_prob.toFixed(1)}%` : "—"} hint="gemiddelde kans vooraf" />
+            <Stat label="Werkelijk" value={h.rate_pct != null ? `${h.rate_pct.toFixed(1)}%` : "—"} hint="haalde +50% en hield stand" />
+            <Stat label="Even aangeraakt" value={h.touches.toLocaleString("nl-NL")} hint="+50% geraakt, viel soms terug" />
+          </div>
+          {h.buckets.length > 0 && (
+            <table className="w-full text-[11px]">
+              <thead className="text-neutral-500 border-b border-ink-5/60">
+                <tr>
+                  <th className="py-1 text-left font-bold">Model zei</th>
+                  <th className="py-1 text-right font-bold">Voorspellingen</th>
+                  <th className="py-1 text-right font-bold">Voorspeld</th>
+                  <th className="py-1 text-right font-bold">Werkelijk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {h.buckets.map((b) => (
+                  <tr key={b.bucket} className="border-t border-ink-5/40">
+                    <td className="py-0.5 text-neutral-400 whitespace-nowrap">{b.bucket}%</td>
+                    <td className="py-0.5 text-right font-mono tabular-nums text-neutral-500">{b.n.toLocaleString("nl-NL")}</td>
+                    <td className="py-0.5 text-right font-mono tabular-nums text-neutral-400">{b.avg_prob.toFixed(1)}%</td>
+                    <td className="py-0.5 text-right font-mono tabular-nums text-fog-lime font-semibold">
+                      {b.rate_pct != null ? `${b.rate_pct.toFixed(1)}%` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="text-[11px] text-neutral-500 leading-relaxed">
+            Een treffer telt pas als de koers +50% haalde <em>en</em> een dag later nog minstens 20% boven de
+            instapkoers stond, dezelfde eis als in de historische meting. Gemeten op slotkoersen, dus een sprong die
+            binnen de dag weer wegviel telt niet mee. Bij weinig voorspellingen zegt een afwijking nog niets; pas na
+            enkele honderden afgewikkelde gevallen per bucket wordt het verschil betekenisvol.
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export function HipposView() {
   const [items, setItems] = useState<HippoItem[]>([]);
   const [calibs, setCalibs] = useState<Record<string, HippoCalibration>>({});
+  const [track, setTrack] = useState<HippoTrackRecord | null>(null);
   const [threshold, setThreshold] = useState(80);
   const [alertHorizon, setAlertHorizon] = useState(14);
   const [maxPerWeek, setMaxPerWeek] = useState(1);
@@ -158,6 +231,7 @@ export function HipposView() {
       const r = await fetchHippoScores();
       setItems(r.items);
       setCalibs(r.calibrations ?? (r.calibration ? { "14": r.calibration } : {}));
+      setTrack(r.track_record ?? null);
       setThreshold(r.threshold);
       setAlertHorizon(r.alert_horizon ?? 14);
       setMaxPerWeek(r.max_per_week ?? 1);
@@ -319,6 +393,8 @@ export function HipposView() {
           {showLifts && <LiftTables calib={calib} />}
         </Card>
       )}
+
+      {track && <TrackRecordCard track={track} shownHz={shownHz} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <Stat label="Favorieten" value={favCount} />
