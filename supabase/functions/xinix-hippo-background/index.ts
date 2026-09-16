@@ -109,7 +109,14 @@ const MIN_BARS = 120;
 // edge runtime: een batch van 250 werd na ~160 tickers afgebroken. 100 was
 // gemeten veilig met één horizon; met twee verdubbelt de kalibratielus, dus 75.
 const BATCH_SIZE = 75;
-const RESCAN_DAYS = 30;
+// Favorieten gaan elke maand opnieuw door de meting, de rest elk kwartaal:
+// 641 / 30 + 3100 / 90 is ongeveer 56 per dag, ruim binnen wat de cron aankan.
+const RESCAN_DAYS_FAV = 30;
+const RESCAN_DAYS_REST = 90;
+// De opbouw per horizon is verreweg het zwaarste veld in de ranglijst. Voor
+// favorieten bewaren we hem altijd, verder alleen voor de kopgroep — daaronder
+// kijkt niemand naar de onderbouwing van een kans van een half procent.
+const TOP_FACTORS = 250;
 const BUDGET_MS = 95_000;
 const SLEEP_MS = 250;
 const K_BUCKET = 300;         // krimp van een bucket-lift naar 1 (in dagen)
@@ -176,9 +183,9 @@ function clampLift(x: number) { return Math.min(LIFT_MAX, Math.max(LIFT_MIN, x))
 function countsOf(r: HistoryRow, hz: string): HorizonCounts | null {
   const h = (r.horizons ?? {})[hz];
   if (h && h.days_n > 0) return h;
-  // Rijen van vóór de horizon-migratie dragen alleen de 14-daagse in de losse
-  // kolommen; die blijven meetellen tot hun eerstvolgende herscan.
-  if (hz === "14" && r.days_n > 0) return { days_n: r.days_n, hits: r.hits, days_2y: r.days_2y, hits_2y: r.hits_2y, buckets: r.buckets ?? {}, calib: r.calib ?? {} };
+  // Een rij van vóór de horizon-migratie heeft nog geen tellingen per venster.
+  // Die telt niet mee tot zijn eerstvolgende herscan; meedoen met halve data
+  // zou de lifts vertekenen.
   return null;
 }
 function poolHistories(rows: HistoryRow[], hz: string): Pooled | null {
@@ -525,24 +532,35 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const errors: string[] = [];
 
   const favs = await fetchAll<{ ticker: string; rating: unknown }>(sb, "xinix_favorites", "ticker, rating");
-  if (!favs.length) return { ok: true, message: "geen favorieten" };
   const favSet = new Set(favs.map((f) => f.ticker));
   const ratingBy = new Map(favs.map((f) => [f.ticker, num(f.rating)]));
+  // Het universum is de hele actieve watchlist. Favorieten hebben voorrang bij
+  // het scannen en zijn de enige die een melding kunnen krijgen, maar de kans
+  // wordt voor iedereen berekend — dat kost niets extra en levert kandidaten op
+  // die nog geen hartje hebben.
+  const universe = await fetchAll<{ ticker: string }>(sb, "signal_tickers", "ticker", (q: any) => q.eq("active", true));
+  if (!universe.length) return { ok: true, message: "geen actieve tickers" };
 
   // ── 1. Scan een batch favorieten bij Yahoo ────────────────────────────────
-  let histories = await fetchAll<HistoryRow>(sb, "xinix_hippo_history", "*");
+  // Alleen de kolommen die het poolen nodig heeft: de losse legacy-tellingen
+  // zijn een spiegel van horizon 14 en zouden de overdracht onnodig verdubbelen.
+  let histories = await fetchAll<HistoryRow>(sb, "xinix_hippo_history",
+    "ticker, scanned_at, ok, days_n, hits, days_2y, hits_2y, peak_count, last_peak_date, horizons");
   const histBy = new Map(histories.map((h) => [h.ticker, h]));
   // De lifts van vóór deze batch: nodig om per historische dag de modelkans
   // te kunnen uitrekenen (kalibratie). Bij de allereerste runs is er nog
   // niets, dan blijft de kalibratie leeg tot de volgende herscan.
-  const own = histories.filter((h) => favSet.has(h.ticker));
   const poolsBefore: Record<string, Pooled | null> = {};
-  for (const h of HORIZONS) poolsBefore[h.key] = poolHistories(own, h.key);
-  const cutoffMs = nowMs - RESCAN_DAYS * DAY;
-  const due = favs
-    .map((f) => ({ ticker: f.ticker, at: histBy.get(f.ticker)?.scanned_at ?? null }))
-    .filter((x) => !x.at || Date.parse(x.at) < cutoffMs)
-    .sort((a, b) => (a.at ? Date.parse(a.at) : 0) - (b.at ? Date.parse(b.at) : 0))
+  for (const h of HORIZONS) poolsBefore[h.key] = poolHistories(histories, h.key);
+  // Favorieten eerst en vaker; de rest schuift aan als er ruimte over is.
+  const due = universe
+    .map((t) => {
+      const fav = favSet.has(t.ticker);
+      const at = histBy.get(t.ticker)?.scanned_at ?? null;
+      return { ticker: t.ticker, fav, at, ageMs: at ? nowMs - Date.parse(at) : Infinity };
+    })
+    .filter((x) => x.ageMs >= (x.fav ? RESCAN_DAYS_FAV : RESCAN_DAYS_REST) * DAY)
+    .sort((a, b) => (a.fav === b.fav ? b.ageMs - a.ageMs : a.fav ? -1 : 1))
     .slice(0, BATCH_SIZE);
   // Yahoo-fouten (geschrapte ticker, 404) zijn geen run-fout: ze worden als
   // ok=false in de historie gezet en over 30 dagen opnieuw geprobeerd. Alleen
@@ -570,14 +588,13 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   histories = [...histBy.values()];
 
   // ── 2. Scoren op verse koersen ────────────────────────────────────────────
-  const ownAfter = histories.filter((h) => favSet.has(h.ticker));
   const pools: Record<string, Pooled | null> = {};
-  for (const h of HORIZONS) pools[h.key] = poolHistories(ownAfter, h.key);
+  for (const h of HORIZONS) pools[h.key] = poolHistories(histories, h.key);
   const pool = pools[DEFAULT_HORIZON];
   if (!pool) {
     return { ok: errors.length === 0, message: `gescand ${scanned} (fouten ${scanErrors}); nog geen historie om op te scoren`, metrics: { scanned, scan_errors: scanErrors } };
   }
-  const tickers = favs.map((f) => f.ticker);
+  const tickers = universe.map((t) => t.ticker);
   const [tk, pr, prevScores] = await Promise.all([
     chunkedIn<any>(sb, "signal_tickers", "ticker, company, exchange, sector, yahoo_sector", tickers),
     chunkedIn<any>(sb, "signal_price_summary", "ticker, last_close, last_volume, avg_volume_30d, volume_ratio, pct_change_5d, pct_change_22d, pct_change_6mo, high_1y, high_5y, low_90d, high_90d, updated_at", tickers),
@@ -588,7 +605,7 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const prevBy = new Map(prevScores.map((r) => [r.ticker, r]));
 
   const scored: any[] = [];
-  for (const f of favs) {
+  for (const f of universe) {
     const h = histBy.get(f.ticker);
     if (!h || !h.ok || h.days_n === 0) continue;
     const p = prBy.get(f.ticker);
@@ -622,7 +639,7 @@ Deno.serve(runBackground("xinix-hippos", async () => {
       const cal = calibrate(pl, raw.prob);
       const jaren = Math.max(1, Math.round(cnt.days_n / 252));
       const factors: Factor[] = [];
-      factors.push({ label: "Basiskans", detail: `${r1(pl.p0 * 100)}% van alle favoriet-dagen begon een +50%-sprint binnen ${hz.days} dagen (${pl.hits.toLocaleString("nl-NL")} van ${pl.n.toLocaleString("nl-NL")})`, mult: 1 });
+      factors.push({ label: "Basiskans", detail: `${r1(pl.p0 * 100)}% van alle doorgelichte handelsdagen begon een +50%-sprint binnen ${hz.days} dagen (${pl.hits.toLocaleString("nl-NL")} van ${pl.n.toLocaleString("nl-NL")})`, mult: 1 });
       factors.push({ label: "Eigen historie", detail: cnt.hits > 0 ? `${r1((100 * cnt.hits) / cnt.days_n)}% van de eigen dagen (${cnt.hits}× in ${jaren} jaar, ${h.peak_count} sprint${h.peak_count === 1 ? "" : "s"}${cnt.hits_2y ? `, ${cnt.hits_2y} dag${cnt.hits_2y === 1 ? "" : "en"} in de laatste 2 jaar` : ""})` : `nooit +50% binnen ${hz.days} dagen gedaan in ${jaren} jaar`, mult: r1(own.lift) });
       for (const part of raw.parts) {
         const fd = FEATURES.find((x) => x.key === part.key)!;
@@ -661,11 +678,17 @@ Deno.serve(runBackground("xinix-hippos", async () => {
       pct_change_5d: r5, pct_change_22d: r22, volume_ratio: vol != null ? r1(vol) : null,
       days_since_peak: since, pct_below_high1y: hi != null ? r1(hi) : null,
       peak_count: h.peak_count, rating: ratingBy.get(f.ticker) ?? null,
+      is_favorite: favSet.has(f.ticker),
       tradeable, flags, scanned_at: h.scanned_at, computed_at: runStart,
     });
   }
   scored.sort((a, b) => b.prob - a.prob || b.raw_prob - a.raw_prob);
-  scored.forEach((r, i) => { r.rank = i + 1; });
+  scored.forEach((r, i) => {
+    r.rank = i + 1;
+    // De opbouw is het zwaarste veld; buiten de kopgroep en zonder hartje
+    // bewaren we hem niet, anders schrijft elke run tientallen megabytes weg.
+    if (i >= TOP_FACTORS && !r.is_favorite) { r.factors = []; r.factors_7d = []; }
+  });
 
   for (let i = 0; i < scored.length; i += 500) {
     const { error } = await sb.from("xinix_hippo_scores").upsert(scored.slice(i, i + 500), { onConflict: "ticker" });
@@ -725,7 +748,9 @@ Deno.serve(runBackground("xinix-hippos", async () => {
 
     // Eén voorspelling per aandeel per dag; een tweede run op dezelfde dag laat
     // de eerste staan, zodat het track record niet stiekem wordt bijgesteld.
-    const fresh = scored.map((sc) => ({
+    // Track record beperkt zich tot favorieten: dat houdt de tabel hanteerbaar
+    // en het zijn de aandelen waar een melding over kan gaan.
+    const fresh = scored.filter((sc) => sc.is_favorite).map((sc) => ({
       ticker: sc.ticker, made_on: today, made_at: nowIso, entry_close: sc.last_close,
       prob_7d: sc.prob_7d, prob_14d: sc.prob, raw_prob_7d: sc.raw_prob_7d, raw_prob_14d: sc.raw_prob,
       rating: sc.rating, tradeable: sc.tradeable,
@@ -750,7 +775,9 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const maxPerWeek = Math.max(0, num(settings?.hippo_alert_max_per_week) ?? 1);
   const probOf = (s: any): number | null => (alertHz === "7" ? s.prob_7d : s.prob);
   if (settings?.ntfy_topic && threshold > 0 && !inQuietHours(settings)) {
-    const cands = scored.filter((s) => { const v = probOf(s); return v != null && v >= threshold && s.tradeable; });
+    // Alleen favorieten kunnen een melding krijgen: een ping over een aandeel
+    // dat je nooit hebt bekeken is ruis, geen signaal.
+    const cands = scored.filter((s) => { const v = probOf(s); return v != null && v >= threshold && s.tradeable && s.is_favorite; });
     candidates = cands.length;
     if (cands.length) {
       const ct = cands.map((c) => c.ticker);
@@ -832,9 +859,9 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const maxOf = (k: "prob" | "prob_7d") => { const v = scored.map((s) => s[k]).filter((x) => x != null) as number[]; return v.length ? Math.max(...v) : null; };
   return {
     ok: errors.length === 0 && !scanBroken,
-    message: `gescand ${scanned}/${due.length} (fouten ${scanErrors}), gescoord ${scored.length}/${favs.length}; 14d: basis ${r1(pool.p0 * 100)}% hoogste ${maxOf("prob") ?? "—"}% plafond ${ceilings["14"] != null ? r1(ceilings["14"]!) : "—"}%; 7d: basis ${p7 ? r1(p7.p0 * 100) : "—"}% hoogste ${maxOf("prob_7d") ?? "—"}% plafond ${ceilings["7"] != null ? r1(ceilings["7"]!) : "—"}%; drempel ${threshold}% op ${alertHz}d, gemeld ${notified}` + (scanErrMsgs.length ? `; yahoo: ${scanErrMsgs.join("; ")}` : "") + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
+    message: `gescand ${scanned}/${due.length} (fouten ${scanErrors}), gescoord ${scored.length}/${universe.length} (${favs.length} favoriet); 14d: basis ${r1(pool.p0 * 100)}% hoogste ${maxOf("prob") ?? "—"}% plafond ${ceilings["14"] != null ? r1(ceilings["14"]!) : "—"}%; 7d: basis ${p7 ? r1(p7.p0 * 100) : "—"}% hoogste ${maxOf("prob_7d") ?? "—"}% plafond ${ceilings["7"] != null ? r1(ceilings["7"]!) : "—"}%; drempel ${threshold}% op ${alertHz}d, gemeld ${notified}` + (scanErrMsgs.length ? `; yahoo: ${scanErrMsgs.join("; ")}` : "") + (errors.length ? `; fouten: ${errors.slice(0, 3).join("; ")}` : ""),
     metrics: {
-      scanned, scan_errors: scanErrors, scored: scored.length, favorites: favs.length,
+      scanned, scan_errors: scanErrors, scored: scored.length, universe: universe.length, favorites: favs.length,
       tickers_with_history: pool.tickers,
       base_rate_14d: r1(pool.p0 * 100), max_prob_14d: maxOf("prob"), ceiling_14d: ceilings["14"] != null ? r1(ceilings["14"]!) : null, days_14d: pool.n, hits_14d: pool.hits,
       base_rate_7d: p7 ? r1(p7.p0 * 100) : null, max_prob_7d: maxOf("prob_7d"), ceiling_7d: ceilings["7"] != null ? r1(ceilings["7"]!) : null, days_7d: p7?.n ?? null, hits_7d: p7?.hits ?? null,

@@ -493,6 +493,8 @@ export interface HippoItem {
   peak_count: number;
   rating: number | null;
   tradeable: boolean;
+  /** Heeft dit aandeel een hartje? Alleen favorieten krijgen een melding. */
+  is_favorite: boolean;
   factors: RocketFactor[];
   factors_7d: RocketFactor[];
   flags: string[];
@@ -570,6 +572,8 @@ export interface HippoResponse {
   track_record: HippoTrackRecord | null;
   favorite_count: number;
   scanned_count: number;
+  /** Hoeveel aandelen er in totaal in de ranglijst staan, ook buiten deze pagina. */
+  scored_count: number;
   computed_at: string | null;
 }
 
@@ -585,8 +589,11 @@ export async function triggerHippoScan(): Promise<{ ok: boolean; message?: strin
   return (await res.json()) as { ok: boolean; message?: string };
 }
 
-export async function fetchHippoScores(): Promise<HippoResponse> {
-  const res = await fetch(apiUrl("/api/hippo-scores"));
+export async function fetchHippoScores(opts?: { favoritesOnly?: boolean; limit?: number }): Promise<HippoResponse> {
+  const qs = new URLSearchParams();
+  if (opts?.favoritesOnly) qs.set("favorites", "1");
+  if (opts?.limit) qs.set("limit", String(opts.limit));
+  const res = await fetch(apiUrl(`/api/hippo-scores${qs.toString() ? `?${qs}` : ""}`));
   if (!res.ok) throw new Error(`hippo-scores ${res.status}`);
   return (await res.json()) as HippoResponse;
 }
