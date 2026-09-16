@@ -532,6 +532,30 @@ export interface HippoCalibration {
   /** Hoogste frequentie die ooit in een kansbucket gemeten is; het plafond. */
   ceiling: number | null;
 }
+/** Één kansbucket van het track record: voorspeld tegen werkelijk. */
+export interface HippoTrackBucket {
+  bucket: string;
+  n: number;
+  hits: number;
+  touches: number;
+  avg_prob: number;
+  rate_pct: number | null;
+}
+export interface HippoTrackHorizon {
+  n: number;
+  hits: number;
+  touches: number;
+  avg_prob: number | null;
+  rate_pct: number | null;
+  buckets: HippoTrackBucket[];
+}
+/** Vooruitkijkend bewijs: wat het model zei, en wat er daarna gebeurde. */
+export interface HippoTrackRecord {
+  since: string | null;
+  open: number;
+  total: number;
+  horizons: Record<string, HippoTrackHorizon>;
+}
 export interface HippoResponse {
   items: HippoItem[];
   /** Kalibratie per horizon, met "7" en "14" als sleutel. */
@@ -543,6 +567,7 @@ export interface HippoResponse {
   alert_horizon: number;
   /** Maximaal aantal meldingen per rollende 7 dagen; 0 = geen plafond. */
   max_per_week: number;
+  track_record: HippoTrackRecord | null;
   favorite_count: number;
   scanned_count: number;
   computed_at: string | null;

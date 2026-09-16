@@ -126,12 +126,20 @@ const DAY = 86400000;
 // randen-lijst; het label wordt daaruit afgeleid zodat UI en backend nooit
 // uit de pas lopen.
 interface FeatureDef { key: string; label: string; edges: number[]; unit: string; nullLabel?: string }
+// Een kenmerk komt hier alleen in als het twee dingen kan: historisch gemeten
+// worden uit de koersbalken, én live afgeleid worden uit signal_price_summary.
+// Zonder dat eerste is de lift een gok, zonder dat tweede is hij vandaag niet
+// toe te passen. Short interest en nieuws vallen daarom af: die zijn er niet
+// voor tien jaar terug, dus hun gewicht zou verzonnen zijn.
 const FEATURES: FeatureDef[] = [
   { key: "r5",    label: "5-daags rendement",        edges: [-30, -15, -5, 5, 15, 30, 50], unit: "%" },
   { key: "r22",   label: "22-daags rendement",       edges: [-40, -20, -5, 10, 30, 60, 100], unit: "%" },
+  { key: "r6mo",  label: "6-maands rendement",       edges: [-70, -40, -10, 30, 100, 300], unit: "%" },
   { key: "vol",   label: "Volume vs 30d-gemiddelde", edges: [0.5, 1, 2, 4, 8], unit: "×" },
   { key: "since", label: "Dagen sinds vorige +50%-piek", edges: [14, 45, 120, 365], unit: "d", nullLabel: "nooit" },
   { key: "hi",    label: "Onder de 1-jaarstop",      edges: [20, 50, 80], unit: "%" },
+  { key: "dd5y",  label: "Onder de 5-jaarstop",      edges: [30, 60, 85, 95], unit: "%" },
+  { key: "rng",   label: "Positie in de 90-daagse bandbreedte", edges: [10, 25, 50, 75], unit: "%" },
 ];
 function bucketKey(v: number | null, f: FeatureDef): string {
   if (v == null || !Number.isFinite(v)) return "null";
@@ -215,7 +223,7 @@ function ceilingOf(pool: Pooled): number | null {
   }
   return best;
 }
-interface Features { r5: number | null; r22: number | null; vol: number | null; since: number | null; hi: number | null }
+interface Features { r5: number | null; r22: number | null; r6mo: number | null; vol: number | null; since: number | null; hi: number | null; dd5y: number | null; rng: number | null }
 function rawProb(pool: Pooled, ownLift: number, feats: Features): { prob: number; parts: Array<{ key: string; bucket: string; lift: number; n: number }> } {
   let odds = pool.p0 / (1 - pool.p0) * ownLift;
   const parts: Array<{ key: string; bucket: string; lift: number; n: number }> = [];
@@ -343,10 +351,18 @@ function analyze(ticker: string, bars: Bar[], pools: Record<string, Pooled | nul
   // zodat de 1-jaarstop O(1) per dag kost — de CPU-limiet van de edge
   // runtime is krap.
   const dq: number[] = [];
+  // Dezelfde truc voor de 5-jaarstop (1260 bars) en voor de 90-daagse
+  // bandbreedte (63 bars, wat ~90 kalenderdagen is): één deque per venster.
+  const dq5y: number[] = [];
+  const dqHi90: number[] = [];
+  const dqLo90: number[] = [];
   for (let t = 0; t + MAX_FWD_BARS <= n - 1; t++) {
     if (isPeak[t]) lastPeakBefore = t;
     if (t >= 30) volSum -= bars[t - 30].vol;
     while (dq.length && dq[0] < t - 252) dq.shift();
+    while (dq5y.length && dq5y[0] < t - 1260) dq5y.shift();
+    while (dqHi90.length && dqHi90[0] < t - 63) dqHi90.shift();
+    while (dqLo90.length && dqLo90[0] < t - 63) dqLo90.shift();
     const c = bars[t].close;
     if (t >= 30 && c >= MIN_PRICE) {
       // Eén keer vooruit lopen: de eerste dag waarop +50% gehaald werd en
@@ -359,21 +375,33 @@ function analyze(ticker: string, bars: Bar[], pools: Record<string, Pooled | nul
       const hits: Record<string, boolean> = {};
       for (const h of HORIZONS) hits[h.key] = firstHit > 0 && firstHit <= h.bars;
       const hi = dq.length ? Math.max(c, bars[dq[0]].close) : c;
+      const hi5y = dq5y.length ? Math.max(c, bars[dq5y[0]].close) : c;
+      const hi90 = dqHi90.length ? Math.max(c, bars[dqHi90[0]].close) : c;
+      const lo90 = dqLo90.length ? Math.min(c, bars[dqLo90[0]].close) : c;
       const avgVol = volSum / 30;
       days.push({
         ms: bars[t].ms, hits,
         feats: {
           r5: (c / bars[t - 5].close - 1) * 100,
           r22: (c / bars[t - 22].close - 1) * 100,
+          r6mo: t >= 126 ? (c / bars[t - 126].close - 1) * 100 : null,
           vol: avgVol > 0 ? bars[t].vol / avgVol : null,
           since: lastPeakBefore >= 0 ? Math.round((bars[t].ms - bars[lastPeakBefore].ms) / DAY) : null,
           hi: (1 - c / hi) * 100,
+          dd5y: (1 - c / hi5y) * 100,
+          rng: hi90 > lo90 ? ((c - lo90) / (hi90 - lo90)) * 100 : null,
         },
       });
     }
     volSum += bars[t].vol;
     while (dq.length && bars[dq[dq.length - 1]].close <= c) dq.pop();
     dq.push(t);
+    while (dq5y.length && bars[dq5y[dq5y.length - 1]].close <= c) dq5y.pop();
+    dq5y.push(t);
+    while (dqHi90.length && bars[dqHi90[dqHi90.length - 1]].close <= c) dqHi90.pop();
+    dqHi90.push(t);
+    while (dqLo90.length && bars[dqLo90[dqLo90.length - 1]].close >= c) dqLo90.pop();
+    dqLo90.push(t);
   }
 
   for (const h of HORIZONS) {
@@ -430,6 +458,64 @@ function ratingStr(r: number | null): string { if (!r || r < 1) return "geen ste
 function r1(x: number) { return Math.round(x * 10) / 10; }
 
 interface Factor { label: string; detail: string; mult: number }
+
+// ── Track record ─────────────────────────────────────────────────────────────
+// De kalibratie toetst het model op zijn eigen historie; eerlijk gemeten, maar
+// wel terugkijkend op dezelfde data waar de lifts uit komen. Het track record
+// kijkt vooruit: leg vast wat het model vandaag zei, en kijk later wat er
+// gebeurde. Daar valt achteraf niets meer aan te sleutelen.
+interface Prediction {
+  ticker: string; made_on: string; made_at: string; entry_close: number;
+  prob_7d: number | null; prob_14d: number | null;
+  raw_prob_7d: number | null; raw_prob_14d: number | null;
+  rating: number | null; tradeable: boolean;
+  max_close: number; max_close_at: string | null;
+  touched_at: string | null; held_at: string | null;
+  touched_7d: boolean | null; held_7d: boolean | null;
+  touched_14d: boolean | null; held_14d: boolean | null;
+  resolved_7d: boolean; resolved_14d: boolean;
+  updated_at: string;
+}
+const TOUCH_MULT = EVENT_MULT;   // +50% aangeraakt
+const HELD_MIN = HOLD_MULT;      // en daarna nog ≥ +20%: dezelfde eis als in de historie
+
+/**
+ * Werk één openstaande voorspelling bij met de koers van nu. Geeft null terug
+ * als er niets veranderde, zodat alleen echte wijzigingen worden weggeschreven.
+ */
+function advancePrediction(p: Prediction, close: number | null, nowMs: number, nowIso: string): Prediction | null {
+  const madeMs = Date.parse(p.made_at);
+  let changed = false;
+  const out: Prediction = { ...p };
+
+  if (close != null && close > 0) {
+    if (close > Number(out.max_close)) { out.max_close = close; out.max_close_at = nowIso; changed = true; }
+    const entry = Number(out.entry_close);
+    if (out.touched_at == null && close >= entry * TOUCH_MULT) { out.touched_at = nowIso; changed = true; }
+    // "Hield stand": minstens een dag ná de aanraking nog ≥ +20% boven de instap.
+    if (out.touched_at != null && out.held_at == null &&
+        nowMs - Date.parse(out.touched_at) >= DAY && close >= entry * HELD_MIN) {
+      out.held_at = nowIso; changed = true;
+    }
+  }
+
+  // Afwikkelen zodra de horizon voorbij is. Een aanraking telt alleen mee als
+  // hij binnen het venster viel; standhouden mag één dag later nog.
+  for (const hz of HORIZONS) {
+    const resolvedKey = hz.key === "7" ? "resolved_7d" : "resolved_14d";
+    if (out[resolvedKey as "resolved_7d" | "resolved_14d"]) continue;
+    if (nowMs < madeMs + hz.days * DAY) continue;
+    const touched = out.touched_at != null && Date.parse(out.touched_at) <= madeMs + hz.days * DAY;
+    const held = touched && out.held_at != null && Date.parse(out.held_at) <= madeMs + (hz.days + 1) * DAY;
+    if (hz.key === "7") { out.touched_7d = touched; out.held_7d = held; out.resolved_7d = true; }
+    else { out.touched_14d = touched; out.held_14d = held; out.resolved_14d = true; }
+    changed = true;
+  }
+
+  if (!changed) return null;
+  out.updated_at = nowIso;
+  return out;
+}
 
 Deno.serve(runBackground("xinix-hippos", async () => {
   const sb = getServiceClient();
@@ -494,7 +580,7 @@ Deno.serve(runBackground("xinix-hippos", async () => {
   const tickers = favs.map((f) => f.ticker);
   const [tk, pr, prevScores] = await Promise.all([
     chunkedIn<any>(sb, "signal_tickers", "ticker, company, exchange, sector, yahoo_sector", tickers),
-    chunkedIn<any>(sb, "signal_price_summary", "ticker, last_close, last_volume, avg_volume_30d, volume_ratio, pct_change_5d, pct_change_22d, high_1y, updated_at", tickers),
+    chunkedIn<any>(sb, "signal_price_summary", "ticker, last_close, last_volume, avg_volume_30d, volume_ratio, pct_change_5d, pct_change_22d, pct_change_6mo, high_1y, high_5y, low_90d, high_90d, updated_at", tickers),
     chunkedIn<any>(sb, "xinix_hippo_scores", "ticker, alerted_at, alerted_prob, alerted_horizon", tickers),
   ]);
   const tkBy = new Map(tk.map((r) => [r.ticker, r]));
@@ -517,7 +603,13 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     const hi = high1y != null && high1y > 0 ? Math.max(0, (1 - lastClose / high1y) * 100) : null;
     let since: number | null = h.last_peak_date ? Math.round((nowMs - Date.parse(h.last_peak_date + "T00:00:00Z")) / DAY) : null;
     if (r5 != null && r5 >= 50) since = 0;    // sprint loopt nu; de scan kan tot 30 dagen achterlopen
-    const feats: Features = { r5, r22, vol, since, hi };
+    const high5y = num(p.high_5y);
+    const dd5y = high5y != null && high5y > 0 ? Math.max(0, (1 - lastClose / high5y) * 100) : null;
+    const lo90 = num(p.low_90d), hi90 = num(p.high_90d);
+    const rng = lo90 != null && hi90 != null && hi90 > lo90
+      ? Math.min(100, Math.max(0, ((lastClose - lo90) / (hi90 - lo90)) * 100))
+      : null;
+    const feats: Features = { r5, r22, r6mo: num(p.pct_change_6mo), vol, since, hi, dd5y, rng };
 
     // Dezelfde opbouw voor elke horizon: alleen de gemeten uitkomst verschilt.
     const per: Record<string, { prob: number; raw: number; base: number; ownRate: number; factors: Factor[] } | null> = {};
@@ -535,7 +627,11 @@ Deno.serve(runBackground("xinix-hippos", async () => {
       for (const part of raw.parts) {
         const fd = FEATURES.find((x) => x.key === part.key)!;
         const v = (feats as unknown as Record<string, number | null>)[part.key];
-        const shown = v == null ? (fd.nullLabel ?? "onbekend") : part.key === "vol" ? `${v.toFixed(1)}×` : part.key === "since" ? `${Math.round(v)} dagen` : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}%`;
+        const shown = v == null ? (fd.nullLabel ?? "onbekend")
+          : part.key === "vol" ? `${v.toFixed(1)}×`
+          : part.key === "since" ? `${Math.round(v)} dagen`
+          : part.key === "rng" ? `${Math.round(v)}% van de band`
+          : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(0)}%`;
         const e = pl.lifts[part.key]?.[part.bucket];
         factors.push({ label: fd.label, detail: `${shown} → bucket ${bucketLabel(part.bucket, fd)}${e ? `: ${r1(e.rate * 100)}% gemeten op ${e.n.toLocaleString("nl-NL")} dagen` : ""}`, mult: r1(part.lift) });
       }
@@ -604,7 +700,48 @@ Deno.serve(runBackground("xinix-hippos", async () => {
     if (calErr) errors.push(`kalibratie: ${calErr.message}`);
   }
 
-  // ── 3. Melden ─────────────────────────────────────────────────────────────
+  // ── 3. Track record: afwikkelen en vastleggen ─────────────────────────────
+  // Eerst de openstaande voorspellingen bijwerken met de koers van nu, daarna
+  // de voorspelling van vandaag vastleggen. In die volgorde, zodat een verse
+  // rij niet meteen tegen zijn eigen instapkoers wordt afgezet.
+  let predUpdated = 0, predNew = 0, predResolved = 0;
+  const nowIso = new Date(nowMs).toISOString();
+  const today = nowIso.slice(0, 10);
+  try {
+    const open = await fetchAll<Prediction>(sb, "xinix_hippo_predictions", "*", (q: any) => q.eq("resolved_14d", false));
+    const changed: Prediction[] = [];
+    for (const pred of open) {
+      const px = prBy.get(pred.ticker);
+      const next = advancePrediction(pred, num(px?.last_close), nowMs, nowIso);
+      if (!next) continue;
+      changed.push(next);
+      if (next.resolved_14d && !pred.resolved_14d) predResolved++;
+    }
+    for (let i = 0; i < changed.length; i += 500) {
+      const { error } = await sb.from("xinix_hippo_predictions").upsert(changed.slice(i, i + 500), { onConflict: "ticker,made_on" });
+      if (error) { errors.push(`track-record bijwerken: ${error.message}`); break; }
+      predUpdated += changed.slice(i, i + 500).length;
+    }
+
+    // Eén voorspelling per aandeel per dag; een tweede run op dezelfde dag laat
+    // de eerste staan, zodat het track record niet stiekem wordt bijgesteld.
+    const fresh = scored.map((sc) => ({
+      ticker: sc.ticker, made_on: today, made_at: nowIso, entry_close: sc.last_close,
+      prob_7d: sc.prob_7d, prob_14d: sc.prob, raw_prob_7d: sc.raw_prob_7d, raw_prob_14d: sc.raw_prob,
+      rating: sc.rating, tradeable: sc.tradeable,
+      max_close: sc.last_close, max_close_at: nowIso, updated_at: nowIso,
+    }));
+    for (let i = 0; i < fresh.length; i += 500) {
+      const batch = fresh.slice(i, i + 500);
+      const { error } = await sb.from("xinix_hippo_predictions").upsert(batch, { onConflict: "ticker,made_on", ignoreDuplicates: true });
+      if (error) { errors.push(`track-record vastleggen: ${error.message}`); break; }
+      predNew += batch.length;
+    }
+  } catch (e) {
+    errors.push(`track-record: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // ── 4. Melden ─────────────────────────────────────────────────────────────
   let notified = 0, candidates = 0, blocked = 0, weekCapped = 0;
   const { data: settingsRow } = await sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, hippo_alert_min_prob, hippo_alert_horizon, hippo_alert_max_per_week").eq("id", 1).single();
   const settings = settingsRow as Settings | null;
@@ -703,6 +840,7 @@ Deno.serve(runBackground("xinix-hippos", async () => {
       base_rate_7d: p7 ? r1(p7.p0 * 100) : null, max_prob_7d: maxOf("prob_7d"), ceiling_7d: ceilings["7"] != null ? r1(ceilings["7"]!) : null, days_7d: p7?.n ?? null, hits_7d: p7?.hits ?? null,
       alert_horizon: Number(alertHz), threshold, max_per_week: maxPerWeek,
       candidates, blocked, week_capped: weekCapped, notified, top5, errors: errors.length,
+      pred_new: predNew, pred_updated: predUpdated, pred_resolved: predResolved,
     },
   };
 }));
