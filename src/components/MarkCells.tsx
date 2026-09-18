@@ -17,10 +17,16 @@ function HeartIcon() {
 }
 
 // Variant 3: gevulde 5-punts ster, currentColor.
-function StarIcon() {
+// Een lege ster wordt als omtrek getekend in plaats van als bijna-zwarte
+// vlakke ster: op een donkere achtergrond is een gevulde ster in een donkere
+// kleur niet van de tabel te onderscheiden, een omtrek wel.
+function StarIcon({ outline = false }: { outline?: boolean }) {
+  const points = "16,2 19.5,12 30,12 21.5,18.5 24.5,29 16,23 7.5,29 10.5,18.5 2,12 12.5,12";
   return (
     <svg viewBox="0 0 32 32" className="w-[1em] h-[1em]" aria-hidden="true">
-      <polygon points="16,2 19.5,12 30,12 21.5,18.5 24.5,29 16,23 7.5,29 10.5,18.5 2,12 12.5,12" fill="currentColor"/>
+      {outline
+        ? <polygon points={points} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round"/>
+        : <polygon points={points} fill="currentColor"/>}
     </svg>
   );
 }
@@ -238,7 +244,7 @@ export function StarHeader() {
       className="px-2 py-2 text-center w-24"
       title="Sterren — geef 1–5 sterren (geeft ook automatisch een hartje)"
     >
-      <span aria-hidden className="text-[#2a0a2a]"><StarIcon /></span>
+      <span aria-hidden className="text-[#8a4a8a]"><StarIcon outline /></span>
     </th>
   );
 }
@@ -257,26 +263,32 @@ export function StarRating({ ticker, size = "sm" }: { ticker: string; size?: "sm
   const { getRating, setRating } = useMarks();
   const current = getRating(ticker) ?? 0;
   const cls = size === "md" ? "text-lg" : "text-sm";
+  // Zweven over ster N vult 1..N vast in, zodat je vóór het klikken ziet
+  // hoeveel sterren je gaat geven.
+  const [hover, setHover] = useState<number | null>(null);
+  const shown = hover ?? current;
   return (
-    <div className="inline-flex items-center gap-0.5">
+    <div className="inline-flex items-center gap-0.5" onMouseLeave={() => setHover(null)}>
       {[1, 2, 3, 4, 5].map((n) => {
-        const filled = n <= current;
+        const filled = n <= shown;
+        const preview = hover != null && n > current && n <= hover;
         return (
           <button
             key={n}
             type="button"
+            onMouseEnter={() => setHover(n)}
             onClick={(e) => {
               e.stopPropagation();
               void setRating(ticker, n === current ? null : n);
             }}
             className={
               cls + " leading-none cursor-pointer transition-colors " +
-              (filled ? "text-[#ff00cc] hover:text-[#ff44dd]" : "text-[#2a0a2a] hover:text-[#5a1a5a]")
+              (preview ? "text-[#ff88e0]" : filled ? "text-[#ff00cc]" : "text-[#7a3a7a] hover:text-[#b060b0]")
             }
             title={n === current ? `Klik om ${n}-sterren te wissen` : `Geef ${n} sterren`}
             aria-label={`Geef ${ticker} ${n} sterren`}
           >
-            <StarIcon />
+            <StarIcon outline={!filled} />
           </button>
         );
       })}
