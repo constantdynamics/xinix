@@ -16,7 +16,7 @@ import type { Dashboard, Card as CardType, Sector } from "../types";
 import { SECTOR_LABEL, SECTOR_TONE, SECTOR_NAAM, SECTORS } from "../types";
 import { googleFinanceUrl } from "../tickerLinks";
 import { inferSector as inferSectorUitNaam } from "../sectorGuess";
-import { Card, Button, Badge, Select, Stat, CollapsibleIntro } from "../components/ui";
+import { Card, Button, Badge, Select, Stat, CollapsibleIntro, ago, useTickingNow } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
@@ -250,6 +250,24 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const now = useTickingNow();
+  const [refreshing, setRefreshing] = useState(false);
+  // Apart van `error`: een mislukte ververs mag de al getoonde lijst niet vervangen.
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  async function refresh() {
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const [d, s] = await Promise.all([fetchDashboard(), fetchScanResults()]);
+      setDashboard(d);
+      setScans(s);
+    } catch (e) {
+      setRefreshError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const rows = useMemo<FavRow[]>(() => {
     if (!dashboard) return [];
     const favSet = marks.favorites;
@@ -330,6 +348,13 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
 
   // Wezen — favorieten zonder enige data — apart bij elkaar voor de reparatie-knop.
   const orphans = useMemo(() => rows.filter((r) => r.orphan), [rows]);
+  const newestPriceAt = useMemo(() => {
+    let max: string | null = null;
+    for (const r of rows) {
+      if (r.price_polled_at && (!max || r.price_polled_at > max)) max = r.price_polled_at;
+    }
+    return max;
+  }, [rows]);
   const [repairing, setRepairing] = useState(false);
   const [repairMsg, setRepairMsg] = useState<string | null>(null);
 
@@ -788,6 +813,25 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         <Stat label="Favorieten" value={marks.favorites.size} />
         <Stat label="Getoond" value={filtered.length} />
         <div className="ml-auto flex items-center gap-2">
+          {dashboard && (
+            <span
+              className="text-xs text-neutral-400"
+              title={`Pagina ververst op ${new Date(dashboard.generated_at).toLocaleString("nl-NL")}${
+                newestPriceAt ? ` · nieuwste koers van ${new Date(newestPriceAt).toLocaleString("nl-NL")}` : ""
+              }`}
+            >
+              Ververst {ago(dashboard.generated_at, now)}
+              {newestPriceAt && (
+                <span className="text-neutral-500"> · nieuwste koers {ago(newestPriceAt, now)}</span>
+              )}
+            </span>
+          )}
+          {refreshError && (
+            <span className="text-xs text-fog-loss" title={refreshError}>Verversen mislukt</span>
+          )}
+          <Button size="sm" onClick={refresh} disabled={refreshing}>
+            {refreshing ? "Bezig…" : "↻ Ververs"}
+          </Button>
           {isAdmin && (
             <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
               {showAdd ? "Sluit" : "+ Toevoegen"}
