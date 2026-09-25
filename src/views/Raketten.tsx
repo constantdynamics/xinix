@@ -13,6 +13,7 @@ import { Card, Button, Stat, CollapsibleIntro, toast } from "../components/ui";
 import { HeartHeader, HeartInline, SeenHeader, SeenInline, StarRating } from "../components/MarkCells";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
+import { EngineInsight } from "../components/EngineInsight";
 
 type Scope = "alles" | "favorieten" | "handelbaar";
 
@@ -262,6 +263,8 @@ export function RakettenView() {
           </p>
         </div>
       </CollapsibleIntro>
+
+      <EngineInsight events={["rk"]} criterion="poefie2y" hit="raket" title="Raketten — gemeten model uit de explosie-motor" />
 
       {calib && (
         <Card className="p-4 space-y-3">

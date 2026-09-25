@@ -14,6 +14,7 @@ import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, StarCell, StarHeader, ShowSeenToggle, MarkAllSeenButton, HideFavoritesToggle, NotYetReviewedTile } from "../components/MarkCells";
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { PriceChartModal } from "./PriceChartModal";
+import { EngineInsight, useEngineProbs } from "../components/EngineInsight";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -26,6 +27,7 @@ const HIKKERTJE_COLUMNS: ColumnMeta[] = [
   { key: "company", label: "Bedrijf + sector" },
   { key: "sparkline", label: "Trend" },
   { key: "spikes", label: "Spikes" },
+  { key: "kans", label: "Kans nieuwe spike (90d)" },
   { key: "koers", label: "Koers" },
   { key: "limit", label: "Limiet + afstand" },
 ];
@@ -57,6 +59,7 @@ export function HikkertjesView() {
   const [chartFor, setChartFor] = useState<{ ticker: string; company: string; exchange: string | null } | null>(null);
   const { visibleKeys } = useColumnLayout("hikkertjes", HIKKERTJE_COLUMNS, "ticker");
   const marks = useMarks();
+  const engineProb = useEngineProbs();
 
   async function refreshData() {
     const r = await fetchScanResults();
@@ -132,6 +135,8 @@ export function HikkertjesView() {
           volatiliteit en explosief koerspotentieel — maar ook hoog risico.
         </p>
       </CollapsibleIntro>
+
+      <EngineInsight events={["k30", "k90"]} criterion="hikkertje" hit="hikkertje" title="Hikkertjes — kans op een nieuwe spike, gemeten" />
 
       {/* Stats + trigger */}
       <div className="flex flex-wrap items-center gap-4">
@@ -296,6 +301,13 @@ export function HikkertjesView() {
                   <div className="font-semibold text-yellow-400 tabular">{h.hikkertje_spikes ?? "—"}×</div>
                 </td>
               ),
+            },
+            kans: {
+              th: <th className="px-3 py-2 text-right w-24" title="Gekalibreerde kans op een nieuwe spike (≥+55% op een dag, 3 dagen vastgehouden) binnen 90 dagen, uit de explosie-motor">Kans 90d</th>,
+              td: (h) => {
+                const p = engineProb(h.ticker, "k90");
+                return <td className="px-3 py-2 text-right tabular font-mono text-fog-lime">{p != null ? `${p.toFixed(1)}%` : "—"}</td>;
+              },
             },
             koers: {
               th: <th className="px-3 py-2 text-right w-20">Koers</th>,

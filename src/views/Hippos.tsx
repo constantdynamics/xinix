@@ -12,6 +12,7 @@ import { Card, Button, Stat, CollapsibleIntro, toast } from "../components/ui";
 import { HeartHeader, HeartInline, SeenHeader, SeenInline, StarRating } from "../components/MarkCells";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
+import { EngineInsight } from "../components/EngineInsight";
 
 // De ranglijst beslaat inmiddels de hele watchlist; favorieten blijft het
 // standaardbeeld, want dat is waar dit tabblad over gaat.
@@ -358,6 +359,8 @@ export function HipposView() {
           )}
         </div>
       </CollapsibleIntro>
+
+      <EngineInsight events={["h7", "h14", "h21"]} criterion="sprint45" hit="hippo" title="Hippos — explosie-motor (hele universum, 19 kenmerken)" />
 
       {thresholdUnreachable && (
         <Card className="p-4 border-fog-loss/40 bg-fog-loss/5">
