@@ -190,6 +190,15 @@ LANGUAGE sql STABLE AS $$
     FROM xinix_event_predictions p
     WHERE NOT p.resolved AND p.due_on <= current_date
     UNION ALL
+    -- 2b. gemeten toen er nog geen model was: wel dagen, geen kalibratie.
+    --     Met een model krijgt elke gemeten dag een kalibratietelling, dus
+    --     een tweede scan vult dit altijd en de ticker valt er daarna uit.
+    SELECT h.ticker, 'kalibratie', 2, 2, extract(epoch FROM h.scanned_at)::numeric
+    FROM xinix_event_history h
+    WHERE h.ok AND EXISTS (SELECT 1 FROM xinix_event_models)
+      AND (SELECT coalesce(sum(x), 0) FROM unnest(h.counts[1:10]) x) > 0
+      AND (SELECT coalesce(sum(x), 0) FROM unnest(h.counts[1901:2060]) x) = 0
+    UNION ALL
     -- 3. sprong gezien in de sweep
     SELECT u.ticker, 'sprong', 2, 1, extract(epoch FROM u.requeue_at)::numeric
     FROM xinix_universe u WHERE u.requeue_at IS NOT NULL AND u.requeue_at <= now()
