@@ -101,6 +101,12 @@ CREATE TABLE IF NOT EXISTS public.xinix_event_history (
   counts      integer[] NOT NULL
 );
 ALTER TABLE public.xinix_event_history ENABLE ROW LEVEL SECURITY;
+-- Wel dagen (tellingen 1..10), maar nog geen kalibratie (1901..2060): gemeten
+-- toen er nog geen model was. Opgeslagen i.p.v. per wachtrij-aanroep alle
+-- arrays uitpakken — dat liep tegen de statement-timeout.
+ALTER TABLE public.xinix_event_history ADD COLUMN IF NOT EXISTS needs_calib boolean
+  GENERATED ALWAYS AS (counts[1:10] <> array_fill(0, ARRAY[10]) AND counts[1901:2060] = array_fill(0, ARRAY[160])) STORED;
+CREATE INDEX IF NOT EXISTS xinix_event_history_needs_calib ON public.xinix_event_history (scanned_at) WHERE needs_calib AND ok;
 
 -- 3) De gepoolde tellingen (één rij). De deep-scan werkt hem per run
 --    incrementeel bij; de dagelijkse run telt alles opnieuw op.
@@ -195,9 +201,7 @@ LANGUAGE sql STABLE AS $$
     --     een tweede scan vult dit altijd en de ticker valt er daarna uit.
     SELECT h.ticker, 'kalibratie', 2, 2, extract(epoch FROM h.scanned_at)::numeric
     FROM xinix_event_history h
-    WHERE h.ok AND EXISTS (SELECT 1 FROM xinix_event_models)
-      AND (SELECT coalesce(sum(x), 0) FROM unnest(h.counts[1:10]) x) > 0
-      AND (SELECT coalesce(sum(x), 0) FROM unnest(h.counts[1901:2060]) x) = 0
+    WHERE h.ok AND h.needs_calib AND EXISTS (SELECT 1 FROM xinix_event_models)
     UNION ALL
     -- 3. sprong gezien in de sweep
     SELECT u.ticker, 'sprong', 2, 1, extract(epoch FROM u.requeue_at)::numeric
