@@ -468,6 +468,14 @@ export interface Model {
 
 const K_BUCKET = 300, K_OWN = 750, K_CALIB = 100;
 const LIFT_MIN = 0.2, LIFT_MAX = 5, PROB_CAP = 90;
+// De kenmerken overlappen (volatiliteit, spikes, poefies, rendementen zeggen
+// deels hetzelfde), dus de naïeve som van log-lifts is ~3× te stellig: op de
+// eerste pool van 3,6k aandelen / 5,9 mln dagen gaf de kalibratie een helling
+// van 0,27–0,43 tussen gemeten en voorspelde log-odds, voor alle events. Zonder
+// demping viel ~11% van alle dagen in de bovenste kansklasse (50–100%) en kreeg
+// de hele kopgroep dezelfde gemeten kans. De kalibratie blijft de getoonde kans
+// bepalen; de demping zorgt dat de klassen de kopgroep uit elkaar houden.
+export const DAMP = 0.35;
 export const SEL_LIFT = 1.5, SEL_MIN_N = 3000, SEL_MIN_H = 20;
 
 export function ownLift(m: Model, h: number, n: number): number {
@@ -478,9 +486,9 @@ export function ownRate(m: Model, h: number, n: number): number { return (h + K_
 
 /** Modelkans (%) vóór kalibratie. slots: Uint8Array(NF). */
 export function rawProb(m: Model, own: number, slots: ArrayLike<number>): number {
-  let logit = Math.log(m.p0 / (1 - m.p0)) + Math.log(own);
-  for (let f = 0; f < NF; f++) logit += m.logLift[f * SLOTS + slots[f]];
-  const odds = Math.exp(logit);
+  let sum = Math.log(own);
+  for (let f = 0; f < NF; f++) sum += m.logLift[f * SLOTS + slots[f]];
+  const odds = Math.exp(Math.log(m.p0 / (1 - m.p0)) + DAMP * sum);
   return Math.min(PROB_CAP, (odds / (1 + odds)) * 100);
 }
 export function calibrate(m: Model, raw: number): { prob: number; n: number; observed: number | null } {
@@ -690,14 +698,14 @@ export function analyze(f: Fetched, opts: { nowMs: number; fx: number; mcapNow: 
       const ownN = sum.own_n[g];
       if (!ownN) continue;
       const own = ownLift(m, sum.own_h[e], ownN);
-      const base = Math.log(m.p0 / (1 - m.p0)) + Math.log(own);
+      const l0 = Math.log(m.p0 / (1 - m.p0)), lOwn = Math.log(own);
       const ll = m.logLift;
       for (let t = 0; t < n; t++) {
         if (!(g === 0 ? inS[t] : inL[t])) continue;
         const o = t * NF;
-        let logit = base;
-        for (let ff = 0; ff < NF; ff++) logit += ll[ff * SLOTS + slots[o + ff]];
-        const odds = Math.exp(logit);
+        let acc = lOwn;
+        for (let ff = 0; ff < NF; ff++) acc += ll[ff * SLOTS + slots[o + ff]];
+        const odds = Math.exp(l0 + DAMP * acc);
         const p = Math.min(PROB_CAP, (odds / (1 + odds)) * 100);
         const hit = (hitBits[t] >> e) & 1;
         counts[idxC(e, calibBucket(p), 0)]++;
