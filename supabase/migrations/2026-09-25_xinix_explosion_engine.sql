@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS public.xinix_universe (
   fb                smallint[],        -- actuele bucket per kenmerk (factoren zijn hieruit af te leiden)
   star_fit          numeric,
   hits              text[],            -- onderdelen waarvan het aandeel nu de criteria haalt
+  add_hint          text,              -- waarom (voor de toevoeg-notitie)
+  strength          numeric,           -- sterkste treffer eerst bij het dagplafond
+  tradeable         boolean,           -- koers ≥ $0,05 en ≥ $10k omzet per dag
   scored_at         timestamptz,
   added_at          timestamptz,       -- door de motor aan de watchlist toegevoegd
   add_reason        text
@@ -276,5 +279,16 @@ GRANT EXECUTE ON FUNCTION public.xinix_event_track_record() TO service_role;
 --     wachtrij leeg is; de sweep één keer per dag na de Amerikaanse slotbel.
 SELECT cron.unschedule('xinix-deep-scan') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'xinix-deep-scan');
 SELECT cron.schedule('xinix-deep-scan', '5,25,45 * * * *', $$SELECT public.invoke_edge('xinix-engine/deep')$$);
-SELECT cron.unschedule('xinix-universe') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'xinix-universe');
-SELECT cron.schedule('xinix-universe', '40 22 * * *', $$SELECT public.invoke_edge('xinix-engine/universe')$$);
+-- De sweep past niet in één aanroep (CPU-limiet): vijf delen per marktgroep
+-- en een afronding (track record, modellen, toevoegen).
+DO $$ DECLARE j text; BEGIN
+  FOREACH j IN ARRAY ARRAY['xinix-universe','xinix-universe-0','xinix-universe-1','xinix-universe-2','xinix-universe-3','xinix-universe-4','xinix-universe-finish'] LOOP
+    PERFORM cron.unschedule(j) WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = j);
+  END LOOP;
+END $$;
+SELECT cron.schedule('xinix-universe-0', '40 22 * * *', $$SELECT public.invoke_edge('xinix-engine/universe?part=0')$$);
+SELECT cron.schedule('xinix-universe-1', '42 22 * * *', $$SELECT public.invoke_edge('xinix-engine/universe?part=1')$$);
+SELECT cron.schedule('xinix-universe-2', '44 22 * * *', $$SELECT public.invoke_edge('xinix-engine/universe?part=2')$$);
+SELECT cron.schedule('xinix-universe-3', '46 22 * * *', $$SELECT public.invoke_edge('xinix-engine/universe?part=3')$$);
+SELECT cron.schedule('xinix-universe-4', '48 22 * * *', $$SELECT public.invoke_edge('xinix-engine/universe?part=4')$$);
+SELECT cron.schedule('xinix-universe-finish', '52 22 * * *', $$SELECT public.invoke_edge('xinix-engine/universe?part=finish')$$);

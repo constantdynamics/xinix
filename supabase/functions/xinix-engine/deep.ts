@@ -22,9 +22,9 @@ import {
   addSettings, addedToday, addToWatchlist, type AddCandidate, type Json, type RunResult,
 } from "../_shared/universe.ts";
 
-const BATCH = 80;
+const BATCH = 60;
 const BUDGET_MS = 120_000;
-const CPU_BUDGET_MS = 1200;       // gemeten rekentijd (parse + analyse), ruim onder de ~2 s-grens
+const CPU_BUDGET_MS = 700;        // gemeten analysetijd; het JSON-parsen komt daar nog bovenop (~2 s-grens)
 const SLEEP_MS = 150;
 const MAX_POOL = 6000;            // max aandelen in de pool (watchlist gaat altijd voor)
 const MODEL_REFRESH_MS = 3 * 3600_000;

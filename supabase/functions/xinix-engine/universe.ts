@@ -1,4 +1,5 @@
-// xinix-engine/universe — dagelijks na de Amerikaanse slotbel (22:40 UTC).
+// xinix-engine/universe — dagelijks na de Amerikaanse slotbel (22:40–22:52 UTC,
+// in vijf delen per marktgroep plus een afronding; zie PARTS).
 //
 // 1. Sweep: TradingView levert in ~25 verzoeken de actuele toestand van alle
 //    ~22k primaire gewone aandelen op de beurzen die Saxo aanbiedt. Dat is de
@@ -16,7 +17,7 @@
 
 import * as E from "../_shared/engine.ts";
 import {
-  getServiceClient, fetchAll, num, r1, MARKETS, tvMarket, tvRegime, tierOf, loadPool,
+  getServiceClient, fetchAll, chunkedIn, num, r1, MARKETS, tvMarket, tvRegime, tierOf, loadPool,
   writeModels, MIN_POOL_TICKERS, addSettings, addedToday, addToWatchlist, type AddCandidate, type Json, type RunResult, type TvRow,
 } from "../_shared/universe.ts";
 
@@ -28,59 +29,79 @@ const SPIKE_JUMP = E.SPIKE_GAIN * 100 - 5;   // ≥ +50% op een dag: mogelijk ee
 const TRADE_MIN_PRICE = 0.05, TRADE_MIN_DVOL = 10_000;
 const PROB_COLS = E.EVENTS.map((e) => `p_${e.key}`);
 
-export async function universeRun(): Promise<RunResult> {
+// De sweep past niet in één aanroep (CPU-limiet ~2 s): per deel een groep
+// markten, daarna een afrondingsstap die uit de database werkt.
+export const PARTS: string[][] = [
+  ["america"],
+  ["canada", "uk", "australia"],
+  ["japan"],
+  ["hongkong", "singapore", "germany", "france"],
+  ["netherlands", "belgium", "italy", "spain", "portugal", "poland", "switzerland", "sweden", "norway", "denmark", "finland"],
+];
+
+export async function universeRun(part: string | null): Promise<RunResult> {
+  if (part === "finish") return finishRun();
+  const idx = Math.max(0, Math.min(PARTS.length - 1, Number(part ?? 0) || 0));
+  const lastPart = idx === PARTS.length - 1;
   const sb = getServiceClient();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
-  const today = nowIso.slice(0, 10);
   const errors: string[] = [];
 
   // ── 1. Sweep ───────────────────────────────────────────────────────────────
   const tv = new Map<string, TvRow>();
   const perMarket: Record<string, number> = {};
-  for (const m of MARKETS) {
+  for (const m of MARKETS.filter((x) => PARTS[idx].includes(x.region))) {
     try {
       const rows = await tvMarket(m.region);
       perMarket[m.region] = rows.length;
       for (const r of rows) if (!tv.has(r.ticker)) tv.set(r.ticker, r);
     } catch (e) { errors.push(`${m.region}: ${e instanceof Error ? e.message : String(e)}`); }
   }
-  if (tv.size < 1000) throw new Error(`sweep leverde maar ${tv.size} aandelen op; ${errors.slice(0, 3).join("; ")}`);
+  if (tv.size < 100) throw new Error(`sweep leverde maar ${tv.size} aandelen op; ${errors.slice(0, 3).join("; ")}`);
   let regime = { iwm200: null as number | null, iwm22: null as number | null };
   try { regime = await tvRegime(); } catch (e) { errors.push(`IWM: ${e instanceof Error ? e.message : String(e)}`); }
 
   // ── 2. Stand van zaken ─────────────────────────────────────────────────────
-  const [tickersAll, favs, uniRows] = await Promise.all([
+  const [tickersAll, favs] = await Promise.all([
     fetchAll<Json>(sb, "signal_tickers", "ticker, active, market_cap_usd"),
     fetchAll<Json>(sb, "xinix_favorites", "ticker, rating"),
-    fetchAll<Json>(sb, "xinix_universe",
-      "ticker, in_watchlist, deep_at, deep_ok, last_peak_date, spike_dates, spikes_1y, last_poefie_date, poefie_count_2y, " +
-      "hi5y, lo5y, phoenix_run, phoenix_peak, phoenix_peak_date, volat22, own_n, own_h, requeue_at, added_at, name, exchange, tv_sector, tv_industry, currency, mcap_usd"),
   ]);
-  const everListed = new Set(tickersAll.map((t) => t.ticker as string));
   const active = new Map(tickersAll.filter((t) => t.active).map((t) => [t.ticker as string, t]));
+  // Het laatste deel neemt ook de watchlist mee die TradingView niet dekt.
+  const allTv = new Set<string>();
+  if (lastPart) {
+    const since = nowMs - 2 * E.DAY;
+    const known = await chunkedIn<Json>(sb, "xinix_universe", "ticker, tv_at", [...active.keys()]);
+    for (const r of known) if (r.tv_at && Date.parse(r.tv_at as string) >= since) allTv.add(r.ticker as string);
+  }
+  const extra = lastPart ? [...active.keys()].filter((t) => !tv.has(t) && !allTv.has(t)) : [];
+  const uniRows = await chunkedIn<Json>(sb, "xinix_universe",
+    "ticker, in_watchlist, deep_at, deep_ok, last_peak_date, spike_dates, spikes_1y, last_poefie_date, poefie_count_2y, " +
+    "hi5y, lo5y, phoenix_run, phoenix_peak, phoenix_peak_date, volat22, own_n, own_h, requeue_at, added_at, name, exchange, tv_sector, tv_industry, currency, mcap_usd",
+    [...tv.keys(), ...extra]);
   const favBy = new Map(favs.map((f) => [f.ticker as string, num(f.rating)]));
   const uniBy = new Map(uniRows.map((u) => [u.ticker as string, u]));
   // Watchlist die TradingView niet dekt (OTC, andere beurzen): koersen uit signal_price_summary.
-  const noTv = [...active.keys()].filter((t) => !tv.has(t));
+  const noTv = extra;
   const psRows = noTv.length ? await fetchAll<Json>(sb, "signal_price_summary",
     "ticker, last_close, last_volume, avg_volume_30d, pct_change_1d, pct_change_5d, pct_change_22d, pct_change_6mo, high_1y, low_1y, high_90d, low_90d, high_5y, low_5y",
     (q) => q.in("ticker", noTv.slice(0, 900))) : [];
   const psBy = new Map(psRows.map((p) => [p.ticker as string, p]));
 
   // Pool één keer per dag volledig opnieuw optellen (herstelt drift).
-  const { error: refErr } = await sb.rpc("xinix_event_pool_refresh", { p_layout: E.LAYOUT });
-  if (refErr) errors.push(`pool-refresh: ${refErr.message}`);
+  if (idx === 0) {
+    const { error: refErr } = await sb.rpc("xinix_event_pool_refresh", { p_layout: E.LAYOUT });
+    if (refErr) errors.push(`pool-refresh: ${refErr.message}`);
+  }
   const pool = await loadPool(sb);
   const models = pool && pool.tickers >= MIN_POOL_TICKERS ? E.buildModels(pool.counts) : null;
 
   // ── 3. Scoren + criteria ───────────────────────────────────────────────────
   const tvRows: Json[] = [], wlRows: Json[] = [], requeue: string[] = [];
-  const addCands: AddCandidate[] = [];
-  const tracked: Array<{ ticker: string; probs: (number | null)[]; raw: (number | null)[]; close: number; fav: boolean; tradeable: boolean }> = [];
   const hitCount: Record<string, number> = {};
   let scored = 0;
-  const allTickers = new Set<string>([...tv.keys(), ...active.keys()]);
+  const allTickers = new Set<string>([...tv.keys(), ...extra]);
 
   for (const ticker of allTickers) {
     const t = tv.get(ticker) ?? null;
@@ -158,7 +179,8 @@ export async function universeRun(): Promise<RunResult> {
     const common: Json = {
       ticker, in_watchlist: inWl, is_favorite: favBy.has(ticker),
       ...Object.fromEntries(PROB_COLS.map((c, i) => [c, probs[i]])),
-      raw: raws, fb: Array.from(lv.slots), star_fit: lv.star, hits, scored_at: nowIso,
+      raw: raws, fb: Array.from(lv.slots), star_fit: lv.star, hits, add_hint: hits.length ? reasons.join("; ") : null,
+      strength: hits.length ? r1(strength) : null, tradeable, scored_at: nowIso,
     };
     if (t) {
       const tr = tierOf(t);
@@ -178,19 +200,6 @@ export async function universeRun(): Promise<RunResult> {
     } else {
       wlRows.push(common);
     }
-
-    if (close != null && close > 0 && (probs.some((p) => p != null))) {
-      tracked.push({ ticker, probs, raw: raws, close, fav: favBy.has(ticker), tradeable });
-    }
-    if (!everListed.has(ticker) && hits.length && tradeable && deepOk) {
-      const fields: Json = {};
-      if (hits.includes("hikkertje") || u?.spikes_1y != null) Object.assign(fields, { is_hikkertje: hits.includes("hikkertje"), hikkertje_spikes: lv.spikes1y > 0 ? lv.spikes1y : null, is_hikkertje_at: u?.deep_at ?? nowIso });
-      if (hits.includes("feniks")) fields.is_phoenix = true;
-      addCands.push({
-        ticker, name: t?.name ?? (u?.name as string) ?? null, exchange: t?.exchange ?? (u?.exchange as string) ?? null, mcap_usd: mcap,
-        tv_sector: t?.tv_sector ?? null, tv_industry: t?.tv_industry ?? null, reasons, strength, fields,
-      });
-    }
   }
 
   // ── 4. Wegschrijven ────────────────────────────────────────────────────────
@@ -206,24 +215,61 @@ export async function universeRun(): Promise<RunResult> {
   const requeueAt = new Date(nowMs + REQUEUE_DAYS * E.DAY).toISOString();
   for (let i = 0; i < requeue.length; i += 200) await sb.from("xinix_universe").update({ requeue_at: requeueAt }).in("ticker", requeue.slice(i, i + 200));
 
-  // Track record: per event de kopgroep (handelbaar) + favorieten met ≥2× de basiskans.
+  return {
+    ok: errors.length === 0,
+    message: `deel ${idx + 1}/${PARTS.length} (${PARTS[idx].join(", ")}): sweep ${tv.size} aandelen${extra.length ? ` + ${extra.length} watchlist zonder TradingView` : ""}; ${scored} gescoord${models ? "" : " (nog geen model: pool te klein)"}; treffers ${Object.entries(hitCount).map(([k, v]) => `${k} ${v}`).join(", ") || "—"}; opnieuw meten ${requeue.length}` +
+      (errors.length ? `; fouten: ${errors.slice(0, 4).join("; ")}` : ""),
+    metrics: { part: idx, universe: tv.size, per_market: perMarket, extra: extra.length, scored, hits: hitCount, requeue: requeue.length, pool_tickers: pool?.tickers ?? 0 },
+  };
+}
+
+/**
+ * Afronding na de delen: track record vastleggen, modellen opslaan en
+ * treffers buiten de watchlist toevoegen. Werkt vanuit xinix_universe, zodat
+ * hij niets van de delen in het geheugen nodig heeft.
+ */
+async function finishRun(): Promise<RunResult> {
+  const sb = getServiceClient();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const today = nowIso.slice(0, 10);
+  const errors: string[] = [];
+  const pool = await loadPool(sb);
+  const models = pool && pool.tickers >= MIN_POOL_TICKERS ? E.buildModels(pool.counts) : null;
+  const fresh = new Date(nowMs - 20 * 3600_000).toISOString();
+
   let tracks = 0;
   if (models) {
     const preds: Json[] = [];
+    const extra: Record<number, Json> = {};
     for (let e = 0; e < E.NE; e++) {
       const m = models[e];
       if (!m) continue;
+      const col = `p_${E.EVENTS[e].key}`;
       const base = m.p0 * 100;
-      const cands = tracked.filter((x) => x.probs[e] != null);
-      const top = cands.filter((x) => x.tradeable).sort((a, b) => (b.probs[e]! - a.probs[e]!) || ((b.raw[e] ?? 0) - (a.raw[e] ?? 0))).slice(0, TOP_TRACK);
-      const topSet = new Set(top.map((x) => x.ticker));
-      const favSel = cands.filter((x) => x.fav && !topSet.has(x.ticker) && x.probs[e]! >= base * FAV_TRACK_MULT);
+      const [top, favs, cnt] = await Promise.all([
+        sb.from("xinix_universe").select(`ticker, close, ${col}, raw`).eq("tradeable", true).gte("scored_at", fresh)
+          .not(col, "is", null).order(col, { ascending: false }).limit(TOP_TRACK),
+        sb.from("xinix_universe").select(`ticker, close, ${col}, raw`).eq("is_favorite", true).gte("scored_at", fresh)
+          .gte(col, base * FAV_TRACK_MULT).order(col, { ascending: false }).limit(300),
+        sb.from("xinix_universe").select("ticker", { count: "exact", head: true }).gte("scored_at", fresh).not(col, "is", null),
+      ]);
+      if (top.error) { errors.push(`top ${col}: ${top.error.message}`); continue; }
+      const topRows = (top.data ?? []) as unknown as Json[];
+      const topSet = new Set(topRows.map((r) => r.ticker as string));
+      extra[e] = { max_prob: topRows.length ? num(topRows[0][col]) : null, scored: cnt.count ?? null };
       const due = new Date(nowMs + (E.EVENTS[e].days + 3) * E.DAY).toISOString().slice(0, 10);
-      for (const [list, source] of [[top, "top"], [favSel, "favoriet"]] as const) {
-        for (const x of list) preds.push({
-          event: E.EVENTS[e].key, ticker: x.ticker, made_on: today, made_at: nowIso, prob: x.probs[e], raw_prob: x.raw[e],
-          base_rate: r1(base * 100) / 100, entry_close: x.close, source, due_on: due,
-        });
+      const favRows = ((favs.data ?? []) as unknown as Json[]).filter((r) => !topSet.has(r.ticker as string));
+      for (const [list, source] of [[topRows, "top"], [favRows, "favoriet"]] as const) {
+        for (const r of list) {
+          const close = num(r.close);
+          if (close == null || !(close > 0)) continue;
+          preds.push({
+            event: E.EVENTS[e].key, ticker: r.ticker, made_on: today, made_at: nowIso, prob: num(r[col]),
+            raw_prob: Array.isArray(r.raw) ? num((r.raw as unknown[])[e]) : null,
+            base_rate: Math.round(base * 100) / 100, entry_close: close, source, due_on: due,
+          });
+        }
       }
     }
     for (let i = 0; i < preds.length; i += 500) {
@@ -231,30 +277,42 @@ export async function universeRun(): Promise<RunResult> {
       if (error) { errors.push(`track record: ${error.message}`); break; }
       tracks += preds.slice(i, i + 500).length;
     }
-    // Modellen met de hoogste kans van vandaag erbij.
-    const err = await writeModels(sb, models, pool!.counts, pool!.tickers, (e) => {
-      const ps = tracked.map((x) => x.probs[e]).filter((p): p is number => p != null);
-      return { max_prob: ps.length ? Math.max(...ps) : null, scored: ps.length };
-    });
+    const err = await writeModels(sb, models, pool!.counts, pool!.tickers, (e) => extra[e] ?? {});
     if (err) errors.push(`modellen: ${err}`);
   }
 
-  // Treffers buiten de watchlist toevoegen (sterkste eerst, binnen het dagplafond).
-  let added: string[] = [];
+  // Treffers buiten de watchlist (sterkste eerst, binnen het dagplafond).
+  let added: string[] = [], candidates = 0;
   const st = await addSettings(sb);
-  if (st.on && addCands.length) {
+  if (st.on) {
     const room = Math.max(0, st.max - (await addedToday(sb)));
-    const r = await addToWatchlist(sb, addCands, room);
-    added = r.added;
-    if (r.error) errors.push(`toevoegen: ${r.error}`);
+    if (room > 0) {
+      const { data, error } = await sb.from("xinix_universe")
+        .select("ticker, name, exchange, mcap_usd, tv_sector, tv_industry, hits, add_hint, strength, spikes_1y, deep_at")
+        .eq("in_watchlist", false).eq("tradeable", true).eq("deep_ok", true).is("added_at", null)
+        .not("add_hint", "is", null).gte("scored_at", fresh).order("strength", { ascending: false }).limit(room * 3);
+      if (error) errors.push(`kandidaten: ${error.message}`);
+      const cands: AddCandidate[] = ((data ?? []) as Json[]).map((u) => {
+        const hits = (u.hits as string[]) ?? [];
+        const fields: Json = {};
+        if (u.spikes_1y != null) Object.assign(fields, { is_hikkertje: hits.includes("hikkertje"), hikkertje_spikes: Number(u.spikes_1y) > 0 ? u.spikes_1y : null, is_hikkertje_at: u.deep_at });
+        if (hits.includes("feniks")) fields.is_phoenix = true;
+        return {
+          ticker: u.ticker as string, name: (u.name as string) ?? null, exchange: (u.exchange as string) ?? null, mcap_usd: num(u.mcap_usd),
+          tv_sector: (u.tv_sector as string) ?? null, tv_industry: (u.tv_industry as string) ?? null,
+          reasons: String(u.add_hint).split("; "), strength: num(u.strength) ?? 0, fields,
+        };
+      });
+      candidates = cands.length;
+      const r = await addToWatchlist(sb, cands, room);
+      added = r.added;
+      if (r.error) errors.push(`toevoegen: ${r.error}`);
+    }
   }
-
   return {
     ok: errors.length === 0,
-    message: `sweep ${tv.size} aandelen over ${Object.keys(perMarket).length} markten; ${scored} gescoord${models ? "" : " (nog geen model: pool te klein)"}; treffers ${Object.entries(hitCount).map(([k, v]) => `${k} ${v}`).join(", ") || "—"}; kandidaten buiten watchlist ${addCands.length}, toegevoegd ${added.length}; track record +${tracks}; opnieuw meten ${requeue.length}` +
+    message: `afronding: track record +${tracks}; ${models ? "modellen opgeslagen" : "nog geen model"}; kandidaten ${candidates}, toegevoegd ${added.length}${added.length ? ` (${added.slice(0, 10).join(", ")})` : ""}` +
       (errors.length ? `; fouten: ${errors.slice(0, 4).join("; ")}` : ""),
-    metrics: { universe: tv.size, per_market: perMarket, scored, hits: hitCount, candidates: addCands.length, added: added.length, tracked: tracks, requeue: requeue.length, pool_tickers: pool?.tickers ?? 0 },
+    metrics: { tracked: tracks, candidates, added: added.length },
   };
 }
-
-

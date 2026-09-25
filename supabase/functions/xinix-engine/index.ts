@@ -7,6 +7,8 @@ import { deepScan } from "./deep.ts";
 import { universeRun } from "./universe.ts";
 
 const deep = runBackground("xinix-deep-scan", deepScan);
-const universe = runBackground("xinix-universe", universeRun);
+// Het deel zit in de query (?part=0..4 of ?part=finish): runBackground kent
+// geen request-parameters, dus per aanroep een eigen handler.
+const universe = (req: Request) => runBackground("xinix-universe", () => universeRun(new URL(req.url).searchParams.get("part")))(req);
 
 Deno.serve((req) => (new URL(req.url).pathname.endsWith("/universe") ? universe(req) : deep(req)));
