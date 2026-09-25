@@ -240,6 +240,11 @@ Eén gecureerde portefeuille die altijd:
 | `xinix_hippo_scores` | Hippos-ranglijst: gekalibreerde kans op +50% binnen 7, 14 en 21 dagen per ticker, factoren, laatste melding |
 | `xinix_hippo_calibration` | Eén rij per horizon (7, 14 en 21 dagen): gepoolde basiskans, lifts per kenmerk, kalibratie (model vs. werkelijkheid) en het gemeten plafond |
 | `xinix_hippo_predictions` | Track record: per aandeel per dag de voorspelde kans + instapkoers, met achteraf de werkelijke uitkomst per horizon |
+| `xinix_universe` | Explosie-motor: ~20k aandelen van alle Saxo-beurzen (TradingView-sweep) met live velden, deep-scan-samenvatting (spikes, poefies, feniks, 5j-top/-bodem), kans per event (`p_h7` … `p_rk`), `hits`, `add_hint`, `tier`, `added_at` |
+| `xinix_event_history` | Per gemeten aandeel de tellingen uit 10 jaar dagkoersen (int4[2060]: dagen per kenmerk-bucket, treffers per event, kalibratie); `needs_calib` = gemeten zonder model |
+| `xinix_event_pool` | Eén rij: de opgetelde tellingen van alle aandelen in de pool (watchlist + beweeglijk universum, max 6000) |
+| `xinix_event_models` | Eén rij per event (h7/h14/h21/k30/k90/p30/p90/rk): basiskans, lifts per kenmerk (gebruikt ja/nee), kalibratie, plafond, backtest van de vaste criteria |
+| `xinix_event_predictions` | Track record van de motor: kopgroep + favorieten per event per dag, met instapkoers en achteraf de uitkomst |
 
 ---
 
