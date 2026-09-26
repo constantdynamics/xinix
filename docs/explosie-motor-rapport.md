@@ -4,6 +4,20 @@ Doel: meer aandelen vinden die voldoen aan de criteria van Hippos, Raketten, de 
 Feniks), Hikkertjes en Poefies, en de voorspellende waarde van elk onderdeel meten in plaats van schatten.
 De definities van de onderdelen zijn niet veranderd.
 
+## 0. Update 26 september: alleen nog ≥4★
+
+Op jouw verzoek draait de motor nu **alleen voor favorieten met minstens 4 sterren** (145 aandelen):
+
+- de dagelijkse sweep van ~20.300 aandelen staat uit;
+- automatisch toevoegen aan de watchlist staat uit;
+- de deep-scan meet alleen nog ≥4★-aandelen;
+- kansen, treffers en open voorspellingen van andere aandelen zijn gewist;
+- de Sprinters-run werkt elke 2 uur de kansen op alle tabbladen bij, alleen voor ≥4★.
+
+De tellingen uit 10 jaar koersdata (de pool van 6.000 aandelen) blijven de basis van het model, maar er
+wordt voor andere aandelen niets nieuws meer gemeten. De cijfers hieronder beschrijven de eerste meting van
+25 september.
+
 ## 1. Bereik
 
 | | Voor | Na |
