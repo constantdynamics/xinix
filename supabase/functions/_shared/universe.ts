@@ -153,22 +153,37 @@ export async function tvMarket(region: string): Promise<TvRow[]> {
       range: [from, from + PAGE],
     });
     for (const row of r.data) {
-      const d = row.d;
-      const exchange = String(d[20] ?? "");
-      const ticker = yahooSymbol(region, exchange, String(d[0] ?? ""));
-      if (!ticker) continue;
-      const n = (i: number) => num(d[i]);
-      out.push({
-        ticker, tv_symbol: row.s, market: region,
-        exchange: region === "america" ? (US_EXCHANGE[exchange] ?? exchange) : exchange,
-        name: (d[1] as string) || null, currency: (d[3] as string) || null,
-        tv_sector: (d[18] as string) || null, tv_industry: (d[19] as string) || null,
-        close: n(2), change_1d: n(4), perf_w: n(5), perf_1m: n(6), perf_6m: n(7),
-        volume: n(8), avg_vol_30d: n(9), mcap_usd: n(10), hi52: n(11), lo52: n(12),
-        hi3m: n(13), lo3m: n(14), hi_all: n(15), lo_all: n(16), volat_m: n(17),
-      });
+      const t = parseTvRow(region, row);
+      if (t) out.push(t);
     }
     if (from + PAGE >= r.totalCount || r.data.length === 0) break;
+  }
+  return out;
+}
+function parseTvRow(region: string, row: { s: string; d: unknown[] }): TvRow | null {
+  const d = row.d;
+  const exchange = String(d[20] ?? "");
+  const ticker = yahooSymbol(region, exchange, String(d[0] ?? ""));
+  if (!ticker) return null;
+  const n = (i: number) => num(d[i]);
+  return {
+    ticker, tv_symbol: row.s, market: region,
+    exchange: region === "america" ? (US_EXCHANGE[exchange] ?? exchange) : exchange,
+    name: (d[1] as string) || null, currency: (d[3] as string) || null,
+    tv_sector: (d[18] as string) || null, tv_industry: (d[19] as string) || null,
+    close: n(2), change_1d: n(4), perf_w: n(5), perf_1m: n(6), perf_6m: n(7),
+    volume: n(8), avg_vol_30d: n(9), mcap_usd: n(10), hi52: n(11), lo52: n(12),
+    hi3m: n(13), lo3m: n(14), hi_all: n(15), lo_all: n(16), volat_m: n(17),
+  };
+}
+/** Verse koersen voor een lijstje TradingView-symbolen van één markt, per symbool. */
+export async function tvQuotes(region: string, symbols: string[]): Promise<Map<string, TvRow>> {
+  const out = new Map<string, TvRow>();
+  if (!symbols.length) return out;
+  const r = await tvPost(region, { symbols: { tickers: symbols }, columns: TV_COLUMNS });
+  for (const row of r.data) {
+    const t = parseTvRow(region, row);
+    if (t) out.set(row.s, t);
   }
   return out;
 }

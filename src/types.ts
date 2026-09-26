@@ -219,6 +219,10 @@ export interface Settings {
   hippo_alert_horizon: number;
   /** Hippos: maximaal aantal meldingen per rollende 7 dagen. 0 = geen plafond. */
   hippo_alert_max_per_week: number;
+  sprint_min_rating?: number;
+  sprint_alert_min_prob?: number;
+  sprint_alert_max_per_week?: number;
+  sprint_override_min_prob?: number;
 }
 
 // Status van een doorlopende achtergrond-job (tabblad "Status").

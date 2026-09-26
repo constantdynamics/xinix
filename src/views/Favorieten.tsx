@@ -25,6 +25,7 @@ import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
 import { RakettenView } from "./Raketten";
 import { HipposView } from "./Hippos";
+import { SprintersView } from "./Sprinters";
 import { StarScannerView } from "./StarScanner";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
@@ -82,7 +83,7 @@ type ViewMode = "table" | "tiles";
 const VIEW_KEY = "xinix_favorieten_view";
 const SUBTAB_KEY = "xinix_favorieten_subtab";
 
-type FavSubTab = "lijst" | "verdubbelaars" | "hippos" | "scanner";
+type FavSubTab = "lijst" | "verdubbelaars" | "hippos" | "sprinters" | "scanner";
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
@@ -203,7 +204,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
   }
   const [subTab, setSubTab] = useState<FavSubTab>(() => {
     const saved = localStorage.getItem(SUBTAB_KEY);
-    return saved === "verdubbelaars" || saved === "hippos" || saved === "scanner" ? saved : "lijst";
+    return saved === "verdubbelaars" || saved === "hippos" || saved === "sprinters" || saved === "scanner" ? saved : "lijst";
   });
   function pickSubTab(v: FavSubTab) {
     setSubTab(v);
@@ -777,6 +778,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           ["lijst", "♥ Lijst"],
           ["verdubbelaars", "🚀 Raketten"],
           ["hippos", "🦛 Hippos"],
+          ["sprinters", "⚡ Sprinters"],
           ["scanner", "🌟 Scanner"],
         ] as Array<[FavSubTab, string]>).map(([key, label]) => (
           <button
@@ -797,6 +799,8 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         <RakettenView />
       ) : subTab === "hippos" ? (
         <HipposView />
+      ) : subTab === "sprinters" ? (
+        <SprintersView />
       ) : subTab === "scanner" ? (
         <StarScannerView scans={scans} />
       ) : (

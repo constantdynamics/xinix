@@ -1363,3 +1363,53 @@ export async function fetchEngineProbs(): Promise<Record<string, (number | null)
   if (!res.ok) throw new Error(`event-scores ${res.status}`);
   return ((await res.json()) as { probs: Record<string, (number | null)[]> }).probs ?? {};
 }
+
+// ── Sprinters (≥4★, +50% binnen 10 handelsdagen) ─────────────────────────────
+// Berekend door xinix-sprint (elke 2 uur op werkdagen): het h14-model van de
+// explosie-motor op verse koersen, maal de gemeten lift van recent nieuws.
+export interface SprintFactor { label: string; bucket: string; mult: number }
+export interface SprintNews {
+  date: string; grp: string; label: string; title: string;
+  lift: number | null; measured_n: number | null; counts: boolean;
+}
+export interface SprintItem {
+  ticker: string; rating: number | null; company: string | null; exchange: string | null; sector: string | null;
+  close: number | null; change_1d: number | null; perf_w: number | null;
+  prob: number | null; prob_model: number | null; prob_7d: number | null; prob_21d: number | null;
+  base_rate: number | null; news_mult: number | null;
+  news: SprintNews[] | null; factors: SprintFactor[] | null;
+  measured: boolean; price_source: string | null; scored_at: string;
+  alerted_at: string | null; alerted_prob: number | null;
+}
+export interface SprintNewsLift {
+  grp: string; label: string; n: number; hits: number; expected: number;
+  rate_pct: number | null; lift: number | null; used: boolean; computed_at: string;
+}
+export interface SprintTrackBucket { b: number; bucket: string; n: number; hits: number; touches: number; open: number; avg_prob: number | null; rate_pct: number | null }
+export interface SprintTrackRecord {
+  since: string | null; total: number; open: number; resolved: number; hits: number;
+  alerts: { n: number; hits: number; open: number };
+  buckets: SprintTrackBucket[];
+}
+export interface SprintResponse {
+  items: SprintItem[];
+  news_lift: SprintNewsLift[];
+  track_record: SprintTrackRecord | null;
+  settings: { sprint_min_rating: number; sprint_alert_min_prob: number; sprint_alert_max_per_week: number; sprint_override_min_prob: number } | null;
+  model: { base_rate: number; ceiling: number | null; computed_at: string; tickers: number; days_n: number } | null;
+  computed_at: string | null;
+}
+export async function fetchSprinters(): Promise<SprintResponse> {
+  const res = await fetch(apiUrl("/api/xinix-sprint"));
+  if (!res.ok) throw new Error(`xinix-sprint ${res.status}`);
+  return (await res.json()) as SprintResponse;
+}
+export async function triggerSprintRun(): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(apiUrl("/api/xinix-sprint?mode=run"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`sprint-run ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; message?: string };
+}
