@@ -73,8 +73,8 @@ koersen, met gemeten nieuws erbij:
 - mijnbouw: sterke boorresultaten, resource-updates, studies en vergunningen;
 - overnames, samenwerkingen, financieringen en 8-K's.
 
-Een nieuwssoort telt alleen mee als hij aantoonbaar verschil maakt. De meting daarvan loopt nog
-(26.000 berichten sinds mei).
+Het nieuws wordt alleen voor je 4- en 5-sterrenaandelen verzameld, gemeten en meegewogen (~1.500
+berichten van ~85 aandelen sinds mei). Een nieuwssoort telt alleen mee als hij aantoonbaar verschil maakt.
 
 Melding vanaf 15% (≈ 6× de basiskans), hoogstens 3 per week, met ntfy-prioriteit 5. Eerste meting:
 de hoogste kans is 11,9%, dus nog geen melding.

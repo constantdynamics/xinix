@@ -85,8 +85,8 @@ function NewsLiftCard({ lifts }: { lifts: SprintNewsLift[] }) {
       </table>
       <div className="text-[11px] text-neutral-500 leading-relaxed">
         Effect = hoe vaak er ná zo'n bericht binnen 10 handelsdagen +50% volgde, gedeeld door hoe vaak dat bij
-        dezelfde aandelen op een willekeurige dag gebeurt. Gemeten over alle berichten sinds mei, toegepast alleen op
-        je ≥4★-aandelen. Een soort telt pas mee bij minstens 30 berichten en 5 treffers, en een effect van ×1,5 of meer
+        dezelfde aandelen op een willekeurige dag gebeurt. Gemeten en toegepast alleen op je ≥4★-aandelen, over hun
+        berichten sinds mei. Een soort telt pas mee bij minstens 30 berichten en 5 treffers, en een effect van ×1,5 of meer
         (of ×0,67 of minder). Nieuws van de laatste 7 dagen telt; het totale nieuwseffect is begrensd op ×3.
       </div>
     </Card>
