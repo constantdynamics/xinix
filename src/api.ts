@@ -1413,3 +1413,35 @@ export async function triggerSprintRun(): Promise<{ ok: boolean; message?: strin
   if (!res.ok) throw new Error(`sprint-run ${res.status}: ${await res.text()}`);
   return (await res.json()) as { ok: boolean; message?: string };
 }
+
+// ── Tijdelijk lijstje (Favorieten → Tijdelijk) ─────────────────────────
+export interface TempListRow {
+  ticker: string;
+  list: string;
+  added_at: string;
+  reason: string | null;
+  company: string | null;
+  exchange: string | null;
+  sector: string | null;
+  market: string | null;
+  close_at_add: number | null;
+  close_date: string | null;
+  active: boolean;
+  last_close: number | null;
+  pct_change_22d: number | null;
+  price_at: string | null;
+  open_sim_positions: number;
+}
+export async function fetchTempList(): Promise<{ rows: TempListRow[] }> {
+  const res = await fetch(apiUrl("/api/temp-list"), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`temp-list ${res.status}`);
+  return (await res.json()) as { rows: TempListRow[] };
+}
+export async function tempListAction(ticker: string, action: "restore" | "remove"): Promise<void> {
+  const res = await fetch(apiUrl("/api/temp-list"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ticker, action }),
+  });
+  if (!res.ok) throw new Error(`${action === "restore" ? "terugzetten" : "verwijderen"} mislukt (${res.status}): ${await res.text()}`);
+}
