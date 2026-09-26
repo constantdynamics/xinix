@@ -6,6 +6,7 @@ import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
+import { EngineInsight } from "../components/EngineInsight";
 
 type SortKey = "score" | "ticker" | "company" | "pct_vs_high5y" | "x_above_low5y" | "pct_change_22d" | "market_cap_usd" | "dollar_volume" | "last_close" | "medals";
 type SortDir = "asc" | "desc";
@@ -167,6 +168,8 @@ export function StarScannerView({ scans }: { scans: ScanResults | null }) {
           </p>
         </div>
       </CollapsibleIntro>
+
+      <EngineInsight events={["h21", "p90", "rk"]} criterion="ster" hit="ster" title="5-sterren-DNA — wat voorspelt het, gemeten" />
 
       <div className="flex flex-wrap items-center gap-3">
         <Stat label="Kandidaten" value={ranking.length} />

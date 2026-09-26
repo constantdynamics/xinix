@@ -53,6 +53,7 @@ import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/Co
 import { GradientTabIcon } from "../tabIcons";
 import { PriceChartModal } from "./PriceChartModal";
 import { FacetFilterBar } from "../components/FacetFilterBar";
+import { EngineInsight } from "../components/EngineInsight";
 
 const SIGNAL_LABELS: Record<string, string> = {
   near_90d_low: "Bij 90d-bodem",
@@ -3063,6 +3064,7 @@ export function PhoenixView() {
 
   return (
     <div className="space-y-6">
+      <EngineInsight events={["h21", "p90", "rk"]} criterion="feniks" hit="feniks" title="Feniksen — wat voorspelt het, gemeten (hele universum)" />
       {/* Uitlegkaart (standaard ingeklapt) */}
       <CollapsibleIntro title="Feniks-aandelen" icon={<GradientTabIcon tab="feniks" />}>
         <div className="text-xs text-neutral-400 leading-relaxed">

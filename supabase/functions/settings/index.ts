@@ -39,6 +39,10 @@ Deno.serve(async (req) => {
       "hippo_alert_min_prob",
       "hippo_alert_horizon",
       "hippo_alert_max_per_week",
+      "sprint_min_rating",
+      "sprint_alert_min_prob",
+      "sprint_alert_max_per_week",
+      "sprint_override_min_prob",
     ];
     const update: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -69,6 +73,21 @@ Deno.serve(async (req) => {
     if ("hippo_alert_max_per_week" in update) {
       const n = Number(update.hippo_alert_max_per_week);
       update.hippo_alert_max_per_week = Number.isFinite(n) ? Math.min(50, Math.max(0, Math.round(n))) : 0;
+    }
+    // Sprinters: NOT NULL-kolommen, dus lege velden krijgen een veilige waarde.
+    if ("sprint_min_rating" in update) {
+      const n = Number(update.sprint_min_rating);
+      update.sprint_min_rating = Number.isFinite(n) ? Math.min(5, Math.max(1, Math.round(n))) : 4;
+    }
+    for (const k of ["sprint_alert_min_prob", "sprint_override_min_prob"]) {
+      if (k in update) {
+        const n = Number(update[k]);
+        update[k] = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
+      }
+    }
+    if ("sprint_alert_max_per_week" in update) {
+      const n = Number(update.sprint_alert_max_per_week);
+      update.sprint_alert_max_per_week = Number.isFinite(n) ? Math.min(50, Math.max(0, Math.round(n))) : 0;
     }
     const { error } = await supabase
       .from("signal_settings")

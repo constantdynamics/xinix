@@ -25,6 +25,7 @@ import {
 import { ColumnPicker, useColumnLayout, type ColumnMeta } from "../components/ColumnPicker";
 import { FacetFilterBar } from "../components/FacetFilterBar";
 import { PriceChartModal } from "./PriceChartModal";
+import { EngineInsight } from "../components/EngineInsight";
 
 function fmtPrice(v: number): string {
   if (v < 1) return v.toFixed(4);
@@ -482,6 +483,8 @@ export function PoefiesView() {
           Per incident wordt gecheckt op stock-splits in het venster en absurde single-bar jumps om <strong className="text-neutral-200">false poefies</strong> uit te sluiten.
         </div>
       </CollapsibleIntro>
+
+      <EngineInsight events={["p30", "p90"]} criterion="poefie2y" hit="poefie" title="Poefies — kans op een nieuwe poefie, gemeten" />
 
       {/* Stats + trigger */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">

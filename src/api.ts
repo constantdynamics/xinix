@@ -1293,3 +1293,123 @@ export async function downloadDataExport(): Promise<void> {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+// ── Explosie-motor ───────────────────────────────────────────────────────────
+// Eén meting voor hippos, raketten, hikkertjes, poefies, scanner en feniksen:
+// per event een gemeten model (basiskans, lifts per kenmerk, kalibratie,
+// backtest van de vaste criteria) en een ranglijst over watchlist + universum.
+export type EngineEvent = "h7" | "h14" | "h21" | "k30" | "k90" | "p30" | "p90" | "rk";
+export const ENGINE_EVENTS: EngineEvent[] = ["h7", "h14", "h21", "k30", "k90", "p30", "p90", "rk"];
+export type EngineHit = "hikkertje" | "poefie" | "feniks" | "ster" | "hippo" | "raket" | "poefie-kans";
+export interface EngineFeature {
+  key: string; label: string; used: boolean; max_lift: number; min_lift: number;
+  buckets: Array<{ slot: number; bucket: string; n: number; hits: number; rate_pct: number; lift: number }>;
+}
+export interface EngineModel {
+  event: EngineEvent; label: string; computed_at: string;
+  base_rate: number; days_n: number; hits: number; tickers: number;
+  features: EngineFeature[];
+  calib: Array<{ bucket: number; lo: number; hi: number; n: number; hits: number; rate_pct: number | null }>;
+  ceiling: number | null;
+  backtest: Array<{ key: string; label: string; n: number; hits: number; rate_pct: number; lift: number | null }>;
+  max_prob: number | null; scored: number | null;
+}
+export interface EngineTrack {
+  made: number; resolved: number; hits: number; avg_prob: number | null; avg_base: number | null;
+  buckets: Array<{ bucket: string; n: number; hits: number; avg_prob: number }>;
+}
+export interface EngineCoverage {
+  universe: number; tv: number; deep_scanned: number; deep_ok: number; in_watchlist: number; pending_scan: number;
+  added_total: number; added_today: number; pool_tickers: number; pool_at: string | null; sweep_at: string | null;
+  hits: Record<string, { all: number; outside: number }>;
+}
+export interface EngineOverview {
+  models: Partial<Record<EngineEvent, EngineModel>>;
+  track_record: Partial<Record<EngineEvent, EngineTrack>> | null;
+  coverage: EngineCoverage;
+}
+export interface EngineItem {
+  ticker: string; name: string | null; market: string | null; exchange: string | null; currency: string | null;
+  close: number | null; change_1d: number | null; perf_w: number | null; perf_1m: number | null;
+  mcap_usd: number | null; avg_vol_30d: number | null;
+  p_h7: number | null; p_h14: number | null; p_h21: number | null; p_k30: number | null; p_k90: number | null;
+  p_p30: number | null; p_p90: number | null; p_rk: number | null;
+  fb: number[] | null; hits: string[] | null; star_fit: number | null;
+  in_watchlist: boolean; is_favorite: boolean; added_at: string | null; add_reason: string | null;
+  spikes_1y: number | null; last_spike_date: string | null; poefie_count: number | null; poefie_count_2y: number | null;
+  last_poefie_date: string | null; poefie_max_growth: number | null; phoenix_peak: number | null; phoenix_peak_date: string | null;
+  deep_at: string | null; scored_at: string | null;
+}
+export type EngineScope = "watchlist" | "universum" | "alles";
+export async function fetchEngineOverview(): Promise<EngineOverview> {
+  const res = await fetch(apiUrl("/api/event-scores"));
+  if (!res.ok) throw new Error(`event-scores ${res.status}`);
+  return (await res.json()) as EngineOverview;
+}
+export async function fetchEngineList(opts: { event?: EngineEvent; hit?: EngineHit; sort?: EngineEvent; scope?: EngineScope; limit?: number }): Promise<EngineItem[]> {
+  const qs = new URLSearchParams();
+  if (opts.event) qs.set("event", opts.event);
+  if (opts.hit) qs.set("hit", opts.hit);
+  if (opts.sort) qs.set("sort", opts.sort);
+  if (opts.scope) qs.set("scope", opts.scope);
+  if (opts.limit) qs.set("limit", String(opts.limit));
+  const res = await fetch(apiUrl(`/api/event-scores?${qs}`));
+  if (!res.ok) throw new Error(`event-scores ${res.status}`);
+  return ((await res.json()) as { items: EngineItem[] }).items ?? [];
+}
+/** Kansen per watchlist-aandeel, in de volgorde van ENGINE_EVENTS. */
+export async function fetchEngineProbs(): Promise<Record<string, (number | null)[]>> {
+  const res = await fetch(apiUrl("/api/event-scores?probs=watchlist"));
+  if (!res.ok) throw new Error(`event-scores ${res.status}`);
+  return ((await res.json()) as { probs: Record<string, (number | null)[]> }).probs ?? {};
+}
+
+// ── Sprinters (≥4★, +50% binnen 10 handelsdagen) ─────────────────────────────
+// Berekend door xinix-sprint (elke 2 uur op werkdagen): het h14-model van de
+// explosie-motor op verse koersen, maal de gemeten lift van recent nieuws.
+export interface SprintFactor { label: string; bucket: string; mult: number }
+export interface SprintNews {
+  date: string; grp: string; label: string; title: string;
+  lift: number | null; measured_n: number | null; counts: boolean;
+}
+export interface SprintItem {
+  ticker: string; rating: number | null; company: string | null; exchange: string | null; sector: string | null;
+  close: number | null; change_1d: number | null; perf_w: number | null;
+  prob: number | null; prob_model: number | null; prob_7d: number | null; prob_21d: number | null;
+  base_rate: number | null; news_mult: number | null;
+  news: SprintNews[] | null; factors: SprintFactor[] | null;
+  measured: boolean; price_source: string | null; scored_at: string;
+  alerted_at: string | null; alerted_prob: number | null;
+}
+export interface SprintNewsLift {
+  grp: string; label: string; n: number; hits: number; expected: number;
+  rate_pct: number | null; lift: number | null; used: boolean; computed_at: string;
+}
+export interface SprintTrackBucket { b: number; bucket: string; n: number; hits: number; touches: number; open: number; avg_prob: number | null; rate_pct: number | null }
+export interface SprintTrackRecord {
+  since: string | null; total: number; open: number; resolved: number; hits: number;
+  alerts: { n: number; hits: number; open: number };
+  buckets: SprintTrackBucket[];
+}
+export interface SprintResponse {
+  items: SprintItem[];
+  news_lift: SprintNewsLift[];
+  track_record: SprintTrackRecord | null;
+  settings: { sprint_min_rating: number; sprint_alert_min_prob: number; sprint_alert_max_per_week: number; sprint_override_min_prob: number } | null;
+  model: { base_rate: number; ceiling: number | null; computed_at: string; tickers: number; days_n: number } | null;
+  computed_at: string | null;
+}
+export async function fetchSprinters(): Promise<SprintResponse> {
+  const res = await fetch(apiUrl("/api/xinix-sprint"));
+  if (!res.ok) throw new Error(`xinix-sprint ${res.status}`);
+  return (await res.json()) as SprintResponse;
+}
+export async function triggerSprintRun(): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(apiUrl("/api/xinix-sprint?mode=run"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`sprint-run ${res.status}: ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; message?: string };
+}

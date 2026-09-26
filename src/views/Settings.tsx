@@ -324,6 +324,70 @@ export function SettingsView({ data }: { data?: Dashboard }) {
           </p>
         </Field>
 
+        <Field label="🚀 Sprinters: melding vanaf kans (%, 0 = uit)">
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            value={s.sprint_alert_min_prob ?? 15}
+            onChange={(e) => setS({ ...s, sprint_alert_min_prob: e.target.value === "" ? 0 : Number(e.target.value) })}
+            className="w-full"
+          />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Favorieten → Sprinters rekent elke 2 uur op werkdagen voor je aandelen met minstens het ingestelde aantal
+            sterren de kans uit op <strong className="text-neutral-300">+50% binnen 10 handelsdagen</strong>, met verse
+            koersen en gemeten nieuws. Het hoogste dat ooit gemeten is ligt rond de 20%; 15% is ongeveer 6× de basiskans.
+          </p>
+        </Field>
+
+        <Field label="🚀 Sprinters: vanaf hoeveel sterren">
+          <div className="flex items-center gap-2">
+            {[3, 4, 5].map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setS({ ...s, sprint_min_rating: r })}
+                className={`px-3 py-1.5 rounded text-sm font-semibold border transition-colors ${
+                  (s.sprint_min_rating ?? 4) === r
+                    ? "border-fog-lime/40 text-fog-lime bg-fog-lime/10"
+                    : "border-ink-5 text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                {"★".repeat(r)}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        <Field label="🚀 Sprinters: maximaal aantal meldingen per week (0 = geen plafond)">
+          <Input
+            type="number"
+            min={0}
+            max={50}
+            step={1}
+            value={s.sprint_alert_max_per_week ?? 3}
+            onChange={(e) => setS({ ...s, sprint_alert_max_per_week: e.target.value === "" ? 0 : Number(e.target.value) })}
+            className="w-full"
+          />
+        </Field>
+
+        <Field label="🚀 Sprinters: demping en 'gezien' negeren vanaf kans (%)">
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            value={s.sprint_override_min_prob ?? 15}
+            onChange={(e) => setS({ ...s, sprint_override_min_prob: e.target.value === "" ? 0 : Number(e.target.value) })}
+            className="w-full"
+          />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Onder deze kans blijft een gedempt of als gezien gemarkeerd aandeel stil; daarboven komt de melding er
+            tóch door. Per aandeel hoogstens één melding per 10 dagen, tenzij de kans 5 punten hoger ligt.
+          </p>
+        </Field>
+
         <div className="flex items-center gap-3 pt-2">
           <Button variant="primary" onClick={save}>
             Opslaan
