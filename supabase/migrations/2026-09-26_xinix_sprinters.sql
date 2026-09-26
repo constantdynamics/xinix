@@ -3,8 +3,8 @@
 -- dag erna nog ≥ +20%) met verse koersen, plus gemeten nieuws-lift.
 
 -- 1) Per nieuwsbericht: volgde er binnen 10 handelsdagen +50%?
---    Gemeten over álle berichten (anders te weinig waarnemingen); het nieuws
---    telt alleen mee bij aandelen met ≥4★.
+--    Alleen berichten van favorieten met ≥ sprint_min_rating sterren (zie
+--    xinix_sprint_news_sync); gemeten én toegepast op alleen die aandelen.
 CREATE TABLE IF NOT EXISTS public.xinix_sprint_news (
   event_id     bigint PRIMARY KEY,
   ticker       text NOT NULL,
@@ -142,10 +142,14 @@ BEGIN
          e.id, e.ticker, e.signal_type, g.grp, e.detected_at::date,
          CASE WHEN u.own_n[1] > 0 THEN u.own_h[2]::numeric / u.own_n[1] END
   FROM signal_events e
+  JOIN xinix_favorites f ON f.ticker = e.ticker
+    AND f.rating >= (SELECT coalesce(sprint_min_rating, 4) FROM signal_settings WHERE id = 1)
   CROSS JOIN LATERAL (SELECT public.xinix_sprint_news_group(e.signal_type) AS grp) g
   LEFT JOIN xinix_universe u ON u.ticker = e.ticker
   WHERE g.grp IS NOT NULL
-    AND e.id > coalesce((SELECT max(event_id) FROM xinix_sprint_news), 0)
+    -- Niet op max(event_id): een aandeel dat later een 4e ster krijgt, moet
+    -- ook zijn oudere berichten meekrijgen.
+    AND NOT EXISTS (SELECT 1 FROM xinix_sprint_news s WHERE s.event_id = e.id)
   ORDER BY e.ticker, g.grp, e.detected_at::date, e.id
   ON CONFLICT DO NOTHING;
   GET DIAGNOSTICS n = ROW_COUNT;
@@ -186,9 +190,9 @@ REVOKE ALL ON FUNCTION public.xinix_sprint_news_lift_refresh(numeric) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.xinix_sprint_news_sync() TO service_role;
 GRANT EXECUTE ON FUNCTION public.xinix_sprint_news_lift_refresh(numeric) TO service_role;
 
--- 8) Cron: elke 2 uur op werkdagen (verse TradingView-koersen), en tijdelijk
---    elke 5 minuten een nieuws-inhaalslag tot de achterstand weg is.
+-- 8) Cron: elke 2 uur op werkdagen (verse TradingView-koersen). Elke run
+--    rekent ook het nieuws van 10 aandelen af; meer is voor ~85 aandelen met
+--    nieuws niet nodig.
 SELECT cron.unschedule('xinix-sprint') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'xinix-sprint');
 SELECT cron.schedule('xinix-sprint', '20 */2 * * 1-5', $$SELECT public.invoke_edge('xinix-sprint?mode=run')$$);
 SELECT cron.unschedule('xinix-sprint-news') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'xinix-sprint-news');
-SELECT cron.schedule('xinix-sprint-news', '*/5 * * * *', $$SELECT public.invoke_edge('xinix-sprint?mode=news')$$);

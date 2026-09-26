@@ -9,8 +9,8 @@
 // erna nog ≥ +20%; gekalibreerd op 10 jaar dagkoersen van ~6000 aandelen) op
 // koersen van nu, maal de gemeten lift van recent nieuws. Een nieuwsgroep telt
 // alleen mee als hij de kans aantoonbaar ≥ 1,5× verhoogt of ≤ 1/1,5× verlaagt
-// (xinix_sprint_news_lift); de lift wordt gemeten over álle berichten, maar
-// toegepast op alleen de ≥4★-aandelen.
+// (xinix_sprint_news_lift). Zowel het meten als het toepassen gebeurt alleen
+// op de ≥4★-aandelen (xinix_sprint_news_sync filtert op de rating).
 import * as E from "../_shared/engine.ts";
 import {
   getServiceClient, runBackground, chunkedIn, fetchAll, num, r1, loadPool, MIN_POOL_TICKERS, tvQuotes, tvRegime,
