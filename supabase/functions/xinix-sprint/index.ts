@@ -11,6 +11,10 @@
 // alleen mee als hij de kans aantoonbaar ≥ 1,5× verhoogt of ≤ 1/1,5× verlaagt
 // (xinix_sprint_news_lift). Zowel het meten als het toepassen gebeurt alleen
 // op de ≥4★-aandelen (xinix_sprint_news_sync filtert op de rating).
+//
+// Sinds de dagelijkse universum-sweep uit staat (de motor draait alleen nog
+// voor ≥4★), werkt deze run ook de kansen van alle acht events en de treffers
+// per onderdeel bij in xinix_universe — alleen voor diezelfde aandelen.
 import * as E from "../_shared/engine.ts";
 import {
   getServiceClient, runBackground, chunkedIn, fetchAll, num, r1, loadPool, MIN_POOL_TICKERS, tvQuotes, tvRegime,
@@ -215,6 +219,7 @@ async function sprintRun(): Promise<RunResult> {
 
   // ── Scoren ──────────────────────────────────────────────────────────────
   const rows: Json[] = [];
+  const uniUpdates: Json[] = [];
   for (const ticker of tickers) {
     const u = uniBy.get(ticker), p = psBy.get(ticker), t = tickBy.get(ticker);
     const q = u?.tv_symbol ? quotes.get(u.tv_symbol as string) ?? null : null;
@@ -289,6 +294,29 @@ async function sprintRun(): Promise<RunResult> {
     factors.sort((a, b) => Number(b.mult) - Number(a.mult));
 
     const dvol = close != null && avgVol != null ? close * avgVol * fx : 0;
+
+    // De andere tabbladen (Hikkertjes, Poefies, Raketten, Hippos, Scanner,
+    // Feniks) lezen hun kansen en treffers uit xinix_universe. Sinds de
+    // dagelijkse sweep uit staat, houdt deze run ze bij — alleen voor ≥4★.
+    const probs: Record<string, number | null> = {};
+    for (let e = 0; e < E.NE; e++) {
+      const m = models[e];
+      probs[`p_${E.EVENTS[e].key}`] = m ? r1(E.scoreEvent(m, lv.slots, ownN[E.EVENTS[e].group] ?? 0, ownH[e] ?? 0).prob) : null;
+    }
+    const hits: string[] = [], reasons: string[] = [];
+    if (lv.spikes1y >= E.HIKK_MIN_SPIKES) { hits.push("hikkertje"); reasons.push(`hikkertje (${lv.spikes1y} spikes in een jaar)`); }
+    if (u!.last_poefie_date && Date.parse(u!.last_poefie_date as string) >= nowMs - 365 * DAY) { hits.push("poefie"); reasons.push(`poefie op ${u!.last_poefie_date}`); }
+    if (lv.values.phx === 1) { hits.push("feniks"); reasons.push("gevallen feniks"); }
+    if (lv.star != null && lv.star >= E.STAR.MIN_SCORE) { hits.push("ster"); reasons.push(`5-sterren-DNA fit ${Math.round(lv.star)}`); }
+    for (const [key, name, mult] of [["h21", "hippo", 3], ["rk", "raket", 2.5], ["p90", "poefie-kans", 2.5]] as const) {
+      const m = models[E.EV[key]], pr = probs[`p_${key}`];
+      if (m && pr != null && pr / (m.p0 * 100) >= mult) { hits.push(name); reasons.push(`kans ${pr}% (${(pr / (m.p0 * 100)).toFixed(1)}× de basiskans)`); }
+    }
+    uniUpdates.push({
+      ticker, ...probs, fb: Array.from(lv.slots), star_fit: lv.star, hits, add_hint: hits.length ? reasons.join("; ") : null,
+      tradeable: dvol >= TRADE_MIN_DVOL, scored_at: nowIso, in_watchlist: t?.active === true, is_favorite: true,
+    });
+
     rows.push({
       ...base, measured: true,
       prob: r1(prob), prob_model: r1(s14.prob), prob_7d: s7 ? r1(s7.prob) : null, prob_21d: s21 ? r1(s21.prob) : null,
@@ -301,10 +329,19 @@ async function sprintRun(): Promise<RunResult> {
   const clean = rows.map(({ _tradeable, ...r }) => r);
   const { error: upErr } = await sb.from("xinix_sprint_scores").upsert(clean, { onConflict: "ticker" });
   if (upErr) errors.push(`scores: ${upErr.message}`);
+  for (let i = 0; i < uniUpdates.length; i += 200) {
+    const { error } = await sb.from("xinix_universe").upsert(uniUpdates.slice(i, i + 200), { onConflict: "ticker" });
+    if (error) { errors.push(`universe: ${error.message}`); break; }
+  }
   // Niet meer ≥4★: van de lijst.
   const { data: all } = await sb.from("xinix_sprint_scores").select("ticker");
   const gone = ((all ?? []) as Json[]).map((r) => r.ticker as string).filter((t) => !ratingBy.has(t));
-  if (gone.length) await sb.from("xinix_sprint_scores").delete().in("ticker", gone);
+  if (gone.length) {
+    await sb.from("xinix_sprint_scores").delete().in("ticker", gone);
+    await sb.from("xinix_universe").update({
+      p_h7: null, p_h14: null, p_h21: null, p_k30: null, p_k90: null, p_p30: null, p_p90: null, p_rk: null, hits: [], add_hint: null,
+    }).in("ticker", gone);
+  }
 
   const preds = rows.filter((r) => r.prob != null && r.close != null).map((r) => ({
     ticker: r.ticker, made_on: today, prob: r.prob, prob_model: r.prob_model, news_mult: r.news_mult, entry_close: r.close,
