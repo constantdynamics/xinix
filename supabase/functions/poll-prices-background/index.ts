@@ -15,7 +15,7 @@ function cors(req: Request) { const o = req.headers.get("origin") ?? ""; return 
 function pf(req: Request) { if (req.method !== "OPTIONS") return null; return new Response(null, { status: 204, headers: cors(req) }); }
 function j(req: Request, body: unknown, init: ResponseInit = {}) { return new Response(JSON.stringify(body), { ...init, headers: { ...cors(req), "content-type": "application/json", ...(init.headers as Record<string,string>|undefined) } }); }
 function tt(req: Request, body: string, init: ResponseInit = {}) { return new Response(body, { ...init, headers: { ...cors(req), "content-type": "text/plain", ...(init.headers as Record<string,string>|undefined) } }); }
-function runBackground(job: string, fn: () => Promise<RunResult>) { return async (req: Request) => { const p = pf(req); if (p) return p; if (!checkAdminOrCron(req)) return tt(req, "Unauthorized", { status: 401 }); try { const r = await logRun(job, fn); return j(req, { ok: r.ok, ...r }, { status: r.ok ? 200 : 500 }); } catch (e) { return j(req, { ok: false, message: e instanceof Error ? e.message : String(e) }, { status: 500 }); } }; }
+function runBackground(job: string, fn: (req: Request) => Promise<RunResult>) { return async (req: Request) => { const p = pf(req); if (p) return p; if (!checkAdminOrCron(req)) return tt(req, "Unauthorized", { status: 401 }); try { const r = await logRun(job, () => fn(req)); return j(req, { ok: r.ok, ...r }, { status: r.ok ? 200 : 500 }); } catch (e) { return j(req, { ok: false, message: e instanceof Error ? e.message : String(e) }, { status: 500 }); } }; }
 
 // Round-robin price polling met bench. Per run de oudst-gescande
 // active+niet-benched tickers, tijdsbudget ~110s, bench na 3 fails.
@@ -24,12 +24,20 @@ function runBackground(job: string, fn: () => Promise<RunResult>) { return async
 // voor tickers die je EXPLICIET wil kopen (big_drop, buy_limit_*) vuren
 // alleen als er een buy_limit is gezet — anders flood bij 3600 tickers.
 const BATCH_SIZE = 80;
+// Favorieten hebben een eigen, ruimere batch. Met ~540 Noord-Amerikaanse
+// favorieten en vier runs per venster paste 4×80 er niet in — en omdat de
+// wachtrij niet sorteerde vielen steeds dezelfde ~220 buiten de boot, waarvan
+// de koers (en dus 1D/1W) weken oud werd. ~0,35 s per ticker → 200 ≈ 70 s.
+const FAV_BATCH_SIZE = 200;
 const BUDGET_MS = 110_000;
 const FAIL_BENCH_AT = 3;
 // Tiered poll-cadans (IO-budget): favorieten 2× per handelsdag (guard voorkomt
 // dubbele polls binnen één venster), overige tickers hooguit 1× per week.
 const FAV_REPOLL_MS = 3 * 60 * 60 * 1000;        // favoriet: niet vaker dan elke 3u
 const REST_STALE_MS = 7 * 24 * 60 * 60 * 1000;   // niet-favoriet: hooguit 1×/week
+// ?inhalen=1: favorieten die langer dan dit niet gepollt zijn, meteen ophalen
+// — ook buiten hun venster. Voor een handmatige inhaalslag na een storing.
+const FAV_CATCHUP_MS = 20 * 60 * 60 * 1000;
 
 interface YahooBar { date: string; close: number | null; volume: number | null; }
 interface YahooFetch { bars: YahooBar[]; dividendTtm: number; exchange: string | null; }
@@ -68,62 +76,81 @@ async function fetchYahoo(ticker: string): Promise<YahooFetch> {
 }
 function pct(a: number, b: number): number { if (!b) return 0; return ((a - b) / b) * 100; }
 
+// ── Handelsregio per ticker. Eerst via Yahoo's fullExchangeName; ontbreekt die
+// (NULL) of staat de beurs niet in de lijst, dan via de ticker-suffix. Zonder
+// die terugval werd een favoriet met een onbekende beurs (bv. PNPN.V zonder
+// exchange, of Stockholm/Kopenhagen/Zwitserland) na de eerste poll nooit meer
+// opgehaald: hij viel in geen enkel favoriet-venster en de gewone wachtrij
+// slaat favorieten over.
+type Regio = "NA" | "EU" | "AZIE" | "ASX";
+const REGIO_PER_BEURS: Record<string, Regio> = {
+  NasdaqCM: "NA", NasdaqGS: "NA", NasdaqGM: "NA", NASDAQ: "NA", NYSE: "NA", "NYSE American": "NA",
+  NYSEArca: "NA", AMEX: "NA", "Cboe US": "NA", "Cboe CA": "NA", Toronto: "NA", TSXV: "NA",
+  "Canadian Sec": "NA", "OTC Markets OTCQB": "NA", "OTC Markets OTCPK": "NA", "OTC Markets OTCID": "NA",
+  "OTC Markets OTCQX": "NA", "Other OTC": "NA",
+  LSE: "EU", Amsterdam: "EU", Paris: "EU", Frankfurt: "EU", XETRA: "EU", Milan: "EU", Warsaw: "EU",
+  Oslo: "EU", Stockholm: "EU", Copenhagen: "EU", Helsinki: "EU", Swiss: "EU", Brussels: "EU",
+  Madrid: "EU", Lisbon: "EU", Vienna: "EU", Irish: "EU", Johannesburg: "EU", "Tel Aviv": "EU",
+  HKSE: "AZIE", Tokyo: "AZIE", SES: "AZIE", Shanghai: "AZIE", Shenzhen: "AZIE", Jakarta: "AZIE",
+  "Kuala Lumpur": "AZIE", NSE: "AZIE", BSE: "AZIE", KSE: "AZIE", KOSDAQ: "AZIE", Taiwan: "AZIE",
+  ASX: "ASX",
+};
+const REGIO_PER_SUFFIX: Record<string, Regio> = {
+  V: "NA", TO: "NA", CN: "NA", NE: "NA",
+  L: "EU", AS: "EU", PA: "EU", DE: "EU", F: "EU", MI: "EU", WA: "EU", OL: "EU", ST: "EU", CO: "EU",
+  HE: "EU", SW: "EU", BR: "EU", MC: "EU", LS: "EU", VI: "EU", IR: "EU", JO: "EU", TA: "EU",
+  HK: "AZIE", T: "AZIE", SS: "AZIE", SZ: "AZIE", SI: "AZIE", JK: "AZIE", KL: "AZIE", NS: "AZIE",
+  BO: "AZIE", KS: "AZIE", KQ: "AZIE", TW: "AZIE",
+  AX: "ASX", NZ: "ASX",
+};
+function regioVan(exchange: string | null, ticker: string): Regio {
+  const viaBeurs = exchange ? REGIO_PER_BEURS[exchange] : undefined;
+  if (viaBeurs) return viaBeurs;
+  const punt = ticker.lastIndexOf(".");
+  return (punt >= 0 ? REGIO_PER_SUFFIX[ticker.slice(punt + 1).toUpperCase()] : undefined) ?? "NA";
+}
+
 // ── Exchange-aware polling: alleen polls als de beurs van een ticker NU open is.
 // Gebruikt ruime vensters (incl. pre/post-market buffer + DST-tolerantie) zodat
 // we ook ~1u voor en na regulier handelen polls doen (relevante bewegingen).
 // Mon-Fri in UTC, behalve ASX die over middernacht loopt.
-function openExchangesNow(now: Date): string[] {
+function openRegiosNow(now: Date): Set<Regio> {
   const day = now.getUTCDay();   // 0=Sun ... 6=Sat
   const hour = now.getUTCHours();
-  const open: string[] = [];
+  const open = new Set<Regio>();
   const isWeekday = day >= 1 && day <= 5;
-
   // Noord-Amerika: regulier 13:30-21:00 UTC. Met pre/post-market buffer 12-23 UTC. Ma-vr.
-  if (isWeekday && hour >= 12 && hour < 23) {
-    open.push(
-      "NasdaqCM","NasdaqGS","NasdaqGM","NYSE","NYSE American","NYSEArca","Cboe US",
-      "Toronto","TSXV","Canadian Sec",
-      "OTC Markets OTCQB","OTC Markets OTCPK","OTC Markets OTCID","OTC Markets OTCQX",
-    );
-  }
+  if (isWeekday && hour >= 12 && hour < 23) open.add("NA");
   // Europa: regulier 07:00-16:30 UTC. Met buffer 06-17 UTC. Ma-vr.
-  if (isWeekday && hour >= 6 && hour < 17) {
-    open.push("LSE","Amsterdam","Paris","Frankfurt","XETRA","Milan");
-  }
+  if (isWeekday && hour >= 6 && hour < 17) open.add("EU");
   // Azië (excl. ASX): 00-11 UTC dekt Tokyo (00-06), HK (01:30-08), Shanghai/Shenzhen,
   // Singapore, Jakarta, KL, India. Ma-vr.
-  if (isWeekday && hour < 11) {
-    open.push("HKSE","Tokyo","SES","Shanghai","Shenzhen","Jakarta","Kuala Lumpur","NSE","BSE");
-  }
+  if (isWeekday && hour < 11) open.add("AZIE");
   // ASX (Sydney): Mon-Fri lokaal = Zon 22:00 UTC tot Vrij 07:00 UTC (UTC+10/11).
   // Sluit Sat helemaal, Zon vóór 22 UTC, Vrij na 07 UTC.
   const asxOpen =
     !(day === 6) &&
     !(day === 0 && hour < 22) &&
     !(day === 5 && hour >= 7);
-  if (asxOpen) open.push("ASX");
-
+  if (asxOpen) open.add("ASX");
   return open;
 }
 
-// ── Favoriet-vensters: welke beurzen zitten NU in een favoriet-poll-venster
+// ── Favoriet-vensters: welke regio's zitten NU in een favoriet-poll-venster
 // (~1u ná opening óf ~1u vóór sluiting)? Vensters zijn ruim (±) genomen zodat
 // zomer-/wintertijd en cron-granulariteit worden opgevangen; de 3u-guard in de
 // queue zorgt dat elk favoriet-venster tot exact één poll leidt. Mon-Fri.
-function favPollWindowExchangesNow(now: Date): Set<string> {
+function favVensterRegiosNow(now: Date): Set<Regio> {
   const day = now.getUTCDay();
   const h = now.getUTCHours() + now.getUTCMinutes() / 60;
   const wk = day >= 1 && day <= 5;
-  const out = new Set<string>();
-  const NA = ["NasdaqCM", "NasdaqGS", "NasdaqGM", "NASDAQ", "NYSE", "NYSE American", "NYSEArca", "Cboe US", "Toronto", "TSXV", "Canadian Sec", "OTC Markets OTCQB", "OTC Markets OTCPK", "OTC Markets OTCID", "OTC Markets OTCQX"];
-  const EU = ["LSE", "Amsterdam", "Paris", "Frankfurt", "XETRA", "Milan", "Warsaw", "Oslo"];
-  const ASIA = ["HKSE", "Tokyo", "SES", "Shanghai", "Shenzhen", "Jakarta", "Kuala Lumpur", "NSE", "BSE"];
+  const out = new Set<Regio>();
   // Noord-Amerika (regulier 13:30-21:00 UTC): open+1u 14:00-16:00, sluit-1u 19:30-21:30.
-  if (wk && ((h >= 14 && h < 16) || (h >= 19.5 && h < 21.5))) NA.forEach((e) => out.add(e));
+  if (wk && ((h >= 14 && h < 16) || (h >= 19.5 && h < 21.5))) out.add("NA");
   // Europa (07:00-16:30 UTC): open+1u 08:00-09:30, sluit-1u 14:30-16:00.
-  if (wk && ((h >= 8 && h < 9.5) || (h >= 14.5 && h < 16))) EU.forEach((e) => out.add(e));
+  if (wk && ((h >= 8 && h < 9.5) || (h >= 14.5 && h < 16))) out.add("EU");
   // Azië (00:00-11:00 UTC): open+1u 01:00-02:30, sluit-1u 09:00-10:30.
-  if (wk && ((h >= 1 && h < 2.5) || (h >= 9 && h < 10.5))) ASIA.forEach((e) => out.add(e));
+  if (wk && ((h >= 1 && h < 2.5) || (h >= 9 && h < 10.5))) out.add("AZIE");
   // ASX (Sydney, UTC+10/11): open ~22:00 UTC → open+1u 23:00-00:30; sluit ~07:00 → sluit-1u 05:00-06:30.
   const asxMorning = (day >= 0 && day <= 4 && h >= 23) || (day >= 1 && day <= 5 && h < 0.5);
   const asxAfternoon = day >= 1 && day <= 5 && h >= 5 && h < 6.5;
@@ -131,14 +158,16 @@ function favPollWindowExchangesNow(now: Date): Set<string> {
   return out;
 }
 
-Deno.serve(runBackground("poll-prices", async () => {
+Deno.serve(runBackground("poll-prices", async (req) => {
   const sb = getServiceClient();
   const startMs = Date.now();
+  const inhalen = new URL(req.url).searchParams.get("inhalen") === "1";
 
   // Bepaal welke beurzen NU open zijn. Tickers van gesloten beurzen pollen we niet —
   // koersen bewegen toch niet en we belasten Yahoo nodeloos.
-  const openExchanges = openExchangesNow(new Date());
-  if (openExchanges.length === 0) {
+  const openRegios = openRegiosNow(new Date());
+  const openExchanges = Object.keys(REGIO_PER_BEURS).filter((e) => openRegios.has(REGIO_PER_BEURS[e]));
+  if (openExchanges.length === 0 && !inhalen) {
     return { ok: true, message: "alle markten gesloten — geen polls", metrics: { skipped: "all-markets-closed" } };
   }
 
@@ -168,11 +197,14 @@ Deno.serve(runBackground("poll-prices", async () => {
   //  • Favorieten: 2× per handelsdag — ~1u na opening en ~1u voor sluiting van
   //    hun eigen beurs. De 3u-guard voorkomt een tweede poll binnen één venster.
   //    Nieuw toegevoegde favoriet (nog nooit gepollt) wordt meteen opgehaald.
+  //    Oudst-gepollt eerst, zodat wat een venster niet haalt het volgende
+  //    venster vooraan staat in plaats van eindeloos achteraan te blijven.
   //  • Overige tickers: hooguit 1× per week, alleen als hun beurs nu open is,
   //    oudst-gepollt eerst — verspreidt ~2100 tickers over de week.
   type QueueRow = { ticker: string; buy_limit: number | null; price_fail_count: number; exchange: string | null; goud_score: number | null; price_polled_at?: string | null };
   const nowQ = Date.now();
-  const favWindow = favPollWindowExchangesNow(new Date());
+  const favVenster = favVensterRegiosNow(new Date());
+  const polledAt = (r: QueueRow) => (r.price_polled_at ? new Date(r.price_polled_at).getTime() : 0);
   let queue: QueueRow[] = [];
   if (favTickers.length > 0) {
     const { data: favRows, error: fErr } = await sb
@@ -183,13 +215,15 @@ Deno.serve(runBackground("poll-prices", async () => {
       .in("ticker", favTickers);
     if (fErr) throw new Error((fErr as { message?: string }).message ?? String(fErr));
     queue = ((favRows ?? []) as QueueRow[]).filter((r) => {
-      const pAt = r.price_polled_at ? new Date(r.price_polled_at).getTime() : 0;
-      if (pAt === 0) return true;                    // nieuw → meteen ophalen
-      if (nowQ - pAt < FAV_REPOLL_MS) return false;  // < 3u geleden gepollt
-      return favWindow.has(r.exchange ?? "");        // alleen in een venster
-    }).slice(0, BATCH_SIZE);
+      const pAt = polledAt(r);
+      if (pAt === 0) return true;                               // nieuw → meteen ophalen
+      if (inhalen) return nowQ - pAt >= FAV_CATCHUP_MS;         // inhaalslag: alles wat blijft liggen
+      if (nowQ - pAt < FAV_REPOLL_MS) return false;             // < 3u geleden gepollt
+      return favVenster.has(regioVan(r.exchange, r.ticker));    // alleen in een venster
+    }).sort((a, b) => polledAt(a) - polledAt(b)).slice(0, FAV_BATCH_SIZE);
   }
-  const remaining = BATCH_SIZE - queue.length;
+  // De inhaalslag gaat alleen over favorieten; de gewone wachtrij loopt vanzelf.
+  const remaining = inhalen ? 0 : BATCH_SIZE - queue.length;
   if (remaining > 0) {
     const staleBefore = new Date(nowQ - REST_STALE_MS).toISOString();
     const baseQuery = sb
@@ -207,7 +241,7 @@ Deno.serve(runBackground("poll-prices", async () => {
     if (rErr) throw new Error((rErr as { message?: string }).message ?? String(rErr));
     queue = [...queue, ...((regularQueue ?? []) as QueueRow[])];
   }
-  if (queue.length === 0) return { ok: true, message: "queue leeg (open markten: " + openExchanges.length + ")" };
+  if (queue.length === 0) return { ok: true, message: inhalen ? "inhalen: geen favorieten achter" : "queue leeg (open markten: " + openExchanges.length + ")" };
 
   let scanned = 0, ok = 0, failed = 0, benched = 0, signalsInserted = 0, glitchSkipped = 0;
   const errSamples: string[] = [];
@@ -330,5 +364,5 @@ Deno.serve(runBackground("poll-prices", async () => {
   }
   const { count: queueLeft } = await sb.from("signal_tickers").select("ticker", { count: "exact", head: true }).eq("active", true).eq("price_benched", false);
   const { count: benchedTotal } = await sb.from("signal_tickers").select("ticker", { count: "exact", head: true }).eq("active", true).eq("price_benched", true);
-  return { ok: failed < scanned / 2, message: `${scanned} gescand, ${ok} ok, ${failed} fout, ${benched} nieuw op bank, ${signalsInserted} signals${glitchSkipped ? `, ${glitchSkipped} koers-glitch geweerd` : ""}` + (errSamples.length ? `; bv: ${errSamples.slice(0, 3).join("; ")}` : ""), metrics: { scanned, ok, failed, benched_new: benched, signals: signalsInserted, glitch_skipped: glitchSkipped, queue_size: queueLeft ?? null, benched_total: benchedTotal ?? null } };
+  return { ok: failed < scanned / 2, message: `${inhalen ? "inhalen: " : ""}${scanned} gescand, ${ok} ok, ${failed} fout, ${benched} nieuw op bank, ${signalsInserted} signals${glitchSkipped ? `, ${glitchSkipped} koers-glitch geweerd` : ""}` + (errSamples.length ? `; bv: ${errSamples.slice(0, 3).join("; ")}` : ""), metrics: { scanned, ok, failed, benched_new: benched, signals: signalsInserted, glitch_skipped: glitchSkipped, queue_size: queueLeft ?? null, benched_total: benchedTotal ?? null } };
 }));

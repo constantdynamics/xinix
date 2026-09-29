@@ -29,7 +29,7 @@ const ENTRIES: Entry[] = [
   { term: "Poefies", category: "Tabbladen", body: "Aandelen die ooit minimaal 125% (2,25×) in maximaal 7 dagen zijn gestegen. Explosieve kortstondige sprongen." },
   { term: "Hikkertjes", category: "Tabbladen", body: "Aandelen die in het afgelopen jaar minimaal 2× op één dag ≥55% stegen en die stijging minimaal 3 handelsdagen vasthielden. Extreme volatiliteit." },
   { term: "Zwitserleven", category: "Tabbladen", body: "Fallen-angel dividend-aandelen: TTM-dividend ≥6,5%, ≥50% onder 5j-hoog, ooit ≥25% sprong, ≥2 groeijaren. Echte kwaliteit die tijdelijk uit de gratie is." },
-  { term: "Favorieten", category: "Tabbladen", aliases: ["Favos"], body: "Aandelen die je met het hartje hebt aangemerkt op een ander tabblad. Verzamelpunt. Orphans (zonder data) verbergen we standaard." },
+  { term: "Favorieten", category: "Tabbladen", aliases: ["Favos"], body: "Aandelen die je met het hartje hebt aangemerkt op een ander tabblad. Verzamelpunt. Favorieten zonder data (niet of niet meer in de watchlist) worden niet getoond." },
   { term: "Beoordelen-popup", category: "Tabbladen", body: "De rechtsboven 'beoordeel'-knop opent een swipe-flow waar je per lijst aandelen één-voor-één een hart, sterren of 'gezien'-markering geeft." },
 
   // ── Xinix sub-tabs ───────────────────────────────────────────────────────
