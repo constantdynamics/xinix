@@ -54,7 +54,8 @@ interface FavRow {
   exchange: string | null;
   score: number | null;
   last_close: number | null;
-  price_polled_at: string | null;
+  /** Tijdstip van de laatst opgehaalde koers (ISO) — ook de basis van 1D/1W/1M/6M. */
+  price_at: string | null;
   buy_limit: number | null;
   above_limit_pct: number | null;
   dividend_yield: number | null;
@@ -70,9 +71,6 @@ interface FavRow {
   bronnen: Bron[];
   /** Wanneer het aandeel favoriet werd (ISO). NULL bij oude rijen zonder tijdstip. */
   favorited_at: string | null;
-  // True wanneer de ticker als favoriet bestaat maar niet (meer) in de watchlist
-  // staat — alle data is dan onbekend en de rij toont enkel streepjes.
-  orphan: boolean;
 }
 
 type SortKey =
@@ -80,6 +78,10 @@ type SortKey =
   | "chg_1d" | "chg_1w" | "chg_1m" | "chg_6m" | "favorited_at";
 type SortDir = "asc" | "desc";
 type ViewMode = "table" | "tiles";
+
+// Kolommen die bij de eerste klik laag → hoog sorteren. Bij de koers-
+// veranderingen wil je eerst de grootste dalers zien (kooprichting).
+const OPLOPEND_EERST = new Set<SortKey>(["ticker", "company", "chg_1d", "chg_1w", "chg_1m", "chg_6m"]);
 
 const VIEW_KEY = "xinix_favorieten_view";
 const SUBTAB_KEY = "xinix_favorieten_subtab";
@@ -120,24 +122,43 @@ function fmtYield(v: number | null): string {
 }
 
 // Koersverandering in %: groen bij winst, rood bij verlies, streepje als de
-// koershistorie te kort is (of de ticker geen koersdata heeft).
-function ChangePct({ value, className }: { value: number | null; className?: string }) {
+// koershistorie te kort is (of de ticker geen koersdata heeft). Bij een
+// verouderde koers (`staleDays`) wordt de waarde gedimd: een "1D" van weken
+// terug zegt niets over vandaag.
+function ChangePct({ value, className, staleDays }: { value: number | null; className?: string; staleDays?: number | null }) {
   if (value == null) return <span className={`text-neutral-600 ${className ?? ""}`}>—</span>;
   const tone = value > 0 ? "text-fog-gain" : value < 0 ? "text-fog-loss" : "text-neutral-400";
+  const stale = staleDays != null;
   return (
-    <span className={`${tone} ${className ?? ""}`}>
+    <span
+      className={`${tone} ${stale ? "opacity-35" : ""} ${className ?? ""}`}
+      title={stale ? `Koers is ${staleDays} dagen oud — deze verandering is niet actueel` : undefined}
+    >
       {value < 0 ? "−" : "+"}{Math.abs(value).toFixed(1)}%
     </span>
   );
 }
 
+function daysSince(iso: string | null): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? (Date.now() - t) / (1000 * 60 * 60 * 24) : null;
+}
+
 // Geeft "Xd" als de koers meer dan 2 dagen oud is (mogelijk gemiste poll).
-function priceAge(polledAt: string | null): string | null {
-  if (!polledAt) return null;
-  const days = (Date.now() - new Date(polledAt).getTime()) / (1000 * 60 * 60 * 24);
-  if (days < 2) return null;
+function priceAge(priceAt: string | null): string | null {
+  const days = daysSince(priceAt);
+  if (days == null || days < 2) return null;
   if (days < 30) return `${Math.floor(days)}d`;
   return `${Math.floor(days / 30)}mnd`;
+}
+
+// Aantal dagen dat de koers oud is, maar alleen als dat méér is dan een lang
+// weekend: favorieten worden elke handelsdag opgehaald, dus ouder dan 4 dagen
+// betekent dat er iets misging (of dat het aandeel niet meer noteert).
+function staleDays(priceAt: string | null): number | null {
+  const days = daysSince(priceAt);
+  return days != null && days >= 4 ? Math.floor(days) : null;
 }
 
 // Zet de gekozen kolomkleur op de cel. De CSS-regel voor .col-tint forceert
@@ -193,7 +214,6 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
   const [bronFilter, setBronFilter] = useState<Set<Bron>>(new Set());
   const [sectorFilter, setSectorFilter] = useState<Set<Sector>>(new Set());
   const [showSeen, setShowSeen] = useState(false);
-  const [showOrphans, setShowOrphans] = useState(false);
   // Minimum sterren-filter: 0 = alles, 1..5 = alleen rijen met ≥ N sterren.
   const [minRating, setMinRating] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>(
@@ -260,7 +280,9 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
     setRefreshing(true);
     setRefreshError(null);
     try {
-      const [d, s] = await Promise.all([fetchDashboard(), fetchScanResults()]);
+      // `true` = browser-cache omzeilen; het dashboard mag anders 2 minuten
+      // uit de cache komen en dan verandert er na een klik niets.
+      const [d, s] = await Promise.all([fetchDashboard(true), fetchScanResults()]);
       setDashboard(d);
       setScans(s);
     } catch (e) {
@@ -297,6 +319,9 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
     for (const T of favSet) {
       const card = cardByTicker.get(T);
       const p = poefieByTicker.get(T);
+      // Favoriet zonder enige data (niet of niet meer actief in de watchlist):
+      // een rij met overal streepjes heeft geen nut, dus die laten we weg.
+      if (!card && !p) continue;
       const bronnen: Bron[] = [];
       if (phoenixSet.has(T) || card?.is_phoenix) bronnen.push("feniks");
       if (p) bronnen.push("poefie");
@@ -318,10 +343,6 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
                   ? ((last_close - buy_limit) / buy_limit) * 100
                   : null));
 
-      // Orphan = favoriet zonder enige data-bron. Komt voor wanneer een ticker
-      // wel in xinix_favorites staat maar niet (meer) actief in signal_tickers.
-      const orphan = !card && !p;
-
       out.push({
         ticker: T,
         company: card?.company ?? p?.company ?? "—",
@@ -329,7 +350,10 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         exchange: card?.exchange ?? p?.exchange ?? null,
         score: card?.goud_score ?? null,
         last_close,
-        price_polled_at: card?.price_polled_at ?? null,
+        // summary.updated_at = moment van de laatste geslaagde koers-poll.
+        // price_polled_at schuift ook op bij een mislukte poll, dus die zegt
+        // niets over hoe vers de koers is.
+        price_at: card?.summary?.updated_at ?? card?.price_polled_at ?? null,
         buy_limit,
         above_limit_pct,
         dividend_yield: card?.dividend_yield ?? null,
@@ -342,63 +366,21 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         medal_bronze: card?.medal_bronze ?? 0,
         bronnen,
         favorited_at: marks.favoritedAt.get(T) ?? null,
-        orphan,
       });
     }
     return out;
   }, [dashboard, scans, marks, limitOverrides]);
 
-  // Wezen — favorieten zonder enige data — apart bij elkaar voor de reparatie-knop.
-  const orphans = useMemo(() => rows.filter((r) => r.orphan), [rows]);
   const newestPriceAt = useMemo(() => {
     let max: string | null = null;
     for (const r of rows) {
-      if (r.price_polled_at && (!max || r.price_polled_at > max)) max = r.price_polled_at;
+      if (r.price_at && (!max || r.price_at > max)) max = r.price_at;
     }
     return max;
   }, [rows]);
-  const [repairing, setRepairing] = useState(false);
-  const [repairMsg, setRepairMsg] = useState<string | null>(null);
-
-  async function repairOrphans() {
-    if (orphans.length === 0 || repairing) return;
-    setRepairing(true);
-    setRepairMsg(null);
-    try {
-      // Lookup om bedrijfsnaam + exchange op te halen (Yahoo via lookupTickers).
-      const tickers = orphans.map((o) => o.ticker);
-      let lookups: LookupResult[] = [];
-      try {
-        lookups = await lookupTickers(tickers);
-      } catch {
-        // Lookup mag falen — voeg dan toch toe met alleen ticker als naam.
-      }
-      const lookupByTicker = new Map(lookups.map((l) => [l.ticker.toUpperCase(), l]));
-      const toAdd: TickerInput[] = tickers.map((t) => {
-        const l = lookupByTicker.get(t);
-        return {
-          ticker: t,
-          company: l?.recognized ? (l.company ?? t) : t,
-          sector: "other" as const,
-        };
-      });
-      await batchAddTickers(toAdd);
-      setRepairMsg(`${toAdd.length} favorieten teruggezet in watchlist — data wordt bij de volgende poll opgehaald.`);
-      // Herlaad dashboard zodat de nieuwe ticker-rijen verschijnen.
-      const d = await fetchDashboard();
-      setDashboard(d);
-    } catch (err) {
-      setRepairMsg(`Fout bij repareren: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setRepairing(false);
-    }
-  }
 
   const filtered = useMemo(() => {
     let list = rows;
-    // Verberg orphans (favorieten zonder data) tenzij de toggle aan staat.
-    // Anders zou een rij met overal "—" altijd verschijnen, wat verwarrend is.
-    if (!showOrphans) list = list.filter((r) => !r.orphan);
     if (!showSeen) list = list.filter((r) => !marks.isSeen(r.ticker));
     if (bronFilter.size > 0) {
       list = list.filter((r) => r.bronnen.some((b) => bronFilter.has(b)));
@@ -439,7 +421,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
       return sortDir === "asc" ? (av as number) - (bv as number) : (bv as number) - (av as number);
     });
     return list;
-  }, [rows, sortKey, sortDir, bronFilter, sectorFilter, showSeen, showOrphans, minRating, marks]);
+  }, [rows, sortKey, sortDir, bronFilter, sectorFilter, showSeen, minRating, marks]);
 
   function startEditLimit(row: FavRow) {
     if (!isAdmin) return;
@@ -476,7 +458,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir(key === "ticker" || key === "company" ? "asc" : "desc"); }
+    else { setSortKey(key); setSortDir(OPLOPEND_EERST.has(key) ? "asc" : "desc"); }
   }
   function toggleBron(b: Bron) {
     setBronFilter((prev) => { const n = new Set(prev); if (n.has(b)) n.delete(b); else n.add(b); return n; });
@@ -618,7 +600,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         </th>
       ),
       td: (r) => {
-        const age = priceAge(r.price_polled_at);
+        const age = priceAge(r.price_at);
         return (
           <td className="px-3 py-2 text-right font-mono tabular-nums">
             {r.last_close != null ? (
@@ -626,8 +608,8 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
                 <span className="text-neutral-200">{fmtPrice(r.last_close)}</span>
                 {age && (
                   <span
-                    className={`ml-1 text-[9px] ${parseInt(age) >= 7 ? "text-fog-loss" : "text-fog-warn"}`}
-                    title={r.price_polled_at ? `Gepollt op ${new Date(r.price_polled_at).toLocaleDateString("nl-NL")}` : undefined}
+                    className={`ml-1 text-[9px] ${age.endsWith("mnd") || parseInt(age) >= 7 ? "text-fog-loss" : "text-fog-warn"}`}
+                    title={r.price_at ? `Koers opgehaald op ${new Date(r.price_at).toLocaleDateString("nl-NL")}` : undefined}
                   >
                     {age}
                   </span>
@@ -650,7 +632,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           1D <span className="text-fog-lime text-[9px]">{sortArrow("chg_1d")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1d} /></td>,
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1d} staleDays={staleDays(r.price_at)} /></td>,
     },
     chg_1w: {
       th: (
@@ -662,7 +644,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           1W <span className="text-fog-lime text-[9px]">{sortArrow("chg_1w")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1w} /></td>,
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1w} staleDays={staleDays(r.price_at)} /></td>,
     },
     chg_1m: {
       th: (
@@ -674,7 +656,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           1M <span className="text-fog-lime text-[9px]">{sortArrow("chg_1m")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1m} /></td>,
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1m} staleDays={staleDays(r.price_at)} /></td>,
     },
     chg_6m: {
       th: (
@@ -686,7 +668,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           6M <span className="text-fog-lime text-[9px]">{sortArrow("chg_6m")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_6m} /></td>,
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_6m} staleDays={staleDays(r.price_at)} /></td>,
     },
     above_limit_pct: {
       th: (
@@ -818,7 +800,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
       </CollapsibleIntro>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Stat label="Favorieten" value={marks.favorites.size} />
+        <Stat label="Favorieten" value={rows.length} />
         <Stat label="Getoond" value={filtered.length} />
         <div className="ml-auto flex items-center gap-2">
           {dashboard && (
@@ -837,7 +819,12 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           {refreshError && (
             <span className="text-xs text-fog-loss" title={refreshError}>Verversen mislukt</span>
           )}
-          <Button size="sm" onClick={refresh} disabled={refreshing}>
+          <Button
+            size="sm"
+            onClick={refresh}
+            disabled={refreshing}
+            title="Haalt de nieuwste koersen uit de database op. Die worden per favoriet 2× per handelsdag bijgewerkt: ±1 uur na de opening en ±1 uur voor het slot van de eigen beurs."
+          >
             {refreshing ? "Bezig…" : "↻ Ververs"}
           </Button>
           {isAdmin && (
@@ -848,38 +835,6 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           <ShowSeenToggle showSeen={showSeen} onChange={setShowSeen} />
         </div>
       </div>
-
-      {/* Compacte reparatie-balk voor orphans (favorieten zonder data).
-          Default verborgen uit de tabel — de banner is je enige aanwijzing. */}
-      {orphans.length > 0 && (
-        <Card className="p-2 border-fog-warn/30 bg-fog-warn/[0.04]">
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-fog-warn font-semibold">
-              {orphans.length} {orphans.length === 1 ? "favoriet" : "favorieten"} zonder data
-              {!showOrphans && <span className="text-neutral-500 font-normal"> · verborgen uit lijst</span>}
-            </span>
-            <span className="text-neutral-500 truncate">
-              ({orphans.slice(0, 5).map((o) => o.ticker).join(", ")}{orphans.length > 5 ? `, …` : ""})
-            </span>
-            <button
-              onClick={() => setShowOrphans((v) => !v)}
-              className="text-[11px] text-neutral-400 hover:text-neutral-200 underline ml-auto"
-            >
-              {showOrphans ? "verberg" : "toon"}
-            </button>
-            {repairMsg && (
-              <span className={`text-[11px] ${repairMsg.startsWith("Fout") ? "text-fog-loss" : "text-fog-lime"}`}>
-                {repairMsg}
-              </span>
-            )}
-            {isAdmin && (
-              <Button size="sm" onClick={repairOrphans} disabled={repairing}>
-                {repairing ? "Bezig…" : `🔧 Repareer ${orphans.length}`}
-              </Button>
-            )}
-          </div>
-        </Card>
-      )}
 
       {showAdd && isAdmin && (
         <BulkAddFavoritesPanel
@@ -1024,18 +979,10 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
                     const seen = marks.isSeen(r.ticker);
                     // Zebra: oneven rijen een haartje lichter, puur om de
                     // regels uit elkaar te houden bij veel kolommen.
-                    const bg = r.orphan
-                      ? "bg-fog-warn/[0.06]"
-                      : i % 2 === 1
-                      ? "bg-white/[0.022]"
-                      : "";
+                    const bg = i % 2 === 1 ? "bg-white/[0.022]" : "";
                     const cls = [seen ? "opacity-50" : "", bg].filter(Boolean).join(" ");
                     return (
-                      <tr
-                        key={r.ticker}
-                        className={cls}
-                        title={r.orphan ? "Data ontbreekt — gebruik de reparatie-knop bovenaan" : undefined}
-                      >
+                      <tr key={r.ticker} className={cls}>
                         <SeenCell ticker={r.ticker} />
                         <HeartCell ticker={r.ticker} />
                         {visibleKeys.map((k) => (
@@ -1134,7 +1081,7 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
               {([["1D", r.chg_1d], ["1W", r.chg_1w], ["1M", r.chg_1m], ["6M", r.chg_6m]] as Array<[string, number | null]>).map(([label, v]) => (
                 <div key={label}>
                   <div className="text-[8px] uppercase tracking-wider text-neutral-600 font-bold">{label}</div>
-                  <ChangePct value={v} className="text-[10px]" />
+                  <ChangePct value={v} className="text-[10px]" staleDays={staleDays(r.price_at)} />
                 </div>
               ))}
             </div>
