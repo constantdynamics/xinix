@@ -244,7 +244,12 @@ Deno.serve(async (req) => {
       const sid = p.strategy_id as number;
       const qty = Number(p.qty);
       const avg = Number(p.avg_price);
-      const px = priceMap.get(p.ticker as string) ?? avg;
+      // Zelfde guard als effPrice() in xinix-sim-background: een koers die ≥8×
+      // of ≤1/8 van de instap staat is een split of pence/pond-wissel die nog
+      // niet verwerkt is. Die telt op instapwaarde, anders staat een glitch
+      // bovenaan de ranglijst.
+      const raw = priceMap.get(p.ticker as string);
+      const px = raw != null && avg > 0 && raw / avg < 8 && raw / avg > 0.125 ? raw : avg;
       const mv = qty * px;
       const cost = qty * avg * (1 + TX_COST);
       const cur = openVal.get(sid) ?? { val: 0, cnt: 0, cost: 0 };

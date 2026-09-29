@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
       :                           "weak_bull";
     const isBull = regime !== "bear";
 
-    await sb.from("market_regime").upsert({
+    const { error: upErr } = await sb.from("market_regime").upsert({
       id:         1,
       updated_at: now,
       spy_close:  +lastClose.toFixed(2),
@@ -84,12 +84,13 @@ Deno.serve(async (req) => {
       regime,
       is_bull:    isBull,
     }, { onConflict: "id" });
+    if (upErr) throw new Error(`market_regime wegschrijven mislukt: ${upErr.message}`);
 
     const regimeLabel = regime === "strong_bull" ? "STRONG BULL 🐂🟢" : regime === "weak_bull" ? "WEAK BULL 🐂🟡" : "BEAR 🐻";
     const vixLabel = vixClose != null ? ` | VIX ${vixClose.toFixed(1)}${vixClose > 30 ? " ⚠️" : ""}` : "";
     const msg = `SPY ${lastClose.toFixed(2)} | 50d MA ${ma50.toFixed(2)} | 200d MA ${ma200.toFixed(2)}${vixLabel} → ${regimeLabel}`;
     await sb.from("signal_runs").insert({
-      job: "xinix-market-regime", ran_at: now, ok: true, message: msg,
+      job: "xinix-market-regime", started_at: now, finished_at: new Date().toISOString(), ok: true, message: msg,
       metrics: { spy_close: +lastClose.toFixed(2), ma_50: +ma50.toFixed(2), ma_200: +ma200.toFixed(2), vix_close: vixClose, regime, is_bull: isBull, data_points: closes.length },
     });
 
@@ -98,7 +99,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await sb.from("signal_runs").insert({ job: "xinix-market-regime", ran_at: now, ok: false, message: msg }).catch(() => {});
+    await sb.from("signal_runs").insert({ job: "xinix-market-regime", started_at: now, finished_at: new Date().toISOString(), ok: false, message: msg });
     return new Response(JSON.stringify({ ok: false, error: msg }), {
       status: 500, headers: { "content-type": "application/json" },
     });

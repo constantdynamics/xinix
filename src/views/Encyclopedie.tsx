@@ -92,7 +92,7 @@ const ENTRIES: Entry[] = [
   // ── Signalen & medailles ─────────────────────────────────────────────────
   { term: "Signaaltype", category: "Signalen", body: "Type trigger dat een aandeel verdient (bv. bonanza, permit, FDA-approval, deal, technical-bottom). Per type wordt rendement & win-rate bijgehouden." },
   { term: "Rood-signaal", category: "Signalen", body: "Sterk catalyst-signaal (bv. FDA-approval, grote permit). Verhoogt de heat naar oranje/rood." },
-  { term: "Score", category: "Signalen", aliases: ["goud_score"], body: "Curatie-score 0–100 die structurele kwaliteit aangeeft. 65+ = sterk, 80+ = top." },
+  { term: "Score", category: "Signalen", aliases: ["goud_score"], body: "Score 0–100 voor biotech- en mijnbouwaandelen. Met de hand ingevuld (curatie) of, als die leeg is, door het model: de rang binnen de eigen sector op structuur, katalysator en timing (90 = beter dan 90% van de sector, 65+ = de beste 35%). Het Potje en de papieren portefeuille filteren hierop; het dashboard kleurt tegels alleen op handmatige scores. Modelscores staan grijs in de tickerlijst." },
   { term: "Gouden medaille", category: "Signalen", aliases: ["medal_gold"], body: "Hoogste medaille-categorie voor opvallende prestaties (bv. grote koersstijging, bijzondere catalyst-historie). Aantal staat in `medal_gold` per ticker." },
   { term: "Zilveren medaille", category: "Signalen", aliases: ["medal_silver"], body: "Middencategorie medaille. Telt mee voor de hot-poort (≥1 zilver of ≥3 brons vereist voor signaal-loze hot-tegels)." },
   { term: "Bronzen medaille", category: "Signalen", aliases: ["medal_bronze"], body: "Laagste medaille-categorie. ≥3 brons = telt mee voor de hot-poort." },

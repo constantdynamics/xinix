@@ -109,9 +109,11 @@ Deno.serve(async (req) => {
       const contrib = HEAT_CONTRIBUTION[sig.signal_type as string];
       if (contrib && SEV_RANK[contrib] > SEV_RANK[signalSev]) signalSev = contrib;
     }
-    // Baseline uit handmatige goud_score (curatie).
+    // Baseline uit handmatige goud_score (curatie). Een score die het model
+    // invulde (goud_score_auto) kleurt de tegel niet: die heeft vrijwel elk
+    // biotech- en mijnbouwaandeel, en dan zegt de kleur niets meer.
     let baselineSev: Sev = "white";
-    if (t.goud_score != null) {
+    if (t.goud_score != null && !t.goud_score_auto) {
       if (t.goud_score >= 80) baselineSev = "red";
       else if (t.goud_score >= 65) baselineSev = "orange";
       else if (t.goud_score >= 35) baselineSev = "yellow";
@@ -132,7 +134,7 @@ Deno.serve(async (req) => {
       : null;
     return {
       ticker: t.ticker, company: t.company, sector: t.sector ?? "other",
-      goud_score: t.goud_score, goud_type: t.goud_type, modality: t.modality,
+      goud_score: t.goud_score, goud_score_auto: t.goud_score_auto ?? false, goud_type: t.goud_type, modality: t.modality,
       disease_area: t.disease_area, phase: t.phase, commodity: t.commodity,
       jurisdiction: t.jurisdiction, deposit_type: t.deposit_type,
       factor_count: t.factor_count ?? 0, trigger_event: t.trigger_event,

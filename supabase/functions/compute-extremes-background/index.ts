@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { normaliseerEenheid } from "../_shared/units.ts";
 function getServiceClient() { const u = Deno.env.get("SUPABASE_URL"); const k = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); if (!u||!k) throw new Error("env"); return createClient(u, k, { auth: { persistSession: false, autoRefreshToken: false } }); }
 type Json = Record<string, unknown>;
 interface RunResult { ok: boolean; message?: string; metrics?: Json; }
@@ -21,17 +22,18 @@ const MAX_PER_RUN = 80;
 const BUDGET_MS = 110_000;
 
 interface Bar { date: string; close: number; }
-async function fetchYahoo5y(ticker: string): Promise<Bar[]> {
+async function fetchYahoo5y(ticker: string): Promise<{ bars: Bar[]; currency: string | null }> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=5y&interval=1wk`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; SignalExtremesBot/1.0; +https://github.com)" } });
   if (!res.ok) throw new Error(`Yahoo ${ticker} HTTP ${res.status}`);
-  const json = (await res.json()) as { chart: { result?: Array<{ timestamp: number[]; indicators: { adjclose?: Array<{ adjclose?: (number | null)[] }>; quote: Array<{ close: (number | null)[] }> }; }>; error?: { description?: string } | null; }; };
+  const json = (await res.json()) as { chart: { result?: Array<{ timestamp: number[]; meta?: { currency?: string }; indicators: { adjclose?: Array<{ adjclose?: (number | null)[] }>; quote: Array<{ close: (number | null)[] }> }; }>; error?: { description?: string } | null; }; };
   const r = json.chart.result?.[0];
   if (!r) throw new Error(`Yahoo ${ticker}: ${json.chart.error?.description ?? "no result"}`);
   const ts = r.timestamp ?? [];
   const adj = r.indicators.adjclose?.[0]?.adjclose;
   const closes = adj ?? r.indicators.quote[0]?.close ?? [];
-  return ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
+  const bars = ts.map((t, i) => ({ date: new Date(t * 1000).toISOString().slice(0, 10), close: closes[i] ?? NaN })).filter((b): b is Bar => Number.isFinite(b.close) && b.close > 0);
+  return { bars, currency: r.meta?.currency ?? null };
 }
 
 function extremesSince(bars: Bar[], cutoff: Date): { low: number | null; high: number | null } {
@@ -97,9 +99,13 @@ Deno.serve(runBackground("compute-extremes", async () => {
   // Skip benched tickers: poll-prices weet al dat Yahoo deze niet kent.
   const { data: tickers } = await sb.from("signal_tickers").select("ticker").eq("active", true).eq("price_benched", false);
   const allActive = new Set((tickers ?? []).map((t) => t.ticker as string));
-  const { data: summaries } = await sb.from("signal_price_summary").select("ticker, last_extremes_at");
+  const { data: summaries } = await sb.from("signal_price_summary").select("ticker, last_extremes_at, last_close");
   const lastByTicker = new Map<string, string | null>();
-  for (const s of summaries ?? []) lastByTicker.set(s.ticker as string, (s.last_extremes_at as string | null) ?? null);
+  const closeByTicker = new Map<string, number | null>();
+  for (const s of summaries ?? []) {
+    lastByTicker.set(s.ticker as string, (s.last_extremes_at as string | null) ?? null);
+    closeByTicker.set(s.ticker as string, (s.last_close as number | null) ?? null);
+  }
   const todo: string[] = [];
   for (const t of allActive) {
     const last = lastByTicker.get(t);
@@ -146,8 +152,11 @@ Deno.serve(runBackground("compute-extremes", async () => {
     if (Date.now() - startMs > BUDGET_MS) break;
     processed++;
     try {
-      const bars = await fetchYahoo5y(ticker);
+      const { bars, currency } = await fetchYahoo5y(ticker);
       if (bars.length === 0) { await markChecked(ticker); notFound++; continue; }
+      // Londen & co: pence/pond-wissels eruit, in de eenheid van de opgeslagen koers.
+      // Anders is de 5j-bodem 100× te laag en telt een wissel als een +9.900%-rally.
+      normaliseerEenheid(ticker, bars, currency, closeByTicker.get(ticker) ?? null);
       const oneY = extremesSince(bars, oneYearAgo);
       const threeY = extremesSince(bars, threeYearsAgo);
       const fiveY = extremesSince(bars, fiveYearsAgo);

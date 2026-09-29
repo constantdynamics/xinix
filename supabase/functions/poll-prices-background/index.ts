@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { normaliseerEenheid, pasSplitsToe, type Split } from "../_shared/units.ts";
 function getServiceClient() { const u = Deno.env.get("SUPABASE_URL"); const k = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); if (!u||!k) throw new Error("env"); return createClient(u, k, { auth: { persistSession: false, autoRefreshToken: false } }); }
 type Json = Record<string, unknown>;
 interface RunResult { ok: boolean; message?: string; metrics?: Json; }
@@ -40,13 +41,13 @@ const REST_STALE_MS = 7 * 24 * 60 * 60 * 1000;   // niet-favoriet: hooguit 1×/w
 const FAV_CATCHUP_MS = 20 * 60 * 60 * 1000;
 
 interface YahooBar { date: string; close: number | null; volume: number | null; }
-interface YahooFetch { bars: YahooBar[]; dividendTtm: number; exchange: string | null; }
+interface YahooFetch { bars: YahooBar[]; dividendTtm: number; exchange: string | null; currency: string | null; splits: Split[]; }
 // range=1y zodat we (a) genoeg historie hebben voor de 90d/30d vensters en
 // (b) de volledige trailing-12m dividenduitkeringen kunnen optellen
 // (events=div geeft een map ts -> {amount,date}). meta.fullExchangeName
 // gebruiken we om voor US-tickers de juiste Google-Finance exchange te kiezen.
 async function fetchYahoo(ticker: string): Promise<YahooFetch> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d&events=div`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d&events=div,splits`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; BiotechSignalBot/1.0; +https://github.com)" } });
   if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
   const json = (await res.json()) as {
@@ -54,8 +55,11 @@ async function fetchYahoo(ticker: string): Promise<YahooFetch> {
       result?: Array<{
         timestamp: number[];
         indicators: { quote: Array<{ close: (number | null)[]; volume: (number | null)[] }> };
-        events?: { dividends?: Record<string, { amount?: number; date?: number }> };
-        meta?: { fullExchangeName?: string; exchangeName?: string };
+        events?: {
+          dividends?: Record<string, { amount?: number; date?: number }>;
+          splits?: Record<string, { date?: number; numerator?: number; denominator?: number }>;
+        };
+        meta?: { fullExchangeName?: string; exchangeName?: string; currency?: string };
       }>;
       error?: { description?: string } | null;
     };
@@ -72,7 +76,13 @@ async function fetchYahoo(ticker: string): Promise<YahooFetch> {
     if (typeof d?.amount === "number" && typeof d?.date === "number" && d.date >= cutoff) dividendTtm += d.amount;
   }
   const exchange = result.meta?.fullExchangeName ?? result.meta?.exchangeName ?? null;
-  return { bars, dividendTtm, exchange };
+  const splits: Split[] = [];
+  for (const sp of Object.values(result.events?.splits ?? {})) {
+    if (typeof sp?.date === "number" && (sp.numerator ?? 0) > 0 && (sp.denominator ?? 0) > 0) {
+      splits.push({ date: new Date(sp.date * 1000).toISOString().slice(0, 10), numerator: sp.numerator!, denominator: sp.denominator! });
+    }
+  }
+  return { bars, dividendTtm, exchange, currency: result.meta?.currency ?? null, splits };
 }
 function pct(a: number, b: number): number { if (!b) return 0; return ((a - b) / b) * 100; }
 
@@ -161,13 +171,16 @@ function favVensterRegiosNow(now: Date): Set<Regio> {
 Deno.serve(runBackground("poll-prices", async (req) => {
   const sb = getServiceClient();
   const startMs = Date.now();
-  const inhalen = new URL(req.url).searchParams.get("inhalen") === "1";
+  const params = new URL(req.url).searchParams;
+  const inhalen = params.get("inhalen") === "1";
+  // ?tickers=A,B: precies deze aandelen ophalen, los van vensters en wachtrij.
+  const alleen = (params.get("tickers") ?? "").split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
 
   // Bepaal welke beurzen NU open zijn. Tickers van gesloten beurzen pollen we niet —
   // koersen bewegen toch niet en we belasten Yahoo nodeloos.
   const openRegios = openRegiosNow(new Date());
   const openExchanges = Object.keys(REGIO_PER_BEURS).filter((e) => openRegios.has(REGIO_PER_BEURS[e]));
-  if (openExchanges.length === 0 && !inhalen) {
+  if (openExchanges.length === 0 && !inhalen && alleen.length === 0) {
     return { ok: true, message: "alle markten gesloten — geen polls", metrics: { skipped: "all-markets-closed" } };
   }
 
@@ -180,9 +193,11 @@ Deno.serve(runBackground("poll-prices", async (req) => {
 
   // Laad favorieten en koers-extremen parallel vóór queue-opbouw zodat we
   // favorieten altijd als eerste in de batch kunnen plaatsen (dagelijks vers).
-  const [{ data: favData }, { data: extremes }] = await Promise.all([
+  const [{ data: favData }, { data: extremes }, { data: heldData }, { data: splitData }] = await Promise.all([
     sb.from("xinix_favorites").select("ticker"),
     sb.from("signal_price_summary").select("ticker, high_1y, last_close"),
+    sb.rpc("xinix_held_tickers"),
+    sb.from("xinix_splits").select("ticker, split_date"),
   ]);
   const high1yByTicker = new Map<string, number | null>();
   const prevCloseByTicker = new Map<string, number | null>();
@@ -191,7 +206,13 @@ Deno.serve(runBackground("poll-prices", async (req) => {
     prevCloseByTicker.set(r.ticker as string, ((r as { last_close?: number | null }).last_close) ?? null);
   }
   const favSet = new Set<string>((favData ?? []).map((f) => f.ticker as string));
-  const favTickers = Array.from(favSet);
+  // Aandelen met een open positie in het Potje of de papieren portefeuille
+  // krijgen dezelfde cadans als favorieten. Als overig aandeel werden ze hooguit
+  // 1× per week opgehaald, dus beoordeelde de sim stops en winstdoelen op een
+  // koers van soms een week oud.
+  const volgSet = new Set<string>([...favSet, ...((heldData ?? []) as string[])]);
+  const volgTickers = Array.from(volgSet);
+  const bekendeSplits = new Set<string>(((splitData ?? []) as Array<{ ticker: string; split_date: string }>).map((r) => `${r.ticker}|${r.split_date}`));
 
   // Poll-queue met tiered cadans (IO-budget):
   //  • Favorieten: 2× per handelsdag — ~1u na opening en ~1u voor sluiting van
@@ -206,13 +227,20 @@ Deno.serve(runBackground("poll-prices", async (req) => {
   const favVenster = favVensterRegiosNow(new Date());
   const polledAt = (r: QueueRow) => (r.price_polled_at ? new Date(r.price_polled_at).getTime() : 0);
   let queue: QueueRow[] = [];
-  if (favTickers.length > 0) {
+  if (alleen.length > 0) {
+    const { data, error } = await sb
+      .from("signal_tickers")
+      .select("ticker, buy_limit, price_fail_count, exchange, goud_score, price_polled_at")
+      .in("ticker", alleen);
+    if (error) throw new Error(error.message);
+    queue = (data ?? []) as QueueRow[];
+  } else if (volgTickers.length > 0) {
     const { data: favRows, error: fErr } = await sb
       .from("signal_tickers")
       .select("ticker, buy_limit, price_fail_count, exchange, goud_score, price_polled_at")
       .eq("active", true)
       .eq("price_benched", false)
-      .in("ticker", favTickers);
+      .in("ticker", volgTickers);
     if (fErr) throw new Error((fErr as { message?: string }).message ?? String(fErr));
     queue = ((favRows ?? []) as QueueRow[]).filter((r) => {
       const pAt = polledAt(r);
@@ -222,8 +250,9 @@ Deno.serve(runBackground("poll-prices", async (req) => {
       return favVenster.has(regioVan(r.exchange, r.ticker));    // alleen in een venster
     }).sort((a, b) => polledAt(a) - polledAt(b)).slice(0, FAV_BATCH_SIZE);
   }
-  // De inhaalslag gaat alleen over favorieten; de gewone wachtrij loopt vanzelf.
-  const remaining = inhalen ? 0 : BATCH_SIZE - queue.length;
+  // De inhaalslag gaat alleen over favorieten en aandelen in portefeuille; de
+  // gewone wachtrij loopt vanzelf.
+  const remaining = inhalen || alleen.length > 0 ? 0 : BATCH_SIZE - queue.length;
   if (remaining > 0) {
     const staleBefore = new Date(nowQ - REST_STALE_MS).toISOString();
     const baseQuery = sb
@@ -235,15 +264,15 @@ Deno.serve(runBackground("poll-prices", async (req) => {
       .or(`price_polled_at.is.null,price_polled_at.lt.${staleBefore}`)
       .order("price_polled_at", { ascending: true, nullsFirst: true })
       .limit(remaining);
-    const { data: regularQueue, error: rErr } = favTickers.length > 0
-      ? await baseQuery.not("ticker", "in", `(${favTickers.join(",")})`)
+    const { data: regularQueue, error: rErr } = volgTickers.length > 0
+      ? await baseQuery.not("ticker", "in", `(${volgTickers.join(",")})`)
       : await baseQuery;
     if (rErr) throw new Error((rErr as { message?: string }).message ?? String(rErr));
     queue = [...queue, ...((regularQueue ?? []) as QueueRow[])];
   }
   if (queue.length === 0) return { ok: true, message: inhalen ? "inhalen: geen favorieten achter" : "queue leeg (open markten: " + openExchanges.length + ")" };
 
-  let scanned = 0, ok = 0, failed = 0, benched = 0, signalsInserted = 0, glitchSkipped = 0;
+  let scanned = 0, ok = 0, failed = 0, benched = 0, signalsInserted = 0, glitchSkipped = 0, eenheidGecorrigeerd = 0, splitsNieuw = 0;
   const errSamples: string[] = [];
   const now = Date.now();
   for (const tk of queue) {
@@ -256,7 +285,14 @@ Deno.serve(runBackground("poll-prices", async (req) => {
     const failCount = (tk as { price_fail_count?: number }).price_fail_count ?? 0;
     scanned++;
     try {
-      const { bars, dividendTtm, exchange } = await fetchYahoo(ticker);
+      const { bars, dividendTtm, exchange, currency, splits } = await fetchYahoo(ticker);
+      pasSplitsToe(bars, splits);
+      const ruweLaatste = [...bars].reverse().find((b) => b.close != null && b.close > 0)?.close ?? null;
+      // Vlak na een split mag de opgeslagen koers de eenheid niet bepalen: een
+      // consolidatie van 1:100 zou anders als pence/pond-wissel teruggedraaid worden.
+      const splitGrens = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const eenheidRef = splits.some((sp) => sp.date >= splitGrens) ? null : (prevCloseByTicker.get(ticker) ?? null);
+      const munt = normaliseerEenheid(ticker, bars, currency, eenheidRef);
       const valid = bars.filter((b): b is YahooBar & { close: number } => b.close !== null);
       if (valid.length === 0) throw new Error("no valid bars");
       const last = valid[valid.length - 1];
@@ -298,9 +334,27 @@ Deno.serve(runBackground("poll-prices", async (req) => {
       const volRatio = avgVol > 0 ? lastVol / avgVol : 0;
       const summary = { ticker, last_close: last.close, last_volume: lastVol, low_90d: low90, high_90d: high90, pct_above_90d_low: low90 > 0 ? pct(last.close, low90) : 0, pct_change_1d: prev ? pct(last.close, prev.close) : 0, pct_change_5d: fiveAgo ? pct(last.close, fiveAgo.close) : 0, pct_change_22d: twentyTwoAgo ? pct(last.close, twentyTwoAgo.close) : null, pct_change_6mo: sixMonthsAgo ? pct(last.close, sixMonthsAgo.close) : null, avg_volume_30d: Math.round(avgVol), volume_ratio: Number(volRatio.toFixed(2)), updated_at: new Date().toISOString() };
       await sb.from("signal_price_summary").upsert(summary, { onConflict: "ticker" });
-      const divYield = last.close > 0 ? Number((dividendTtm / last.close).toFixed(5)) : 0;
+      if (ruweLaatste != null && Math.abs(Math.log(last.close / ruweLaatste)) > 1) eenheidGecorrigeerd++;
+      // Nieuwe splits vastleggen; de database rekent de open posities meteen om
+      // (xinix_record_split → xinix_apply_splits), vóórdat de sim deze koers ziet.
+      for (const sp of splits) {
+        if (bekendeSplits.has(`${ticker}|${sp.date}`)) continue;
+        const { data: nieuw, error: spErr } = await sb.rpc("xinix_record_split", {
+          p_ticker: ticker, p_split_date: sp.date, p_numerator: sp.numerator, p_denominator: sp.denominator,
+          // Eerste slotkoers ná de split, al in de opgeslagen eenheid.
+          p_ref_close: valid.find((b) => b.date >= sp.date)?.close ?? null,
+        });
+        if (spErr) { if (errSamples.length < 5) errSamples.push(`${ticker}: split ${sp.date}: ${spErr.message}`); continue; }
+        bekendeSplits.add(`${ticker}|${sp.date}`);
+        if (nieuw) splitsNieuw++;
+      }
+      // Een yield boven 30% is een eenheidsfout (dividend in pence, koers in pond)
+      // of een eenmalige uitkering; de sim telde dat als rendement (SDEV: −15% werd +40%).
+      const rawYield = last.close > 0 ? dividendTtm / last.close : 0;
+      const divYield = rawYield > 0.30 ? 0 : Number(rawYield.toFixed(5));
       const tickerUpdate: Record<string, unknown> = { price_polled_at: new Date().toISOString(), price_fail_count: 0, price_last_error: null, dividend_yield: divYield };
       if (exchange) tickerUpdate.exchange = exchange;
+      if (munt) tickerUpdate.price_currency = munt;
       await sb.from("signal_tickers").update(tickerUpdate).eq("ticker", ticker);
       ok++;
       const today = new Date().toISOString().slice(0, 10);
@@ -364,5 +418,5 @@ Deno.serve(runBackground("poll-prices", async (req) => {
   }
   const { count: queueLeft } = await sb.from("signal_tickers").select("ticker", { count: "exact", head: true }).eq("active", true).eq("price_benched", false);
   const { count: benchedTotal } = await sb.from("signal_tickers").select("ticker", { count: "exact", head: true }).eq("active", true).eq("price_benched", true);
-  return { ok: failed < scanned / 2, message: `${inhalen ? "inhalen: " : ""}${scanned} gescand, ${ok} ok, ${failed} fout, ${benched} nieuw op bank, ${signalsInserted} signals${glitchSkipped ? `, ${glitchSkipped} koers-glitch geweerd` : ""}` + (errSamples.length ? `; bv: ${errSamples.slice(0, 3).join("; ")}` : ""), metrics: { scanned, ok, failed, benched_new: benched, signals: signalsInserted, glitch_skipped: glitchSkipped, queue_size: queueLeft ?? null, benched_total: benchedTotal ?? null } };
+  return { ok: failed < scanned / 2, message: `${inhalen ? "inhalen: " : ""}${scanned} gescand, ${ok} ok, ${failed} fout, ${benched} nieuw op bank, ${signalsInserted} signals${glitchSkipped ? `, ${glitchSkipped} koers-glitch geweerd` : ""}${eenheidGecorrigeerd ? `, ${eenheidGecorrigeerd} pence/pond gecorrigeerd` : ""}${splitsNieuw ? `, ${splitsNieuw} nieuwe split(s)` : ""}` + (errSamples.length ? `; bv: ${errSamples.slice(0, 3).join("; ")}` : ""), metrics: { scanned, ok, failed, benched_new: benched, signals: signalsInserted, glitch_skipped: glitchSkipped, unit_fixed: eenheidGecorrigeerd, splits_new: splitsNieuw, queue_size: queueLeft ?? null, benched_total: benchedTotal ?? null } };
 }));

@@ -1482,7 +1482,10 @@ export function TickersView({
                           {c.company}
                         </button>
                       </td>
-                      <td className="p-3 tabular text-neutral-200">
+                      <td
+                        className={`p-3 tabular ${c.goud_score_auto ? "text-neutral-500" : "text-neutral-200"}`}
+                        title={c.goud_score_auto ? "Modelscore: rang binnen de sector. Vul zelf een score in om hem te overschrijven." : undefined}
+                      >
                         {c.goud_score ?? "—"}
                       </td>
                       <td className="p-3 text-neutral-500">
