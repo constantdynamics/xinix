@@ -79,6 +79,8 @@ export interface Card {
   company: string;
   sector: Sector;
   goud_score: number | null;
+  // true = de score komt van het model (rang binnen de sector), niet van curatie.
+  goud_score_auto?: boolean;
   goud_type: string | null;
   modality: string | null;
   disease_area: string | null;

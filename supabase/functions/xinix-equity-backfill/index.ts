@@ -17,6 +17,7 @@
 import { getServiceClient, type RunResult } from "../_shared/supabase.ts";
 import { runBackground } from "../_shared/runner.ts";
 import { TX_COST } from "../_shared/constants.ts";
+import { normaliseerEenheid } from "../_shared/units.ts";
 
 interface PositionRow {
   strategy_id?: number;
@@ -70,7 +71,9 @@ function parsePosition(p: PositionRow): ParsedPosition {
   };
 }
 
-async function fetchYahooCloses(ticker: string): Promise<Map<string, number>> {
+// `ref` = de opgeslagen slotkoers; Londense reeksen worden daarmee in dezelfde
+// eenheid (pence) gezet als de posities.
+async function fetchYahooCloses(ticker: string, ref: number | null): Promise<Map<string, number>> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1y&interval=1d`;
   const headers = { "User-Agent": "Mozilla/5.0 (compatible; XinixBackfill/1.0; +https://github.com)" };
   let lastErr: Error | null = null;
@@ -80,20 +83,19 @@ async function fetchYahooCloses(ticker: string): Promise<Map<string, number>> {
       const res = await fetch(u, { headers });
       if (!res.ok) { lastErr = new Error(`HTTP ${res.status}`); continue; }
       const json = await res.json() as {
-        chart: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ close?: (number | null)[] }> } }>; error?: { description?: string } | null };
+        chart: { result?: Array<{ timestamp?: number[]; meta?: { currency?: string }; indicators?: { quote?: Array<{ close?: (number | null)[] }> } }>; error?: { description?: string } | null };
       };
       const result = json.chart.result?.[0];
       if (!result) { lastErr = new Error(json.chart.error?.description ?? "no result"); continue; }
       const ts = result.timestamp ?? [];
       const cs = result.indicators?.quote?.[0]?.close ?? [];
-      const map = new Map<string, number>();
-      for (let i = 0; i < ts.length; i++) {
+      const bars = ts.map((t, i) => {
         const c = cs[i];
-        if (typeof c === "number" && Number.isFinite(c)) {
-          const d = new Date(ts[i] * 1000).toISOString().slice(0, 10);
-          map.set(d, c);
-        }
-      }
+        return { date: new Date(t * 1000).toISOString().slice(0, 10), close: typeof c === "number" && Number.isFinite(c) ? c : null };
+      });
+      normaliseerEenheid(ticker, bars, result.meta?.currency ?? null, ref);
+      const map = new Map<string, number>();
+      for (const b of bars) if (b.close != null) map.set(b.date, b.close);
       return map;
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
@@ -141,7 +143,10 @@ function markPriceFor(
     }
     return avgPrice;
   }
-  return priceOnOrBefore(closes, date, avgPrice);
+  // Zelfde guard als effPrice() in xinix-sim-background: ≥8× of ≤1/8 van de
+  // instap is een onverwerkte split of eenheidswissel, geen koers.
+  const px = priceOnOrBefore(closes, date, avgPrice);
+  return avgPrice > 0 && (px / avgPrice >= 8 || px / avgPrice <= 0.125) ? avgPrice : px;
 }
 
 interface EquityRow {
@@ -301,6 +306,10 @@ async function logic(): Promise<RunResult> {
 
   // 3) Yahoo bars per unieke ticker (parallel, gelimiteerd)
   const tickerList = [...tickerSet];
+  const { data: refRows } = await sb.from("signal_price_summary").select("ticker, last_close")
+    .or("ticker.like.*.L,ticker.like.*.IL,ticker.like.*.JO,ticker.like.*.TA");
+  const refByTicker = new Map<string, number>();
+  for (const r of refRows ?? []) if (r.last_close != null) refByTicker.set(r.ticker as string, Number(r.last_close));
   const closesByTicker = new Map<string, Map<string, number>>();
   let fetchOk = 0, fetchFail = 0;
   const failSamples: string[] = [];
@@ -311,7 +320,7 @@ async function logic(): Promise<RunResult> {
       const i = cursor++;
       const t = tickerList[i];
       try {
-        const m = await fetchYahooCloses(t);
+        const m = await fetchYahooCloses(t, refByTicker.get(t) ?? null);
         closesByTicker.set(t, m);
         fetchOk++;
       } catch (e) {
