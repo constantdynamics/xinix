@@ -14,6 +14,7 @@ import { PoefiesView } from "./views/Poefies";
 import { HikkertjesView } from "./views/Hikkertjes";
 import { ZwitserlevenView } from "./views/Zwitserleven";
 import { FavorietenView } from "./views/Favorieten";
+import { DagadviesView } from "./views/Dagadvies";
 import { EncyclopedieView } from "./views/Encyclopedie";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
@@ -77,6 +78,7 @@ const HELP_PAGE: Record<Tab, string> = {
   hikkertjes: "hikkertjes",
   zwitserleven: "zwitserleven",
   favorieten: "favorieten",
+  dagadvies: "dagadvies",
   status: "status",
   encyclopedie: "encyclopedie",
   settings: "settings",
@@ -98,6 +100,9 @@ function tabColor(i: number, n: number): string {
 // Tab onthouden tussen sessies — bij refresh blijf je op dezelfde tab.
 const TAB_KEY = "xinix_active_tab_v1";
 function loadInitialTab(): Tab {
+  // Een link met #tab (bv. #dagadvies in een ntfy-melding) gaat voor.
+  const hash = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
+  if (hash && TABS.some((t) => t.key === hash)) return hash as Tab;
   try {
     const saved = sessionStorage.getItem(TAB_KEY);
     // settings/status staan niet meer in de tabbalk maar zijn nog wel geldige
@@ -114,6 +119,8 @@ export function App() {
   const setTab = (t: Tab) => {
     setTabRaw(t);
     try { sessionStorage.setItem(TAB_KEY, t); } catch { /* ignore */ }
+    // De #tab uit een meldingslink is gebruikt; anders opent herladen weer dat tabblad.
+    if (window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
   };
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -132,9 +139,14 @@ export function App() {
     let list = [...TABS];
     if (uiSettings?.tab_order && uiSettings.tab_order.length > 0) {
       const order = uiSettings.tab_order.filter((k) => TABS.some((t) => t.key === k));
-      const ordered = order.map((k) => TABS.find((t) => t.key === k)!).filter(Boolean);
-      const missing = TABS.filter((t) => !order.includes(t.key));
-      list = [...ordered, ...missing];
+      list = order.map((k) => TABS.find((t) => t.key === k)!).filter(Boolean);
+      // Een nieuw tabblad dat nog niet in de opgeslagen volgorde staat, komt
+      // naast zijn buurman uit de standaardvolgorde (Dagadvies naast Favorieten).
+      TABS.forEach((t, i) => {
+        if (order.includes(t.key)) return;
+        const prev = i > 0 ? list.findIndex((x) => x.key === TABS[i - 1].key) : -1;
+        list.splice(prev >= 0 ? prev + 1 : list.length, 0, t);
+      });
     }
     const labels = uiSettings?.tab_labels ?? {};
     list = list.map((t) => labels[t.key] ? { ...t, label: labels[t.key] } : t);
@@ -405,6 +417,7 @@ export function App() {
           {tab === "hikkertjes" && <HikkertjesView />}
           {tab === "zwitserleven" && <ZwitserlevenView />}
           {tab === "favorieten" && <FavorietenView initialDashboard={data} initialScans={scans} />}
+          {tab === "dagadvies" && <DagadviesView />}
           {tab === "status" && <HealthView />}
           {tab === "encyclopedie" && <EncyclopedieView />}
           <HelpPanel pageId={HELP_PAGE[tab]} />

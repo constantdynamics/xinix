@@ -1445,3 +1445,89 @@ export async function tempListAction(ticker: string, action: "restore" | "remove
   });
   if (!res.ok) throw new Error(`${action === "restore" ? "terugzetten" : "verwijderen"} mislukt (${res.status}): ${await res.text()}`);
 }
+
+// ── Dagadvies (xinix-advice) ─────────────────────────────────────────────
+// Papieren portefeuille van €10.000 bij DEGIRO: 'live' krijgt de meldingen en
+// volgt de bron met het beste track record; de vijf schaduwboeken draaien
+// dezelfde regels als meetlat.
+export interface AdviceBook {
+  book: string; label: string; source: string; source_since: string;
+  cash_eur: number; start_eur: number; started_at: string;
+  fees_eur: number; fx_cost_eur: number; tax_eur: number; connect_eur: number;
+  last_daily_at: string | null; last_select_at: string | null;
+  equity_eur: number; invested_eur: number; reserved_eur: number;
+  return_pct: number; month_return_pct: number | null;
+  positions: number; open_orders: number; closed_trades: number; wins: number;
+  realized_eur: number; costs_eur: number;
+}
+export interface AdviceOrder {
+  id: number; book: string; ticker: string; company: string | null; market: string; exchange: string; currency: string;
+  limit_price: number; qty: number; reserved_eur: number; close_at: number | null; watch_limit: number | null;
+  buy_limit_now: number | null; last_close: number | null; conviction: number | null; source: string | null;
+  reason: string | null; valid_from: string; created_at: string; misses: number;
+}
+export interface AdvicePosition {
+  id: number; book: string; ticker: string; company: string | null; market: string; exchange: string; currency: string;
+  qty: number; entry_price: number; cost_eur: number; stop_price: number | null; high_price: number | null;
+  price: number; value_eur: number; pnl_eur: number; pnl_pct: number; days: number; stop_pct: number | null;
+  source: string | null; conviction: number | null; reason: string | null; opened_at: string;
+  exit_pending: string | null; exit_pending_at: string | null; last_price_at: string | null;
+}
+export interface AdviceClosed {
+  book: string; ticker: string; company: string | null; exchange: string; currency: string; qty: number;
+  entry_price: number; exit_price: number | null; cost_eur: number; proceeds_eur: number | null;
+  pnl_eur: number | null; pnl_pct: number | null; exit_reason: string | null; opened_at: string; closed_at: string;
+  source: string | null;
+}
+export interface AdviceEvent {
+  id: number; book: string; at: string; kind: string; ticker: string | null; message: string; urgent: boolean;
+  payload: Record<string, unknown> | null; notified_at: string | null;
+}
+export interface AdviceRules {
+  cash_floor_pct: number; max_weight_pct: number; stop_pct: number; trail_from_pct: number;
+  time_exit_days: number; time_exit_min_gain_pct: number; max_hold_days: number;
+  limit_below_close_pct: number; max_limit_gap_pct: number; order_days: number;
+  min_dollar_volume: number; min_order_eur: number; autofx_pct: number; connect_eur: number; digest_hour_utc: number;
+}
+export interface AdviceResponse {
+  books: AdviceBook[];
+  orders: AdviceOrder[];
+  positions: AdvicePosition[];
+  closed: AdviceClosed[];
+  events: AdviceEvent[];
+  equity: Record<string, Array<{ date: string; equity_eur: number }>>;
+  settings: { advice_notify: boolean; ntfy_configured: boolean; quiet_hours_start: number | null; quiet_hours_end: number | null };
+  fx: { as_of: string | null; rates: Record<string, number | null> };
+  sources: Array<{ key: string; label: string }>;
+  rules: AdviceRules;
+  generated_at: string;
+}
+export async function fetchAdvice(): Promise<AdviceResponse> {
+  const res = await fetch(apiUrl("/api/xinix-advice"), { cache: "no-store" });
+  if (!res.ok) throw new Error(`xinix-advice ${res.status}`);
+  return (await res.json()) as AdviceResponse;
+}
+async function adviceAction(body: Record<string, unknown>): Promise<void> {
+  const res = await fetch(apiUrl("/api/xinix-advice"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`mislukt (${res.status}): ${await res.text()}`);
+}
+export function adviceRaiseLimit(ticker: string, limit: number): Promise<void> {
+  return adviceAction({ action: "raise_limit", ticker, limit });
+}
+export function adviceSetNotify(on: boolean): Promise<void> {
+  return adviceAction({ action: "notify", on });
+}
+/** Koersen nu controleren (vullingen, stops, nieuws) in plaats van op het volgende kwartier te wachten. */
+export async function triggerAdviceWatch(): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch(apiUrl("/api/xinix-advice?mode=watch"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: "{}",
+  });
+  if (!res.ok) throw new Error(`controle mislukt (${res.status}): ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; message?: string };
+}
