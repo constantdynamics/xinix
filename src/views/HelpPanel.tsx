@@ -742,6 +742,49 @@ export const PAGE_HELP: Record<string, PageHelp> = {
     ],
   },
 
+  dagadvies: {
+    intro:
+      "Een papieren portefeuille van €10.000 bij DEGIRO die elke werkdag advies geeft: wat je koopt, tegen welke limiet, waar je stop-loss staat en wanneer je verkoopt. Jij voert het uit bij DEGIRO; de meldingen vertellen je wanneer.",
+    blocks: [
+      {
+        id: "adv-dag",
+        title: "Het ritme van een dag",
+        body:
+          "Na de Amerikaanse slotbel (23:10 UTC) rekent Xinix alles door: wisselkoersen, kandidaten, verlopen orders, tijd-exits. Om 06:00 UTC krijg je één melding met de kooporders van die dag, met aantal, limiet en wanneer je ze moet plaatsen.\nTijdens de handelsdag wordt elk kwartier gekeken of een limiet geraakt is (dan: 'zet nu je stop-loss'), of een stop omhoog kan, of een stop geraakt is en of er slecht nieuws is. Zulke meldingen komen meteen, maar niet in je stille uren.",
+      },
+      {
+        id: "adv-bronnen",
+        title: "Vijf bronnen, de data kiest",
+        body:
+          "Mix (alle bronnen samen: hoe meer bronnen hetzelfde aandeel aanwijzen, hoe groter de positie), Potje-toppers (wat de tien beste strategieën van de laatste 60 dagen net kochten), Hippos (kans op +50% binnen 14 dagen), Sprinters (≥4★-favorieten, model × nieuws) en Signalen (score + positieve signalen rond de aankooplimiet).\nElke bron heeft een eigen schaduwportefeuille van €10.000 met exact dezelfde regels en kosten. Begin van elke maand volgt jouw advies de bron met het beste rendement over de laatste drie maanden, als die minstens 20 handelsdagen en 3 afgesloten trades heeft en 2 procentpunt beter is dan de huidige.",
+      },
+      {
+        id: "adv-orders",
+        title: "Kooporders en limieten",
+        body:
+          "Elke order is een GTC-limietorder op je watchlist-limiet, maar minstens 3% onder de slotkoers. Ligt die limiet meer dan 15% onder de koers, dan komt er geen order (die vult toch niet) maar een tip onder 'Limiet verhogen?'. Daar kun je met één klik je watchlist-limiet verhogen; de volgende dagrun rekent er dan mee.\nEen order vervalt na 10 handelsdagen zonder vulling, of als het aandeel drie dagen op rij geen kandidaat meer is. Een vulling telt pas als de koers de limiet echt raakt in een sessie nadat je de order kon plaatsen.",
+      },
+      {
+        id: "adv-exits",
+        title: "Stop-loss en verkopen",
+        body:
+          "Direct na een aankoop zet je een GTC stop-loss op −20%. Staat het aandeel 25% hoger dan de instap, dan gaat de stop naar break-even en daarna mee: 20% onder de top, vanaf +50% 15% en vanaf +100% 12%. Voor elke verhoging van minstens 8% krijg je een melding.\nNa 30 handelsdagen verkoop je als hij niet minstens 10% hoger staat, na 60 handelsdagen hoe dan ook. Bij slecht nieuws (aandelenuitgifte, faillissement, mislukte studie, delisting) verkoop je meteen. Bij DEGIRO moet je daarvoor eerst je stop-loss annuleren.",
+      },
+      {
+        id: "adv-kosten",
+        title: "Kosten en valuta",
+        body:
+          "Alles staat in euro, na aftrek van de DEGIRO-kosten: VS en Canada €2 per order, Europa, Londen en Azië €4,90, Australië €5, plus 0,25% AutoFX bij elke omwisseling (bij kopen én verkopen), €2,50 aansluitkosten per beurs per jaar en 0,5% zegelrecht bij aankoop in Londen. Wisselkoersen komen dagelijks van de ECB.",
+      },
+      {
+        id: "adv-grenzen",
+        title: "Waar het advies zich aan houdt",
+        body:
+          "Alleen aandelen uit je actieve watchlist, op beurzen die DEGIRO aanbiedt (geen OTC en geen Hongkong) en met minstens $250.000 omzet per dag. Positiegrootte naar overtuiging: 10, 15 of 20% van de portefeuille, nooit meer dan 20% per aandeel en altijd minstens 20% cash. Open orders houden hun bedrag vast, net als bij DEGIRO.",
+      },
+    ],
+  },
+
   settings: {
     intro: "Hier stel je in waar en wanneer je notificaties krijgt, en welke aandelen wél een melding waard zijn.",
     blocks: [
