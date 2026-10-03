@@ -99,17 +99,21 @@ function tabColor(i: number, n: number): string {
 
 // Tab onthouden tussen sessies — bij refresh blijf je op dezelfde tab.
 const TAB_KEY = "xinix_active_tab_v1";
+// settings/status staan niet meer in de tabbalk maar zijn nog wel geldige
+// routes (bereikbaar via de bovenbalk) — dus expliciet toelaten.
+function asTab(s: string | null): Tab | null {
+  if (!s) return null;
+  return TABS.some((t) => t.key === s) || s === "settings" || s === "status" ? (s as Tab) : null;
+}
 function loadInitialTab(): Tab {
-  // Een link met #tab (bv. #dagadvies in een ntfy-melding) gaat voor.
-  const hash = typeof window !== "undefined" ? window.location.hash.slice(1) : "";
-  if (hash && TABS.some((t) => t.key === hash)) return hash as Tab;
+  // Een link met ?tab= of #tab (bv. ?tab=dagadvies in een ntfy-melding) gaat voor.
+  if (typeof window !== "undefined") {
+    const fromUrl = asTab(new URLSearchParams(window.location.search).get("tab")) ?? asTab(window.location.hash.slice(1));
+    if (fromUrl) return fromUrl;
+  }
   try {
-    const saved = sessionStorage.getItem(TAB_KEY);
-    // settings/status staan niet meer in de tabbalk maar zijn nog wel geldige
-    // routes (bereikbaar via de bovenbalk) — dus expliciet toelaten.
-    if (saved && (TABS.some((t) => t.key === saved) || saved === "settings" || saved === "status")) {
-      return saved as Tab;
-    }
+    const saved = asTab(sessionStorage.getItem(TAB_KEY));
+    if (saved) return saved;
   } catch { /* SSR/restricted */ }
   return "favorieten";
 }
@@ -119,9 +123,19 @@ export function App() {
   const setTab = (t: Tab) => {
     setTabRaw(t);
     try { sessionStorage.setItem(TAB_KEY, t); } catch { /* ignore */ }
-    // De #tab uit een meldingslink is gebruikt; anders opent herladen weer dat tabblad.
-    if (window.location.hash) history.replaceState(null, "", window.location.pathname + window.location.search);
+    // De ?tab=/#tab uit een meldingslink is gebruikt; anders opent herladen weer dat tabblad.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("tab") || url.hash) {
+      url.searchParams.delete("tab");
+      history.replaceState(null, "", url.pathname + url.search);
+    }
   };
+  // Staat Xinix al open en tik je op een melding met #tab, dan laadt de pagina niet opnieuw.
+  useEffect(() => {
+    const onHash = () => { const t = asTab(window.location.hash.slice(1)); if (t) setTabRaw(t); };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
