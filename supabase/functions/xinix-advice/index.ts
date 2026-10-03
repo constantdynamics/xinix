@@ -33,6 +33,7 @@
 //   nadat je de order kon plaatsen (de dagmelding komt om 06:00 UTC). De Potje-
 //   sim kocht tegen de slotkoers van de vorige dag, wat te gunstig bleek (ZYBT).
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { publishNtfy } from "../_shared/ntfy.ts";
 
 type SB = SupabaseClient;
 type Json = Record<string, unknown>;
@@ -69,7 +70,9 @@ const SELECT_MIN_DAYS = 20;
 const SELECT_MIN_TRADES = 3;
 const HIPPO_CEILING_FALLBACK = 13;
 const SPRINT_CEILING_FALLBACK = 21.8;
-const APP_URL = "https://constantdynamics.github.io/xinix/#dagadvies";
+// ?tab= laadt de pagina altijd opnieuw (een #hash niet als Xinix al openstaat);
+// de #hash erbij werkt ook met een oudere build die ?tab= nog niet kent.
+const APP_URL = "https://constantdynamics.github.io/xinix/?tab=dagadvies#dagadvies";
 
 const SOURCES = ["mix", "potje", "hippo", "sprint", "signaal"] as const;
 type Source = typeof SOURCES[number];
@@ -754,18 +757,29 @@ function inQuiet(st: Json, ms: number): boolean {
   const h = new Date(ms).getUTCHours();
   return a < b ? h >= a && h < b : h >= a || h < b;
 }
-async function sendNtfy(server: string, topic: string, title: string, body: string, priority: number): Promise<string | null> {
-  const res = await fetch(server.replace(/\/$/, ""), {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, title, message: body, priority, tags: ["briefcase"], click: APP_URL }),
+function sendNtfy(ctx: Ctx, server: string, topic: string, title: string, body: string, priority: number): Promise<string | null> {
+  return publishNtfy(ctx.s, server, {
+    topic, title, message: body, priority, tags: ["briefcase"], click: APP_URL,
+    actions: [{ action: "view", label: "Alle adviezen", url: APP_URL, clear: true }],
   });
-  return res.ok ? null : `ntfy ${res.status}: ${await res.text()}`;
+}
+/** Eén regel met de hele portefeuille, zodat een melding over één aandeel niet het hele advies lijkt. */
+function bookSummary(ctx: Ctx): string {
+  const b = ctx.books.get("live");
+  if (!b) return "";
+  const { equity } = equityOf(ctx, "live");
+  const held = ctx.positions.filter((p) => p.book === "live" && !p.closed_at).map((p) => p.ticker);
+  const open = ctx.orders.filter((o) => o.book === "live" && o.status === "open").map((o) => o.ticker);
+  return `📋 Portefeuille ${fmtEur(equity)} (${fmtPct((equity / b.start_eur - 1) * 100)}) · ` +
+    `posities: ${held.length ? held.join(", ") : "geen"} · orders: ${open.length ? open.join(", ") : "geen"}. ` +
+    "Tik op deze melding voor alle adviezen.";
 }
 function composeBody(lines: string[]): string {
   const out: string[] = [];
   let len = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (len + lines[i].length > 3600) { out.push(`… en ${lines.length - i} meer in het tabblad Dagadvies.`); break; }
+    // ntfy maakt van een bericht boven 4096 bytes een bijlage; ruimte laten voor de stand eronder.
+    if (len + lines[i].length > 3000) { out.push(`… en ${lines.length - i} meer in het tabblad Dagadvies.`); break; }
     out.push(lines[i]); len += lines[i].length + 2;
   }
   return out.join("\n\n");
@@ -788,16 +802,17 @@ async function sendPending(ctx: Ctx): Promise<number> {
   let sent = 0;
   const urgent = fresh.filter((e) => e.urgent);
   const digest = fresh.filter((e) => !e.urgent && nextDigest(Date.parse(String(e.at))) <= ctx.now);
+  const summary = bookSummary(ctx);
+  const withSummary = (lines: string[]) => composeBody(lines) + (summary ? `\n\n${summary}` : "");
   if (urgent.length) {
-    const err = await sendNtfy(server, topic, `💼 Dagadvies: nu doen (${urgent.length})`, composeBody(urgent.map((e) => String(e.message))), 5);
+    const err = await sendNtfy(ctx, server, topic, `💼 Dagadvies: nu doen (${urgent.length})`, withSummary(urgent.map((e) => String(e.message))), 5);
     if (err) ctx.errors.push(err); else { await mark(urgent.map((e) => Number(e.id))); sent++; }
   }
   if (digest.length) {
     const orders = digest.filter((e) => e.kind === "order_new").length;
     const title = `💼 Dagadvies ${new Date(ctx.now).toLocaleDateString("nl-NL", { day: "numeric", month: "long", timeZone: "Europe/Amsterdam" })}` +
       (orders ? ` — ${orders} kooporder${orders === 1 ? "" : "s"}` : "");
-    const lines = digest.map((e) => String(e.message));
-    const err = await sendNtfy(server, topic, title, composeBody(lines), 4);
+    const err = await sendNtfy(ctx, server, topic, title, withSummary(digest.map((e) => String(e.message))), 4);
     if (err) ctx.errors.push(err); else { await mark(digest.map((e) => Number(e.id))); sent++; }
   }
   bump(ctx, "notified", sent);
