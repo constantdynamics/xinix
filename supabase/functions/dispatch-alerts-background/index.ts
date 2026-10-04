@@ -87,11 +87,16 @@ async function sendEmail(to: string, subject: string, text: string): Promise<{ o
   const html = `<!DOCTYPE html><html><body style="font-family:monospace;font-size:13px;white-space:pre-wrap;max-width:680px">${
     esc(text).replace(/https?:\/\/[^\s<"]+/g, u => `<a href="${u}" style="color:#3b82f6">${u}</a>`)
   }</body></html>`;
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to, subject, text, html }),
-  });
+  let res: Response;
+  try {
+    res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to, subject, text, html }),
+    });
+  } catch (e) {
+    return { ok: false, error: `Resend: ${e instanceof Error ? e.message : String(e)}` };
+  }
   if (!res.ok) { const body = await res.text(); return { ok: false, error: `Resend ${res.status}: ${body}` }; }
   return { ok: true };
 }
@@ -100,7 +105,7 @@ async function sendEmail(to: string, subject: string, text: string): Promise<{ o
 // notification clients .TO / .V / .AX niet als TLD herkennen en
 // auto-linkificeren. Visueel onzichtbaar.
 function safeTickerDisplay(ticker: string): string {
-  return ticker.replace(/\./g, "​.");
+  return ticker.replace(/\./g, "\u200B.");
 }
 
 async function sendNtfy(server: string, topic: string, title: string, body: string, priority: number, tags: string[], clickUrl: string | null): Promise<{ ok: boolean; error?: string }> {
@@ -108,11 +113,17 @@ async function sendNtfy(server: string, topic: string, title: string, body: stri
   if (clickUrl) {
     payload.click = clickUrl;
   }
-  const res = await fetch(server.replace(/\/$/, ""), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  // Een netwerkfout telt als mislukte push, zodat de mail het vangnet kan zijn.
+  let res: Response;
+  try {
+    res = await fetch(server.replace(/\/$/, ""), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    return { ok: false, error: `ntfy: ${e instanceof Error ? e.message : String(e)}` };
+  }
   if (!res.ok) { const text = await res.text(); return { ok: false, error: `ntfy ${res.status}: ${text}` }; }
   return { ok: true };
 }
@@ -478,19 +489,24 @@ Deno.serve(runBackground("dispatch-alerts", async () => {
     }
     if (nearLimit) nearLimitAlerts++;
 
+    // Mail is alleen een vangnet (keuze gebruiker, 2026-10-04): eerst de push,
+    // en pas als die niet lukt (of er geen topic is) dezelfde melding per mail.
     let anyAttempted = false;
     let anySent = false;
-    if (s.email) {
-      anyAttempted = true;
-      const r = await sendEmail(s.email, `[XINIX] ${view.title}`, `${view.body}\nDetected: ${sig.detected_at}`);
-      await sb.from("signal_alerts_sent").insert({ signal_id: sig.id, channel: "email", success: r.ok, error: r.error ?? null });
-      if (r.ok) { sentEmail++; anySent = true; } else errors.push(`email ${sig.id}: ${r.error}`);
-    }
     if (s.ntfy_topic) {
       anyAttempted = true;
       const r = await sendNtfy(s.ntfy_server, s.ntfy_topic, view.title, view.body, view.priority, view.tags, reviewUrl(sig.ticker));
       await sb.from("signal_alerts_sent").insert({ signal_id: sig.id, channel: "ntfy", success: r.ok, error: r.error ?? null });
       if (r.ok) { sentNtfy++; anySent = true; } else errors.push(`ntfy ${sig.id}: ${r.error}`);
+    }
+    if (!anySent && s.email) {
+      anyAttempted = true;
+      const why = s.ntfy_topic
+        ? "Deze melding kon niet als pushmelding worden verstuurd, daarom krijg je hem per mail."
+        : "Er is geen ntfy-topic ingesteld, daarom krijg je deze melding per mail.";
+      const r = await sendEmail(s.email, `[XINIX] ${view.title}`, `${why}\n\n${view.body}\nDetected: ${sig.detected_at}`);
+      await sb.from("signal_alerts_sent").insert({ signal_id: sig.id, channel: "email", success: r.ok, error: r.error ?? null });
+      if (r.ok) { sentEmail++; anySent = true; } else errors.push(`email ${sig.id}: ${r.error}`);
     }
     // Leg de melding vast in het centrale grootboek, zodat de cooldown-poort
     // (hier én in de andere meldingsfuncties) dit aandeel nu even overslaat.
