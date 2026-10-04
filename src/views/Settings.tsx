@@ -109,6 +109,11 @@ export function SettingsView({ data }: { data?: Dashboard }) {
             placeholder="jij@voorbeeld.nl"
             className="w-full"
           />
+          <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+            Signaalmeldingen komen alleen per mail als de pushmelding niet lukt; herstellinks voor je wachtwoord
+            gaan wel per mail. Resend draait in testmodus en mailt alleen naar het adres van het Resend-account,
+            dus laat dat adres hier staan.
+          </p>
         </Field>
 
         <Field label="ntfy.sh topic (telefoon push)">
