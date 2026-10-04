@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchSettings, fetchUiSettings, saveSettings, saveUiSettings, unbenchAll, getToken, runDataExport, downloadDataExport } from "../api";
 import { DEFAULT_TABS, type Tab, type TabDef } from "../tabsConfig";
 import type { Settings, Severity, Dashboard } from "../types";
+import { fetchDevices, getDeviceId, getDeviceToken, logout, requestReset, revokeDevice, type AuthDevice, type AuthFailure } from "../auth";
 import {
   loadTilePrefs,
   saveTilePrefs,
@@ -139,6 +140,12 @@ export function SettingsView({ data }: { data?: Dashboard }) {
             onChange={(e) => setS({ ...s, ntfy_server: e.target.value })}
             className="w-full"
           />
+          {s.ntfy_server.includes("/functions/v1/xinix-ntfy") && (
+            <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+              Laat dit zo staan: meldingen lopen via Xinix' eigen doorgeefluik. Dat stuurt ze door naar ntfy.sh,
+              omzeilt de daglimiet van ntfy.sh en laat een tik op een melding het Dagadvies openen.
+            </p>
+          )}
         </Field>
 
         <div className="grid grid-cols-2 gap-3">
@@ -396,6 +403,8 @@ export function SettingsView({ data }: { data?: Dashboard }) {
         </div>
       </Card>
 
+      <DevicesCard />
+
       <TilePrefsCard />
 
       <TabsCustomizerCard />
@@ -478,6 +487,124 @@ function fmtAgo(iso: string | null | undefined): string {
   if (h < 1) return `${Math.floor(ms / 60000)} min geleden`;
   if (h < 48) return `${h} uur geleden`;
   return `${Math.floor(h / 24)} dagen geleden`;
+}
+
+const fmtWhen = (iso: string) =>
+  new Date(iso).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+// Inlogpagina: waar Xinix op ingelogd is, met intrekken per apparaat.
+function DevicesCard() {
+  const [data, setData] = useState<{ devices: AuthDevice[]; failures: AuthFailure[] } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState<number | "reset" | null>(null);
+  const me = getDeviceId();
+
+  const load = () =>
+    fetchDevices()
+      .then(setData)
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+  useEffect(() => { load(); }, []);
+
+  async function revoke(d: AuthDevice) {
+    if (!confirm(`${d.name} uitloggen? Daar moet dan opnieuw het wachtwoord ingevuld worden.`)) return;
+    setBusy(d.id); setErr(null); setMsg(null);
+    try {
+      await revokeDevice(d.id);
+      if (d.id === me) { await logout(); location.reload(); return; }
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function sendReset() {
+    setBusy("reset"); setErr(null); setMsg(null);
+    try {
+      const r = await requestReset();
+      setMsg(r.channel === "email"
+        ? `Herstellink gemaild${r.to ? ` naar ${r.to}` : ""}; hij werkt een uur.`
+        : `Herstellink als pushmelding verstuurd, want ${r.emailProblem ?? "e-mail lukte niet"}; hij werkt een uur.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function signOut() {
+    await logout();
+    location.reload();
+  }
+
+  const active = (data?.devices ?? []).filter((d) => !d.revoked_at);
+  const revoked = (data?.devices ?? []).filter((d) => d.revoked_at).slice(0, 10);
+
+  return (
+    <div className="space-y-3">
+      <SectionHeader
+        eyebrow="Beveiliging"
+        title="Apparaten"
+        subtitle="Waar Xinix op ingelogd is. Een apparaat blijft bekend tot je het hier intrekt."
+      />
+      <Card className="p-4 space-y-3 text-sm">
+        {!data && !err && <p className="text-neutral-500 text-xs">Laden…</p>}
+        {data && active.length === 0 && <p className="text-neutral-400 text-xs">Nog geen ingelogde apparaten.</p>}
+        {active.length > 0 && (
+          <ul className="divide-y divide-ink-5">
+            {active.map((d) => (
+              <li key={d.id} className="py-2 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-neutral-100 truncate">
+                    {d.name}
+                    {d.id === me && <span className="ml-2 text-[10px] uppercase tracking-wide text-fog-lime">dit apparaat</span>}
+                  </div>
+                  <div className="text-[11px] text-neutral-500">
+                    ingelogd {fmtWhen(d.created_at)} · laatst gezien {fmtAgo(d.last_seen_at)}{d.ip ? ` · IP ${d.ip}` : ""}
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => revoke(d)} disabled={busy !== null}>
+                  {busy === d.id ? "Bezig…" : "Intrekken"}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {revoked.length > 0 && (
+          <details className="text-xs text-neutral-500">
+            <summary className="cursor-pointer select-none">Ingetrokken ({revoked.length})</summary>
+            <ul className="mt-1 space-y-0.5">
+              {revoked.map((d) => (
+                <li key={d.id}>{d.name} · ingetrokken {fmtWhen(d.revoked_at!)}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {data && data.failures.length > 0 && (
+          <details className="text-xs text-neutral-500">
+            <summary className="cursor-pointer select-none">Foute wachtwoorden, laatste 30 dagen ({data.failures.length})</summary>
+            <ul className="mt-1 space-y-0.5">
+              {data.failures.map((f, i) => (
+                <li key={i}>{fmtWhen(f.at)} · {f.device ?? "onbekend apparaat"}{f.ip ? ` · IP ${f.ip}` : ""}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button size="sm" onClick={sendReset} disabled={busy !== null}>
+            {busy === "reset" ? "Bezig…" : "Wachtwoord wijzigen (herstellink)"}
+          </Button>
+          {getDeviceToken() && (
+            <Button size="sm" variant="ghost" onClick={signOut} disabled={busy !== null}>
+              Uitloggen op dit apparaat
+            </Button>
+          )}
+        </div>
+        {msg && <p className="text-fog-lime text-xs">{msg}</p>}
+        {err && <p className="text-fog-loss text-xs">{err}</p>}
+      </Card>
+    </div>
+  );
 }
 
 function ScanRulesCard({ data }: { data: Dashboard }) {
