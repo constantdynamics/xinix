@@ -147,8 +147,8 @@ export function SettingsView({ data }: { data?: Dashboard }) {
           />
           {s.ntfy_server.includes("/functions/v1/xinix-ntfy") && (
             <p className="text-xs text-neutral-500 mt-1.5 leading-relaxed">
-              Laat dit zo staan: meldingen lopen via Xinix' eigen doorgeefluik. Dat stuurt ze door naar ntfy.sh,
-              omzeilt de daglimiet van ntfy.sh en laat een tik op een melding het Dagadvies openen.
+              Laat dit zo staan: meldingen lopen via Xinix' eigen doorgeefluik. Dat stuurt ze ongewijzigd door
+              naar ntfy.sh en omzeilt de daglimiet van ntfy.sh.
             </p>
           )}
         </Field>
