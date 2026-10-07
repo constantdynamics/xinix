@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ScanResults, StarScanEntry, StarArchetype } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
+import { CryptoBadge, useCryptoLabels } from "../components/CryptoBadge";
 import { Card, Stat, CollapsibleIntro } from "../components/ui";
 import { useMarks } from "../hooks/useMarks";
 import { HeartCell, HeartHeader, SeenCell, SeenHeader, ShowSeenToggle, StarRating } from "../components/MarkCells";
@@ -280,6 +281,7 @@ export function StarScannerView({ scans }: { scans: ScanResults | null }) {
 }
 
 function StarRow({ r, rank, onCompanyClick }: { r: StarScanEntry; rank: number; onCompanyClick: () => void }) {
+  const cryptoLabels = useCryptoLabels();
   return (
     <tr>
       <td className="px-2 py-2 text-right font-mono tabular-nums text-neutral-500 text-xs">{rank}</td>
@@ -290,6 +292,7 @@ function StarRow({ r, rank, onCompanyClick }: { r: StarScanEntry; rank: number; 
         <a href={googleFinanceUrl(r.ticker, r.exchange)} target="_blank" rel="noreferrer" className="font-mono font-semibold tab-accent-text hover:underline">
           {r.ticker}
         </a>
+        <CryptoBadge cat={cryptoLabels[r.ticker.toUpperCase()]} />
         {isNew(r.first_seen_at) && (
           <span className="ml-1.5 px-1 py-0.5 rounded bg-fog-lime/15 text-fog-lime text-[9px] font-bold align-middle">NIEUW</span>
         )}

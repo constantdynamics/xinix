@@ -28,6 +28,8 @@ import { HipposView } from "./Hippos";
 import { SprintersView } from "./Sprinters";
 import { TempListView } from "./TempList";
 import { StarScannerView } from "./StarScanner";
+import { CryptoView } from "./Crypto";
+import { CryptoBadge, useCryptoLabels } from "../components/CryptoBadge";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
 
@@ -86,7 +88,8 @@ const OPLOPEND_EERST = new Set<SortKey>(["ticker", "company", "chg_1d", "chg_1w"
 const VIEW_KEY = "xinix_favorieten_view";
 const SUBTAB_KEY = "xinix_favorieten_subtab";
 
-type FavSubTab = "lijst" | "verdubbelaars" | "hippos" | "sprinters" | "scanner" | "tijdelijk";
+type FavSubTab = "lijst" | "verdubbelaars" | "hippos" | "sprinters" | "scanner" | "tijdelijk" | "crypto";
+const SUBTABS: FavSubTab[] = ["lijst", "verdubbelaars", "hippos", "sprinters", "scanner", "tijdelijk", "crypto"];
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
@@ -203,6 +206,7 @@ interface FavorietenViewProps {
 
 export function FavorietenView({ initialDashboard, initialScans }: FavorietenViewProps = {}) {
   const marks = useMarks();
+  const cryptoLabels = useCryptoLabels();
   const [dashboard, setDashboard] = useState<Dashboard | null>(initialDashboard ?? null);
   const [scans, setScans] = useState<ScanResults | null>(initialScans ?? null);
   const [loading, setLoading] = useState(!(initialDashboard && initialScans));
@@ -223,9 +227,11 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
     setViewMode(v);
     localStorage.setItem(VIEW_KEY, v);
   }
+  // Een meldingslink kan een sub-tabblad kiezen (?tab=favorieten&sub=crypto), anders het laatst gekozen.
   const [subTab, setSubTab] = useState<FavSubTab>(() => {
-    const saved = localStorage.getItem(SUBTAB_KEY);
-    return saved === "verdubbelaars" || saved === "hippos" || saved === "sprinters" || saved === "scanner" || saved === "tijdelijk" ? saved : "lijst";
+    const fromUrl = new URLSearchParams(window.location.search).get("sub");
+    const saved = fromUrl ?? localStorage.getItem(SUBTAB_KEY);
+    return SUBTABS.includes(saved as FavSubTab) ? (saved as FavSubTab) : "lijst";
   });
   function pickSubTab(v: FavSubTab) {
     setSubTab(v);
@@ -493,6 +499,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           <a href={googleFinanceUrl(r.ticker, r.exchange)} target="_blank" rel="noreferrer" className="font-mono font-semibold tab-accent-text hover:underline">
             {r.ticker}
           </a>
+          <CryptoBadge cat={cryptoLabels[r.ticker.toUpperCase()]} />
         </td>
       ),
     },
@@ -756,7 +763,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
   return (
     <div className="space-y-4">
       {/* Sub-tabs binnen Favorieten: de lijst zelf + de verdubbel-analyse */}
-      <div className="flex items-center gap-1 border-b border-ink-5">
+      <div className="flex flex-wrap items-center gap-1 border-b border-ink-5">
         {([
           ["lijst", "♥ Lijst"],
           ["verdubbelaars", "🚀 Raketten"],
@@ -764,6 +771,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           ["sprinters", "⚡ Sprinters"],
           ["scanner", "🌟 Scanner"],
           ["tijdelijk", "🗂️ Tijdelijk"],
+          ["crypto", "🪙 Crypto"],
         ] as Array<[FavSubTab, string]>).map(([key, label]) => (
           <button
             key={key}
@@ -789,6 +797,8 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         <StarScannerView scans={scans} />
       ) : subTab === "tijdelijk" ? (
         <TempListView />
+      ) : subTab === "crypto" ? (
+        <CryptoView />
       ) : (
         <>
       <CollapsibleIntro title="Favorieten" icon={<GradientTabIcon tab="favorieten" />}>
@@ -1018,6 +1028,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
 // afstand tot limiet, medailles en bron-badges. Klik op de ticker opent
 // Google Finance; klik op de bedrijfsnaam opent de koersgrafiek.
 function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyClick: (r: FavRow) => void }) {
+  const cryptoLabels = useCryptoLabels();
   const marks = useMarks();
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
@@ -1039,6 +1050,7 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
                 className="font-mono font-bold text-sm tab-accent-text hover:underline truncate"
               >
                 {r.ticker}
+                <CryptoBadge cat={cryptoLabels[r.ticker.toUpperCase()]} />
               </a>
               <span className="flex items-center gap-1 shrink-0">
                 {r.favorited_at && (

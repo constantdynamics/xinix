@@ -8,7 +8,7 @@ import { useState } from "react";
 import { useMarks } from "../hooks/useMarks";
 
 // Variant 4: gevuld hart, currentColor zodat Tailwind hover-classes werken.
-function HeartIcon() {
+export function HeartIcon() {
   return (
     <svg viewBox="0 0 32 32" className="w-[1em] h-[1em]" aria-hidden="true">
       <path d="M16 27.5 C5 19.5,1 13,1 9 C1 4.5,4.5 2,8.5 2 C11.5 2,14 4,16 7.5 C18 4,20.5 2,23.5 2 C27.5 2,31 4.5,31 9 C31 13,27 19.5,16 27.5 Z" fill="currentColor"/>

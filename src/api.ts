@@ -1446,6 +1446,77 @@ export async function tempListAction(ticker: string, action: "restore" | "remove
   if (!res.ok) throw new Error(`${action === "restore" ? "terugzetten" : "verwijderen"} mislukt (${res.status}): ${await res.text()}`);
 }
 
+// ── Crypto (Favorieten → Crypto) ──────────────────────────────────────────
+// Wekelijkse scan door xinix-crypto: crypto-aandelen op de DEGIRO-beurzen die
+// minstens één keer +400% in een maand stegen, met een eigen score (nieuws over
+// een cryptostrategie, fase, explosies, omzet). Lezen is open, het hartje
+// (overnemen op de watchlist) vraagt het beheertoken.
+export type CryptoCat = "miner" | "treasury" | "exchange" | "tech";
+export interface CryptoNews { title: string; url: string | null; publisher: string | null; at: string; kind: string }
+export interface CryptoRow {
+  ticker: string;
+  tv_symbol: string | null;
+  market: string;
+  exchange: string | null;
+  name: string | null;
+  currency: string | null;
+  category: CryptoCat | null;
+  score: number | null;
+  best_score: number | null;
+  phase: string | null;
+  components: { nieuws: number; fase: number; explosie: number; omzet: number } | null;
+  close: number | null;
+  mcap_usd: number | null;
+  dollar_vol_usd: number | null;
+  perf_w: number | null;
+  perf_1m: number | null;
+  perf_3m: number | null;
+  perf_6m: number | null;
+  best_month_pct: number | null;
+  best_month_end: string | null;
+  months_400: number | null;
+  last_400_end: string | null;
+  news: CryptoNews[] | null;
+  in_watchlist: boolean;
+  no_sim: boolean;
+  first_seen_at: string;
+}
+export interface CryptoExcluded {
+  ticker: string;
+  name: string | null;
+  market: string;
+  category: CryptoCat | null;
+  reason: string | null;
+  best_month_pct: number | null;
+  mcap_usd: number | null;
+  dollar_vol_usd: number | null;
+}
+export interface CryptoResponse {
+  rows: CryptoRow[];
+  excluded: CryptoExcluded[];
+  last_run: { started_at: string; finished_at: string | null; ok: boolean | null; message: string | null } | null;
+}
+export async function fetchCrypto(): Promise<CryptoResponse> {
+  const res = await fetch(apiUrl("/api/xinix-crypto"));
+  if (!res.ok) throw new Error(`xinix-crypto ${res.status}`);
+  return (await res.json()) as CryptoResponse;
+}
+export async function fetchCryptoLabels(): Promise<Record<string, CryptoCat>> {
+  const res = await fetch(apiUrl("/api/xinix-crypto?labels=1"));
+  if (!res.ok) throw new Error(`xinix-crypto labels ${res.status}`);
+  return ((await res.json()) as { labels: Record<string, CryptoCat> }).labels;
+}
+/** Zet een aandeel uit het crypto-tabblad op de watchlist (met label, buiten het Potje en het Dagadvies). */
+export async function cryptoAdopt(ticker: string): Promise<{ ok: boolean; added: boolean }> {
+  const res = await fetch(apiUrl("/api/xinix-crypto"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ticker, action: "adopt" }),
+  });
+  if (!res.ok) throw new Error(`op de watchlist zetten mislukt (${res.status}): ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; added: boolean };
+}
+
 // ── Dagadvies (xinix-advice) ─────────────────────────────────────────────
 // Papieren portefeuille van €10.000 bij DEGIRO: 'live' krijgt de meldingen en
 // volgt de bron met het beste track record; de vijf schaduwboeken draaien
