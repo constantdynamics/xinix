@@ -133,7 +133,7 @@ async function run(): Promise<RunResult> {
     fetchAllPages((f, t) => sb.from("signal_price_summary")
       .select("ticker, last_close").order("ticker").range(f, t)),
     fetchAllPages((f, t) => sb.from("signal_tickers")
-      .select("ticker, company, sector, goud_score, buy_limit, active, price_benched, first_price_date")
+      .select("ticker, company, sector, goud_score, buy_limit, active, price_benched, first_price_date, no_sim")
       .eq("active", true).eq("price_benched", false).order("id").range(f, t)),
     // Alle actieve (niet-verlopen) signalen. Voorheen .limit(2000) terwijl er
     // ~7000 actief zijn: oudere-maar-geldige signalen vielen stilletjes weg uit
@@ -180,10 +180,11 @@ async function run(): Promise<RunResult> {
   for (const p of (summaryRes.data ?? [])) {
     if (p.last_close != null) priceByTicker.set(p.ticker as string, Number(p.last_close));
   }
-  const allTickers = (tickersRes.data ?? []) as Array<{
+  // Crypto-favorieten (hartje in het crypto-tabblad) koopt de papieren portefeuille niet.
+  const allTickers = ((tickersRes.data ?? []) as Array<{
     ticker: string; company: string | null; sector: string | null;
-    goud_score: number | null; buy_limit: number | null; first_price_date: string | null;
-  }>;
+    goud_score: number | null; buy_limit: number | null; first_price_date: string | null; no_sim: boolean | null;
+  }>).filter((t) => !t.no_sim);
   const signalsByTicker = new Map<string, Array<{ signal_type: string; severity: string }>>();
   for (const s of (signalsRes.data ?? [])) {
     const arr = signalsByTicker.get(s.ticker as string) ?? [];

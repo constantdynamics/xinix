@@ -789,7 +789,7 @@ interface OpenPos {
   entry_signal_types: string[];
   partial_exits: Array<{ qty_sold: number; net_proceeds: number; at: string; reason: string }>;
 }
-interface TickerRow { ticker: string; sector: string | null; goud_score: number | null; buy_limit: number | null; medal_gold: number | null; is_hikkertje: boolean | null; is_poefie: boolean | null; dividend_yield: number | null; first_price_date: string | null; }
+interface TickerRow { ticker: string; sector: string | null; goud_score: number | null; buy_limit: number | null; medal_gold: number | null; is_hikkertje: boolean | null; is_poefie: boolean | null; dividend_yield: number | null; first_price_date: string | null; no_sim: boolean | null; }
 interface SigRow { ticker: string; signal_type: string; severity: string; }
 
 Deno.serve(async (req) => {
@@ -851,7 +851,7 @@ async function run() {
       .select("id, strategy_id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, take_profit_price, entry_signal_types, partial_exits")
       .is("closed_at", null).order("id").range(f, t)),
     fetchAllPages((f, t) => sb.from("signal_tickers")
-      .select("ticker, sector, goud_score, buy_limit, medal_gold, is_hikkertje, is_poefie, dividend_yield, first_price_date")
+      .select("ticker, sector, goud_score, buy_limit, medal_gold, is_hikkertje, is_poefie, dividend_yield, first_price_date, no_sim")
       .eq("active", true).eq("price_benched", false).order("id").range(f, t)),
     fetchAllPages((f, t) => sb.from("signal_price_summary")
       .select("ticker, last_close").order("ticker").range(f, t)),
@@ -938,7 +938,8 @@ async function run() {
     return raw;
   }
 
-  const tickers = (tickersRes.data ?? []) as TickerRow[];
+  // Crypto-favorieten (hartje in het crypto-tabblad) koopt het Potje niet; open posities lopen gewoon af.
+  const tickers = ((tickersRes.data ?? []) as TickerRow[]).filter((t) => !t.no_sim);
   const sigsByTicker = new Map<string, SigRow[]>();
   for (const s of (signalsRes.data ?? []) as SigRow[]) {
     const arr = sigsByTicker.get(s.ticker) ?? [];

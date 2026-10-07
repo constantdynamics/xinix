@@ -115,3 +115,7 @@ td.col-tint,
 td.col-tint * {
   color: var(--col-tint) !important;
 }
+/* Het rode CRYPTO-label blijft rood, ook in een gekleurde kolom. */
+td.col-tint .crypto-badge {
+  color: #ef4444 !important;
+}

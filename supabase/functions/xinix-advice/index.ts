@@ -828,7 +828,7 @@ async function buildCandidates(ctx: Ctx): Promise<{ ranked: Record<Source, Cand[
   const s = ctx.s;
   const since7 = new Date(ctx.now - 7 * DAY).toISOString(), sinceBlock = new Date(ctx.now - BLOCK_DAYS * DAY).toISOString();
   const [tickers, summaries, hippo, hippoCal, sprint, sprintModel, potje, posSig, negSig, news, flags] = await Promise.all([
-    fetchAll<Json>(s, "signal_tickers", "ticker, company, sector, exchange, buy_limit, goud_score, price_currency, price_benched", "ticker", (q) => q.eq("active", true)),
+    fetchAll<Json>(s, "signal_tickers", "ticker, company, sector, exchange, buy_limit, goud_score, price_currency, price_benched, no_sim", "ticker", (q) => q.eq("active", true)),
     fetchAll<Json>(s, "signal_price_summary", "ticker, last_close, avg_volume_30d, updated_at", "ticker"),
     fetchAll<Json>(s, "xinix_hippo_scores", "ticker, prob, raw_prob, prob_21d, base_rate, tradeable", "ticker"),
     s.from("xinix_hippo_calibration").select("ceiling").eq("horizon", 14).maybeSingle(),
@@ -843,7 +843,8 @@ async function buildCandidates(ctx: Ctx): Promise<{ ranked: Record<Source, Cand[
     fetchAll<Json>(s, "xinix_price_flags", "ticker, resolved", "ticker", (q) => q.eq("resolved", false)),
   ]);
   if (potje.error) ctx.errors.push(`potje: ${potje.error.message}`);
-  const act = tickers.filter((t) => !t.price_benched);
+  // Crypto-favorieten (hartje in het crypto-tabblad) doen niet mee in het Dagadvies.
+  const act = tickers.filter((t) => !t.price_benched && !t.no_sim);
   const uni = await chunkedIn<Json>(s, "xinix_universe", "ticker, tv_symbol, market", act.map((t) => String(t.ticker)));
   const uniBy = new Map(uni.map((u) => [String(u.ticker), { tv_symbol: (u.tv_symbol as string) ?? null, market: (u.market as string) ?? null }]));
   const sumBy = new Map(summaries.map((r) => [String(r.ticker), r]));
