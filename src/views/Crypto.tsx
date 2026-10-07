@@ -91,7 +91,7 @@ function CatChip({ cat }: { cat: CryptoCat | null }) {
   );
 }
 
-export function CryptoView() {
+export function CryptoView({ onAdopted }: { onAdopted?: () => void }) {
   const marks = useMarks();
   const [data, setData] = useState<CryptoResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +143,7 @@ export function CryptoView() {
     try {
       const res = await cryptoAdopt(r.ticker);
       await marks.toggle("favorite", r.ticker);
+      onAdopted?.();
       setData((prev) => prev && { ...prev, rows: prev.rows.map((x) => (x.ticker === r.ticker ? { ...x, in_watchlist: true, no_sim: true } : x)) });
       toast(res.added ? `${r.ticker} staat nu op de watchlist en bij je favorieten` : `${r.ticker} is favoriet`);
     } catch (e) {

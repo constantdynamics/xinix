@@ -798,7 +798,8 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
       ) : subTab === "tijdelijk" ? (
         <TempListView />
       ) : subTab === "crypto" ? (
-        <CryptoView />
+        // Een nieuw aandeel staat pas in de favorietenlijst als het dashboard het kent; buiten de cache om herladen.
+        <CryptoView onAdopted={() => { fetchDashboard(true).then(setDashboard).catch(() => {}); }} />
       ) : (
         <>
       <CollapsibleIntro title="Favorieten" icon={<GradientTabIcon tab="favorieten" />}>
