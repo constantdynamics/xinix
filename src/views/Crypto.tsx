@@ -12,7 +12,7 @@ import { CRYPTO_CAT_LABEL, CRYPTO_CAT_UITLEG } from "../components/CryptoBadge";
 // alle DEGIRO-beurzen zonder OTC, minstens één keer +400% binnen een maand,
 // nieuws over een cryptostrategie weegt het zwaarst, beurswaarde ≥ $20 mln en
 // omzet ≥ $1 mln per dag. Hartje = favoriet en op de watchlist, maar niet in
-// het Potje en het Dagadvies; gezien = weg uit deze lijst.
+// het Potje en de papieren portefeuille; gezien = weg uit deze lijst.
 
 const CAT_TONE: Record<CryptoCat, string> = {
   miner: "border-amber-400/50 bg-amber-400/10 text-amber-300",
@@ -129,7 +129,7 @@ export function CryptoView({ onAdopted }: { onAdopted?: () => void }) {
       return by((r) => r.score) || by((r) => r.perf_1m);
     });
 
-  // Hartje = favoriet, en dan ook op de watchlist (maar niet in het Potje en het Dagadvies).
+  // Hartje = favoriet, en dan ook op de watchlist (maar niet in het Potje en de papieren portefeuille).
   async function heart(r: CryptoRow) {
     if (marks.isFavorite(r.ticker)) {
       await marks.toggle("favorite", r.ticker);
@@ -203,7 +203,7 @@ export function CryptoView({ onAdopted }: { onAdopted?: () => void }) {
         </ul>
         <p className="leading-relaxed mt-2">
           <b>Hartje</b>: favoriet en op de watchlist, met het rode CRYPTO-label, maar het aandeel doet <b>niet</b> mee in
-          het Potje en het Dagadvies. <b>Gezien</b> (verrekijker): weg uit deze lijst. Komt er een nieuwe kandidaat met
+          het Potje en de papieren portefeuille. <b>Gezien</b> (verrekijker): weg uit deze lijst. Komt er een nieuwe kandidaat met
           score 80 of hoger bij, dan krijg je een pushmelding (niet voor favorieten, gezien of gedempte aandelen).
         </p>
       </CollapsibleIntro>
@@ -260,7 +260,7 @@ export function CryptoView({ onAdopted }: { onAdopted?: () => void }) {
           <table className="w-full text-sm">
             <thead className="border-b border-ink-5/60 text-[11px] uppercase tracking-wider">
               <tr>
-                <th className="px-2 py-2 w-8" title="Favoriet: ook op de watchlist, maar niet in het Potje en het Dagadvies" />
+                <th className="px-2 py-2 w-8" title="Favoriet: ook op de watchlist, maar niet in het Potje en de papieren portefeuille" />
                 <th className="px-2 py-2 w-8" title="Gezien: weg uit deze lijst">
                   <span aria-hidden>🔭</span>
                 </th>
@@ -301,7 +301,7 @@ export function CryptoView({ onAdopted }: { onAdopted?: () => void }) {
                         title={
                           fav
                             ? "Favoriet — klik om te verwijderen"
-                            : "Favoriet maken: ook op de watchlist, maar niet in het Potje en het Dagadvies"
+                            : "Favoriet maken: ook op de watchlist, maar niet in het Potje en de papieren portefeuille"
                         }
                         aria-label={`Markeer ${r.ticker} als favoriet`}
                         aria-pressed={fav}

@@ -14,7 +14,6 @@ import { PoefiesView } from "./views/Poefies";
 import { HikkertjesView } from "./views/Hikkertjes";
 import { ZwitserlevenView } from "./views/Zwitserleven";
 import { FavorietenView } from "./views/Favorieten";
-import { DagadviesView } from "./views/Dagadvies";
 import { EncyclopedieView } from "./views/Encyclopedie";
 import { HealthView } from "./views/Health";
 import { HelpPanel, scrollToPageHelp } from "./views/HelpPanel";
@@ -78,7 +77,6 @@ const HELP_PAGE: Record<Tab, string> = {
   hikkertjes: "hikkertjes",
   zwitserleven: "zwitserleven",
   favorieten: "favorieten",
-  dagadvies: "dagadvies",
   status: "status",
   encyclopedie: "encyclopedie",
   settings: "settings",
@@ -106,7 +104,7 @@ function asTab(s: string | null): Tab | null {
   return TABS.some((t) => t.key === s) || s === "settings" || s === "status" ? (s as Tab) : null;
 }
 function loadInitialTab(): Tab {
-  // Een link met ?tab= of #tab (bv. ?tab=dagadvies in een ntfy-melding) gaat voor.
+  // Een link met ?tab= of #tab (bv. ?tab=favorieten in een ntfy-melding) gaat voor.
   if (typeof window !== "undefined") {
     const fromUrl = asTab(new URLSearchParams(window.location.search).get("tab")) ?? asTab(window.location.hash.slice(1));
     if (fromUrl) return fromUrl;
@@ -155,7 +153,7 @@ export function App() {
       const order = uiSettings.tab_order.filter((k) => TABS.some((t) => t.key === k));
       list = order.map((k) => TABS.find((t) => t.key === k)!).filter(Boolean);
       // Een nieuw tabblad dat nog niet in de opgeslagen volgorde staat, komt
-      // naast zijn buurman uit de standaardvolgorde (Dagadvies naast Favorieten).
+      // naast zijn buurman uit de standaardvolgorde.
       TABS.forEach((t, i) => {
         if (order.includes(t.key)) return;
         const prev = i > 0 ? list.findIndex((x) => x.key === TABS[i - 1].key) : -1;
@@ -431,7 +429,6 @@ export function App() {
           {tab === "hikkertjes" && <HikkertjesView />}
           {tab === "zwitserleven" && <ZwitserlevenView />}
           {tab === "favorieten" && <FavorietenView initialDashboard={data} initialScans={scans} />}
-          {tab === "dagadvies" && <DagadviesView />}
           {tab === "status" && <HealthView />}
           {tab === "encyclopedie" && <EncyclopedieView />}
           <HelpPanel pageId={HELP_PAGE[tab]} />
