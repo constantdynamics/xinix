@@ -1517,6 +1517,65 @@ export async function cryptoAdopt(ticker: string): Promise<{ ok: boolean; added:
   return (await res.json()) as { ok: boolean; added: boolean };
 }
 
+// ── Skyshots (Favorieten → Skyshots) ──────────────────────────────────────
+// Wekelijkse scan door xinix-skyshots: handelsdagen waarop de hoogste koers
+// minstens +50% boven het vorige slot lag (het tabblad kiest de drempel), over
+// drie jaar dagkoersen van de hele watchlist. Lezen is open, "telt niet" vraagt
+// het beheertoken.
+export type SkyshotReason = "eenheid" | "geen_handel" | "tick" | "volume" | "tradingview";
+// Lege velden laat de server weg (anders is het hele tabblad ruim 1 MB).
+export interface SkyshotDay {
+  d: string;                 // handelsdag (JJJJ-MM-DD)
+  p: number;                 // hoogste koers t.o.v. het vorige slot, in % (Yahoo)
+  t?: number | null;         // hetzelfde volgens TradingView
+  s?: "ok" | "afwijkend" | "onbekend" | null;
+  c?: number | null;         // slot t.o.v. het vorige slot, in %
+  r?: SkyshotReason | null;  // leeg = telt mee
+  x?: boolean;               // door de gebruiker afgekeurd
+  k?: number | null;         // koersstapjes
+  v?: number | null;         // volume ÷ mediaan van de 20 handelsdagen ervoor
+  a1?: number | null;        // slot 1, 5 en 20 handelsdagen later t.o.v. het slot van die dag, in %
+  a5?: number | null;
+  a20?: number | null;
+}
+export interface SkyshotRow {
+  ticker: string;
+  company: string;
+  exchange: string | null;
+  sector: string | null;
+  currency: string | null;
+  last_close: number | null;
+  price_at: string | null;
+  buy_limit: number | null;
+  note: string | null;
+  days: SkyshotDay[];
+}
+export interface SkyshotsResponse {
+  rows: SkyshotRow[];
+  last_run: { started_at: string; finished_at: string | null; ok: boolean | null; message: string | null } | null;
+  progress: { week_start: string; scanned: number; pool: number };
+}
+// De server laat de browser 5 minuten bewaren; `fresh` haalt buiten die cache om op.
+export async function fetchSkyshots(fresh = false): Promise<SkyshotsResponse> {
+  const res = await fetch(apiUrl("/api/xinix-skyshots"), fresh ? { cache: "reload" } : undefined);
+  if (!res.ok) throw new Error(`xinix-skyshots ${res.status}`);
+  return (await res.json()) as SkyshotsResponse;
+}
+/** Getelde skyshots ≥ +80% in 12 maanden per aandeel, voor de kolom in de favorietenlijst. */
+export async function fetchSkyshotCounts(): Promise<Record<string, number>> {
+  const res = await fetch(apiUrl("/api/xinix-skyshots?counts=1"));
+  if (!res.ok) throw new Error(`xinix-skyshots ${res.status}`);
+  return ((await res.json()) as { counts: Record<string, number> }).counts;
+}
+export async function skyshotReject(ticker: string, day: string, reject: boolean): Promise<void> {
+  const res = await fetch(apiUrl("/api/xinix-skyshots"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ticker, day, action: reject ? "reject" : "restore" }),
+  });
+  if (!res.ok) throw new Error(`${reject ? "afkeuren" : "terugzetten"} mislukt (${res.status}): ${await res.text()}`);
+}
+
 // ── Dagadvies (xinix-advice) ─────────────────────────────────────────────
 // Papieren portefeuille van €10.000 bij DEGIRO: 'live' krijgt de meldingen en
 // volgt de bron met het beste track record; de vijf schaduwboeken draaien

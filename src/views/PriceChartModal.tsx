@@ -7,6 +7,8 @@ interface Props {
   ticker: string;
   company: string;
   exchange: string | null;
+  /** Dagen om te markeren (Skyshots): handelsdag JJJJ-MM-DD + korte tekst voor de tooltip. */
+  markers?: { date: string; label: string }[];
   onClose: () => void;
 }
 
@@ -15,9 +17,11 @@ const RANGES: { key: PriceRange; label: string; full: string }[] = [
   { key: "5d", label: "1W", full: "1 week" },
   { key: "1mo", label: "1M", full: "1 maand" },
   { key: "1y", label: "1J", full: "1 jaar" },
+  { key: "3y", label: "3J", full: "3 jaar" },
   { key: "5y", label: "5J", full: "5 jaar" },
   { key: "max", label: "Max", full: "maximaal" },
 ];
+const MARKER = "#ff4fd8";
 
 // Grafiek-geometrie (SVG viewBox-coördinaten — schaalt mee met de container).
 const W = 760;
@@ -55,7 +59,7 @@ function fmtTipDate(unixSec: number, range: PriceRange): string {
   return d.toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 }
 
-export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
+export function PriceChartModal({ ticker, company, exchange, markers, onClose }: Props) {
   const [range, setRange] = useState<PriceRange>("1y");
   const [history, setHistory] = useState<PriceHistory | null>(null);
   const [loading, setLoading] = useState(true);
@@ -124,6 +128,22 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
     if (!chart) return [];
     return computeTop3Swings(chart.closes, chart.pts, range);
   }, [chart, range]);
+
+  // Gemarkeerde dagen binnen het venster, op het dichtstbijzijnde koerspunt
+  // (bij 3J en 5J zijn dat weekkoersen).
+  const marks = useMemo(() => {
+    if (!chart || !markers?.length) return [];
+    const first = chart.pts[0].t - 4 * 86400, last = chart.pts[chart.n - 1].t + 4 * 86400;
+    const out: { x: number; title: string }[] = [];
+    for (const m of markers) {
+      const t = Date.parse(`${m.date}T12:00:00Z`) / 1000;
+      if (!(t >= first && t <= last)) continue;
+      let best = 0;
+      for (let i = 1; i < chart.n; i++) if (Math.abs(chart.pts[i].t - t) < Math.abs(chart.pts[best].t - t)) best = i;
+      out.push({ x: chart.x(best), title: `🌠 ${fmtTipDate(t, "1y")}: ${m.label}` });
+    }
+    return out;
+  }, [chart, markers]);
 
   const lineColor = chart ? (chart.up ? GAIN : LOSS) : GAIN;
   const gradId = `chart-grad-${ticker.replace(/[^A-Za-z0-9]/g, "")}`;
@@ -290,6 +310,15 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
                 <path d={chart.area} fill={`url(#${gradId})`} />
                 <path d={chart.line} fill="none" stroke={lineColor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
 
+                {/* Gemarkeerde dagen (skyshots): stippellijn + driehoekje onderaan */}
+                {marks.map((m, k) => (
+                  <g key={`m${k}`}>
+                    <title>{m.title}</title>
+                    <line x1={m.x} y1={PAD.t} x2={m.x} y2={PAD.t + PLOT_H} stroke={MARKER} strokeWidth="1" strokeOpacity="0.5" strokeDasharray="2 4" />
+                    <path d={`M${(m.x - 6).toFixed(1)},${PAD.t + PLOT_H} L${(m.x + 6).toFixed(1)},${PAD.t + PLOT_H} L${m.x.toFixed(1)},${PAD.t + PLOT_H - 11} Z`} fill={MARKER} />
+                  </g>
+                ))}
+
                 {/* Top-3 stijgingen: ROW1=piek, ROW2=verschil, ROW3=low */}
                 {top3.map((sw, si) => {
                   if (!shownSwings.has(si)) return null;
@@ -342,6 +371,12 @@ export function PriceChartModal({ ticker, company, exchange, onClose }: Props) {
           </div>
           <p className="text-[10px] text-neutral-600 mt-2 text-center">
             Koersdata via Yahoo Finance · klik op de ticker voor Google Finance
+            {markers?.length ? (
+              <span>
+                {" "}· <span style={{ color: MARKER }}>▲</span> = skyshot
+                {marks.length < markers.length ? ` (${markers.length - marks.length} buiten dit venster)` : ""}
+              </span>
+            ) : null}
           </p>
         </div>
       </div>

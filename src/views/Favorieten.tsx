@@ -5,6 +5,7 @@ import {
   fetchDashboard,
   fetchScanResults,
   fetchSettings,
+  fetchSkyshotCounts,
   getToken,
   lookupTickers,
   patchTicker,
@@ -29,6 +30,7 @@ import { SprintersView } from "./Sprinters";
 import { TempListView } from "./TempList";
 import { StarScannerView } from "./StarScanner";
 import { CryptoView } from "./Crypto";
+import { SkyshotsView } from "./Skyshots";
 import { CryptoBadge, useCryptoLabels } from "../components/CryptoBadge";
 
 type Bron = "feniks" | "poefie" | "hikkertje" | "zwitserleven" | "watchlist";
@@ -73,11 +75,13 @@ interface FavRow {
   bronnen: Bron[];
   /** Wanneer het aandeel favoriet werd (ISO). NULL bij oude rijen zonder tijdstip. */
   favorited_at: string | null;
+  /** Skyshots (dag-top ≥ +80% boven het vorige slot) in de laatste 12 maanden; NULL = nog niet geladen. */
+  skyshots: number | null;
 }
 
 type SortKey =
   | "ticker" | "company" | "score" | "above_limit_pct" | "last_close" | "rating" | "medals" | "dividend"
-  | "chg_1d" | "chg_1w" | "chg_1m" | "chg_6m" | "favorited_at";
+  | "chg_1d" | "chg_1w" | "chg_1m" | "chg_6m" | "favorited_at" | "skyshots";
 type SortDir = "asc" | "desc";
 type ViewMode = "table" | "tiles";
 
@@ -88,8 +92,8 @@ const OPLOPEND_EERST = new Set<SortKey>(["ticker", "company", "chg_1d", "chg_1w"
 const VIEW_KEY = "xinix_favorieten_view";
 const SUBTAB_KEY = "xinix_favorieten_subtab";
 
-type FavSubTab = "lijst" | "verdubbelaars" | "hippos" | "sprinters" | "scanner" | "tijdelijk" | "crypto";
-const SUBTABS: FavSubTab[] = ["lijst", "verdubbelaars", "hippos", "sprinters", "scanner", "tijdelijk", "crypto"];
+type FavSubTab = "lijst" | "verdubbelaars" | "hippos" | "sprinters" | "scanner" | "tijdelijk" | "crypto" | "skyshots";
+const SUBTABS: FavSubTab[] = ["lijst", "verdubbelaars", "hippos", "sprinters", "scanner", "tijdelijk", "crypto", "skyshots"];
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
@@ -194,6 +198,7 @@ const FAV_COLUMNS: ColumnMeta[] = [
   { key: "above_limit_pct", label: "vs limiet" },
   { key: "limiet", label: "Limiet" },
   { key: "favorited_at", label: "Toegevoegd" },
+  { key: "skyshots", label: "Skyshots" },
 ];
 
 // Optionele props: als App.tsx al een dashboard/scans-fetch heeft gedaan, kunnen
@@ -207,6 +212,11 @@ interface FavorietenViewProps {
 export function FavorietenView({ initialDashboard, initialScans }: FavorietenViewProps = {}) {
   const marks = useMarks();
   const cryptoLabels = useCryptoLabels();
+  // Aantal skyshots ≥ +80% in 12 maanden per aandeel (kolom "Skyshots").
+  const [skyshotCounts, setSkyshotCounts] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    fetchSkyshotCounts().then(setSkyshotCounts).catch(() => {});
+  }, []);
   const [dashboard, setDashboard] = useState<Dashboard | null>(initialDashboard ?? null);
   const [scans, setScans] = useState<ScanResults | null>(initialScans ?? null);
   const [loading, setLoading] = useState(!(initialDashboard && initialScans));
@@ -372,10 +382,11 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         medal_bronze: card?.medal_bronze ?? 0,
         bronnen,
         favorited_at: marks.favoritedAt.get(T) ?? null,
+        skyshots: skyshotCounts ? (skyshotCounts[T] ?? 0) : null,
       });
     }
     return out;
-  }, [dashboard, scans, marks, limitOverrides]);
+  }, [dashboard, scans, marks, limitOverrides, skyshotCounts]);
 
   const newestPriceAt = useMemo(() => {
     let max: string | null = null;
@@ -417,6 +428,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           av = a.favorited_at ? Date.parse(a.favorited_at) : null;
           bv = b.favorited_at ? Date.parse(b.favorited_at) : null;
           break;
+        case "skyshots": av = a.skyshots; bv = b.skyshots; break;
       }
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
@@ -758,6 +770,26 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         </td>
       ),
     },
+    skyshots: {
+      th: (
+        <th
+          className="px-3 py-2 text-right cursor-pointer hover:text-neutral-300 select-none"
+          title="Skyshots: dagen in de laatste 12 maanden waarop de hoogste koers minstens +80% boven het slot van de dag ervoor lag (zie Favorieten → Skyshots)"
+          onClick={() => toggleSort("skyshots")}
+        >
+          Skyshots <span className="text-fog-lime text-[9px]">{sortArrow("skyshots")}</span>
+        </th>
+      ),
+      td: (r) => (
+        <td className="px-3 py-2 text-right tabular-nums">
+          {r.skyshots ? (
+            <span className="font-semibold text-fog-lime">{r.skyshots}</span>
+          ) : (
+            <span className="text-neutral-600">{r.skyshots == null ? "—" : "0"}</span>
+          )}
+        </td>
+      ),
+    },
   };
 
   return (
@@ -772,6 +804,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           ["scanner", "🌟 Scanner"],
           ["tijdelijk", "🗂️ Tijdelijk"],
           ["crypto", "🪙 Crypto"],
+          ["skyshots", "🌠 Skyshots"],
         ] as Array<[FavSubTab, string]>).map(([key, label]) => (
           <button
             key={key}
@@ -800,6 +833,8 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
       ) : subTab === "crypto" ? (
         // Een nieuw aandeel staat pas in de favorietenlijst als het dashboard het kent; buiten de cache om herladen.
         <CryptoView onAdopted={() => { fetchDashboard(true).then(setDashboard).catch(() => {}); }} />
+      ) : subTab === "skyshots" ? (
+        <SkyshotsView />
       ) : (
         <>
       <CollapsibleIntro title="Favorieten" icon={<GradientTabIcon tab="favorieten" />}>
@@ -928,6 +963,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
               ["chg_1w", "1W"],
               ["chg_1m", "1M"],
               ["chg_6m", "6M"],
+              ["skyshots", "Skyshots"],
               ["ticker", "Ticker"],
             ] as Array<[SortKey, string]>).map(([key, label]) => (
               <button
