@@ -309,145 +309,150 @@ export function SkyshotsView() {
       ) : null}
 
       {shown.length ? (
-        <Card className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b border-ink-5/60 text-[11px] uppercase tracking-wider">
-              <tr>
-                <th className="px-2 py-2 w-8" title="Favoriet" />
-                <th className="px-2 py-2 w-8" title="Gezien">
-                  <span aria-hidden>🔭</span>
-                </th>
-                {th(null, "#")}
-                {th(null, "Aandeel", undefined, false)}
-                {th(null, "Sterren", undefined, false)}
-                {th("n12", "12 mnd", `Skyshots van minstens +${min}% in de laatste 12 maanden`)}
-                {th("n3m", "3 mnd", "In de laatste 3 maanden")}
-                {th("n3y", "3 jaar", "In de laatste 3 jaar")}
-                {th("n100", "≥ +100%", "Skyshots van minstens +100% in 12 maanden")}
-                {th("n200", "≥ +200%", "Skyshots van minstens +200% in 12 maanden")}
-                {th("best", "Grootste", "Grootste skyshot in 12 maanden")}
-                {th("last", "Laatste", "Datum van de laatste skyshot")}
-                {th("a5", "Na een skyshot", "Gemiddeld slot 1, 5 en 20 handelsdagen later t.o.v. het slot van de skyshot-dag (alle skyshots van 3 jaar)")}
-                {th("limit", "Koers", "Laatste koers en de afstand tot je aankooplimiet")}
-                <th className="px-2 py-2 w-6" />
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((s, i) => {
-                const r = s.row;
-                const isOpen = open === r.ticker;
-                const unchecked = r.days.some((d) => counts(d, min) && d.s === "onbekend");
-                return (
-                  <Fragment key={r.ticker}>
-                    <tr
-                      className={`border-t border-ink-5/40 align-top ${i % 2 ? "bg-white/[0.022]" : ""} ${
-                        marks.isSeen(r.ticker) ? "opacity-50" : ""
-                      }`}
-                    >
-                      <td className="px-2 py-2 text-center">
-                        <HeartInline ticker={r.ticker} />
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        <SeenInline ticker={r.ticker} />
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-neutral-500">{i + 1}</td>
-                      <td className="px-3 py-2 min-w-[12rem]">
-                        <a
-                          href={googleFinanceUrl(r.ticker, r.exchange)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-mono font-bold text-neutral-100 hover:text-fog-pink"
-                        >
-                          {r.ticker}
-                        </a>
-                        {/* Op een telefoon valt de kolom "12 mnd" buiten beeld. */}
-                        <span className="ml-2 sm:hidden text-xs font-bold text-fog-lime" title={`${s.n12} skyshots in 12 maanden`}>
-                          🌠 {s.n12}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setChartFor(r)}
-                          className="block text-left text-[11px] text-neutral-400 hover:text-fog-pink truncate max-w-[16rem]"
-                          title="Koersgrafiek met de skyshots"
-                        >
-                          {r.company}
-                        </button>
-                        {unchecked ? (
-                          <div className="text-[10px] text-neutral-600" title={r.note ?? "TradingView kon deze skyshots niet controleren"}>
-                            ? niet bij TradingView gecontroleerd
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <StarRating ticker={r.ticker} />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <span className={`text-lg font-extrabold tabular-nums ${s.n12 ? "text-fog-lime" : "text-neutral-600"}`}>{s.n12}</span>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-neutral-200">{s.n3m || <span className="text-neutral-600">0</span>}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-neutral-200">{s.n3y}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-neutral-200">{s.n100 || <span className="text-neutral-600">0</span>}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-neutral-200">{s.n200 || <span className="text-neutral-600">0</span>}</td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap">
-                        {s.best ? (
-                          <>
-                            <div className="font-bold tabular-nums text-fog-lime">{fmtPct(eff(s.best))}</div>
-                            <div className="text-[10px] text-neutral-500">{fmtDay(s.best.d)}</div>
-                          </>
-                        ) : (
-                          <span className="text-neutral-600">—</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap text-neutral-300">{fmtDay(s.last)}</td>
-                      <td
-                        className="px-3 py-2 text-right whitespace-nowrap tabular-nums text-xs"
-                        title={`Gemiddeld over ${s.nAfter} skyshot${s.nAfter === 1 ? "" : "s"}: 1 dag ${fmtPct(s.a1, 1)}, 5 dagen ${fmtPct(s.a5, 1)}, 20 dagen ${fmtPct(s.a20, 1)}`}
+        <Card className="overflow-hidden">
+          {/* Net als in de favorietenlijst: één scroll-container voor beide richtingen, zodat de
+              kopregel erin kan blijven staan (de app-header is zelf al sticky). Alleen de eigen
+              kopregel, niet die van een uitgeklapte dagenlijst. */}
+          <div className="overflow-auto max-h-[calc(100vh-15rem)] [&>table>thead>tr>th]:sticky [&>table>thead>tr>th]:top-0 [&>table>thead>tr>th]:z-10 [&>table>thead>tr>th]:bg-ink-3">
+            <table className="w-full text-sm">
+              <thead className="border-b border-ink-5/60 text-[11px] uppercase tracking-wider">
+                <tr>
+                  <th className="px-2 py-2 w-8" title="Favoriet" />
+                  <th className="px-2 py-2 w-8" title="Gezien">
+                    <span aria-hidden>🔭</span>
+                  </th>
+                  {th(null, "#")}
+                  {th(null, "Aandeel", undefined, false)}
+                  {th(null, "Sterren", undefined, false)}
+                  {th("n12", "12 mnd", `Skyshots van minstens +${min}% in de laatste 12 maanden`)}
+                  {th("n3m", "3 mnd", "In de laatste 3 maanden")}
+                  {th("n3y", "3 jaar", "In de laatste 3 jaar")}
+                  {th("n100", "≥ +100%", "Skyshots van minstens +100% in 12 maanden")}
+                  {th("n200", "≥ +200%", "Skyshots van minstens +200% in 12 maanden")}
+                  {th("best", "Grootste", "Grootste skyshot in 12 maanden")}
+                  {th("last", "Laatste", "Datum van de laatste skyshot")}
+                  {th("a5", "Na een skyshot", "Gemiddeld slot 1, 5 en 20 handelsdagen later t.o.v. het slot van de skyshot-dag (alle skyshots van 3 jaar)")}
+                  {th("limit", "Koers", "Laatste koers en de afstand tot je aankooplimiet")}
+                  <th className="px-2 py-2 w-6" />
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((s, i) => {
+                  const r = s.row;
+                  const isOpen = open === r.ticker;
+                  const unchecked = r.days.some((d) => counts(d, min) && d.s === "onbekend");
+                  return (
+                    <Fragment key={r.ticker}>
+                      <tr
+                        className={`border-t border-ink-5/40 align-top ${i % 2 ? "bg-white/[0.022]" : ""} ${
+                          marks.isSeen(r.ticker) ? "opacity-50" : ""
+                        }`}
                       >
-                        <span className={tone(s.a1)}>{fmtPct(s.a1)}</span>
-                        <span className="text-neutral-600"> · </span>
-                        <span className={tone(s.a5)}>{fmtPct(s.a5)}</span>
-                        <span className="text-neutral-600"> · </span>
-                        <span className={tone(s.a20)}>{fmtPct(s.a20)}</span>
-                      </td>
-                      <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
-                        <div className="text-neutral-200">
-                          {fmtPrice(r.last_close)}
-                          <span className="ml-1 text-[10px] text-neutral-600">{r.currency ?? ""}</span>
-                        </div>
-                        {s.limitPct != null ? (
-                          <div
-                            className={`text-[10px] ${s.limitPct <= 0 ? "text-fog-lime" : s.limitPct <= 10 ? "text-fog-warn" : "text-neutral-500"}`}
-                            title={`Aankooplimiet ${fmtPrice(r.buy_limit)}`}
+                        <td className="px-2 py-2 text-center">
+                          <HeartInline ticker={r.ticker} />
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <SeenInline ticker={r.ticker} />
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-neutral-500">{i + 1}</td>
+                        <td className="px-3 py-2 min-w-[12rem]">
+                          <a
+                            href={googleFinanceUrl(r.ticker, r.exchange)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-mono font-bold text-neutral-100 hover:text-fog-pink"
                           >
-                            {fmtPct(s.limitPct, 1)} vs limiet
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setOpen(isOpen ? null : r.ticker)}
-                          className="text-neutral-400 hover:text-neutral-100"
-                          title={isOpen ? "Inklappen" : "Alle skyshots van dit aandeel"}
-                          aria-expanded={isOpen}
+                            {r.ticker}
+                          </a>
+                          {/* Op een telefoon valt de kolom "12 mnd" buiten beeld. */}
+                          <span className="ml-2 sm:hidden text-xs font-bold text-fog-lime" title={`${s.n12} skyshots in 12 maanden`}>
+                            🌠 {s.n12}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setChartFor(r)}
+                            className="block text-left text-[11px] text-neutral-400 hover:text-fog-pink truncate max-w-[16rem]"
+                            title="Koersgrafiek met de skyshots"
+                          >
+                            {r.company}
+                          </button>
+                          {unchecked ? (
+                            <div className="text-[10px] text-neutral-600" title={r.note ?? "TradingView kon deze skyshots niet controleren"}>
+                              ? niet bij TradingView gecontroleerd
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <StarRating ticker={r.ticker} />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <span className={`text-lg font-extrabold tabular-nums ${s.n12 ? "text-fog-lime" : "text-neutral-600"}`}>{s.n12}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-neutral-200">{s.n3m || <span className="text-neutral-600">0</span>}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-neutral-200">{s.n3y}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-neutral-200">{s.n100 || <span className="text-neutral-600">0</span>}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-neutral-200">{s.n200 || <span className="text-neutral-600">0</span>}</td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                          {s.best ? (
+                            <>
+                              <div className="font-bold tabular-nums text-fog-lime">{fmtPct(eff(s.best))}</div>
+                              <div className="text-[10px] text-neutral-500">{fmtDay(s.best.d)}</div>
+                            </>
+                          ) : (
+                            <span className="text-neutral-600">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap text-neutral-300">{fmtDay(s.last)}</td>
+                        <td
+                          className="px-3 py-2 text-right whitespace-nowrap tabular-nums text-xs"
+                          title={`Gemiddeld over ${s.nAfter} skyshot${s.nAfter === 1 ? "" : "s"}: 1 dag ${fmtPct(s.a1, 1)}, 5 dagen ${fmtPct(s.a5, 1)}, 20 dagen ${fmtPct(s.a20, 1)}`}
                         >
-                          {isOpen ? "▾" : "▸"}
-                        </button>
-                      </td>
-                    </tr>
-                    {isOpen ? (
-                      <tr className="border-t border-ink-5/20">
-                        <td />
-                        <td colSpan={14} className="px-3 pb-3">
-                          <DayList row={r} min={min} isAdmin={isAdmin} busy={busy} onToggle={toggleReject} />
+                          <span className={tone(s.a1)}>{fmtPct(s.a1)}</span>
+                          <span className="text-neutral-600"> · </span>
+                          <span className={tone(s.a5)}>{fmtPct(s.a5)}</span>
+                          <span className="text-neutral-600"> · </span>
+                          <span className={tone(s.a20)}>{fmtPct(s.a20)}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
+                          <div className="text-neutral-200">
+                            {fmtPrice(r.last_close)}
+                            <span className="ml-1 text-[10px] text-neutral-600">{r.currency ?? ""}</span>
+                          </div>
+                          {s.limitPct != null ? (
+                            <div
+                              className={`text-[10px] ${s.limitPct <= 0 ? "text-fog-lime" : s.limitPct <= 10 ? "text-fog-warn" : "text-neutral-500"}`}
+                              title={`Aankooplimiet ${fmtPrice(r.buy_limit)}`}
+                            >
+                              {fmtPct(s.limitPct, 1)} vs limiet
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setOpen(isOpen ? null : r.ticker)}
+                            className="text-neutral-400 hover:text-neutral-100"
+                            title={isOpen ? "Inklappen" : "Alle skyshots van dit aandeel"}
+                            aria-expanded={isOpen}
+                          >
+                            {isOpen ? "▾" : "▸"}
+                          </button>
                         </td>
                       </tr>
-                    ) : null}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
+                      {isOpen ? (
+                        <tr className="border-t border-ink-5/20">
+                          <td />
+                          <td colSpan={14} className="px-3 pb-3">
+                            <DayList row={r} min={min} isAdmin={isAdmin} busy={busy} onToggle={toggleReject} />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </Card>
       ) : null}
 
