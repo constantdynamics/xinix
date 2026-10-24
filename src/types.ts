@@ -22,6 +22,9 @@ export interface PriceSummary {
   low_5y?: number | null;
   high_5y?: number | null;
   last_extremes_at?: string | null;
+  // Datum (YYYY-MM-DD) van de laatste dagkoers met volume; gevuld door poll-prices.
+  // updated_at is het moment van de poll, ook als Yahoo alleen een oude koers had.
+  last_trade_date?: string | null;
   updated_at: string;
 }
 

@@ -60,6 +60,8 @@ interface FavRow {
   last_close: number | null;
   /** Tijdstip van de laatst opgehaalde koers (ISO) — ook de basis van 1D/1W/1M/6M. */
   price_at: string | null;
+  /** Laatste handelsdag met volume (YYYY-MM-DD); null = nog niet bekend. */
+  last_trade: string | null;
   buy_limit: number | null;
   above_limit_pct: number | null;
   dividend_yield: number | null;
@@ -166,6 +168,29 @@ function priceAge(priceAt: string | null): string | null {
 function staleDays(priceAt: string | null): number | null {
   const days = daysSince(priceAt);
   return days != null && days >= 4 ? Math.floor(days) : null;
+}
+
+// De laatste handelsdag, als die bij het ophalen al een week of langer terug lag:
+// Yahoo blijft voor een geschorst of verdwenen aandeel de oude koers teruggeven.
+function noTradeSince(r: FavRow): string | null {
+  if (!r.last_trade || !r.price_at) return null;
+  return Date.parse(r.price_at) - Date.parse(r.last_trade) >= 7 * 86_400_000 ? r.last_trade : null;
+}
+
+// Zelfde regel als het Potje en de papieren portefeuille: die kopen het aandeel
+// niet, en hier wordt het gedimd. Ook twee weken geen geslaagde poll telt.
+function stalled(r: FavRow): boolean {
+  return noTradeSince(r) != null || (daysSince(r.price_at) ?? 0) >= 14;
+}
+
+// Dimt 1D/1W/1M/6M ook als de koers zelf vers is opgehaald maar al weken stilstaat.
+function changeStaleDays(r: FavRow): number | null {
+  const since = noTradeSince(r);
+  return staleDays(r.price_at) ?? (since ? Math.floor(daysSince(since) ?? 0) : null);
+}
+
+function fmtDay(day: string): string {
+  return new Date(day).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" });
 }
 
 // Zet de gekozen kolomkleur op de cel. De CSS-regel voor .col-tint forceert
@@ -370,6 +395,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         // price_polled_at schuift ook op bij een mislukte poll, dus die zegt
         // niets over hoe vers de koers is.
         price_at: card?.summary?.updated_at ?? card?.price_polled_at ?? null,
+        last_trade: card?.summary?.last_trade_date ?? null,
         buy_limit,
         above_limit_pct,
         dividend_yield: card?.dividend_yield ?? null,
@@ -620,15 +646,25 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
       ),
       td: (r) => {
         const age = priceAge(r.price_at);
+        const noTrade = noTradeSince(r);
         return (
           <td className="px-3 py-2 text-right font-mono tabular-nums">
             {r.last_close != null ? (
               <>
                 <span className="text-neutral-200">{fmtPrice(r.last_close)}</span>
-                {age && (
+                {noTrade ? (
+                  <span
+                    className="ml-1 text-[9px] text-fog-loss"
+                    title={`Laatste handelsdag ${fmtDay(noTrade)}: de simulaties kopen dit aandeel niet`}
+                  >
+                    geen handel
+                  </span>
+                ) : age && (
                   <span
                     className={`ml-1 text-[9px] ${age.endsWith("mnd") || parseInt(age) >= 7 ? "text-fog-loss" : "text-fog-warn"}`}
-                    title={r.price_at ? `Koers opgehaald op ${new Date(r.price_at).toLocaleDateString("nl-NL")}` : undefined}
+                    title={r.price_at
+                      ? `Koers opgehaald op ${new Date(r.price_at).toLocaleDateString("nl-NL")}${stalled(r) ? ": de simulaties kopen dit aandeel niet" : ""}`
+                      : undefined}
                   >
                     {age}
                   </span>
@@ -651,7 +687,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           1D <span className="text-fog-lime text-[9px]">{sortArrow("chg_1d")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1d} staleDays={staleDays(r.price_at)} /></td>,
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1d} staleDays={changeStaleDays(r)} /></td>,
     },
     chg_1w: {
       th: (
@@ -663,7 +699,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           1W <span className="text-fog-lime text-[9px]">{sortArrow("chg_1w")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1w} staleDays={staleDays(r.price_at)} /></td>,
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1w} staleDays={changeStaleDays(r)} /></td>,
     },
     chg_1m: {
       th: (
@@ -675,7 +711,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           1M <span className="text-fog-lime text-[9px]">{sortArrow("chg_1m")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1m} staleDays={staleDays(r.price_at)} /></td>,
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_1m} staleDays={changeStaleDays(r)} /></td>,
     },
     chg_6m: {
       th: (
@@ -687,7 +723,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           6M <span className="text-fog-lime text-[9px]">{sortArrow("chg_6m")}</span>
         </th>
       ),
-      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_6m} staleDays={staleDays(r.price_at)} /></td>,
+      td: (r) => <td className="px-3 py-2 text-right font-mono tabular-nums"><ChangePct value={r.chg_6m} staleDays={changeStaleDays(r)} /></td>,
     },
     above_limit_pct: {
       th: (
@@ -1027,7 +1063,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
                     // Zebra: oneven rijen een haartje lichter, puur om de
                     // regels uit elkaar te houden bij veel kolommen.
                     const bg = i % 2 === 1 ? "bg-white/[0.022]" : "";
-                    const cls = [seen ? "opacity-50" : "", bg].filter(Boolean).join(" ");
+                    const cls = [seen || stalled(r) ? "opacity-50" : "", bg].filter(Boolean).join(" ");
                     return (
                       <tr key={r.ticker} className={cls}>
                         <SeenCell ticker={r.ticker} />
@@ -1077,7 +1113,7 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
         return (
           <div
             key={r.ticker}
-            className={`rounded-xl border border-ink-5 bg-ink-2/60 ring-1 ${toneRing} p-2.5 transition ${seen ? "opacity-50" : ""}`}
+            className={`rounded-xl border border-ink-5 bg-ink-2/60 ring-1 ${toneRing} p-2.5 transition ${seen || stalled(r) ? "opacity-50" : ""}`}
           >
             <div className="flex items-center justify-between gap-1 mb-1">
               <a
@@ -1123,6 +1159,11 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
             <div className="text-[10px] font-mono tabular-nums text-neutral-500 mt-0.5">
               {r.last_close != null ? `$${fmtPrice(r.last_close)}` : "—"}
               {r.buy_limit != null && <span className="text-neutral-600"> / lim ${fmtPrice(r.buy_limit)}</span>}
+              {noTradeSince(r) && (
+                <span className="text-fog-loss" title={`Laatste handelsdag ${fmtDay(noTradeSince(r)!)}: de simulaties kopen dit aandeel niet`}>
+                  {" "}· geen handel
+                </span>
+              )}
             </div>
             {/* Koersverandering over dag/week/maand/half jaar — zelfde vier
                 waarden als de kolommen in de lijstweergave. */}
@@ -1130,7 +1171,7 @@ function FavorietenTiles({ rows, onCompanyClick }: { rows: FavRow[]; onCompanyCl
               {([["1D", r.chg_1d], ["1W", r.chg_1w], ["1M", r.chg_1m], ["6M", r.chg_6m]] as Array<[string, number | null]>).map(([label, v]) => (
                 <div key={label}>
                   <div className="text-[8px] uppercase tracking-wider text-neutral-600 font-bold">{label}</div>
-                  <ChangePct value={v} className="text-[10px]" staleDays={staleDays(r.price_at)} />
+                  <ChangePct value={v} className="text-[10px]" staleDays={changeStaleDays(r)} />
                 </div>
               ))}
             </div>

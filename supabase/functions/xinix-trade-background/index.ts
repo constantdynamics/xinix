@@ -131,7 +131,7 @@ async function run(): Promise<RunResult> {
       .select("id, ticker, qty, avg_price, entry_date, scheduled_exit_date, stop_loss_price, entry_signal_types, entry_sector, partial_exits")
       .is("closed_at", null),
     fetchAllPages((f, t) => sb.from("signal_price_summary")
-      .select("ticker, last_close").order("ticker").range(f, t)),
+      .select("ticker, last_close, last_trade_date, updated_at").order("ticker").range(f, t)),
     fetchAllPages((f, t) => sb.from("signal_tickers")
       .select("ticker, company, sector, goud_score, buy_limit, active, price_benched, first_price_date, no_sim")
       .eq("active", true).eq("price_benched", false).order("id").range(f, t)),
@@ -176,15 +176,22 @@ async function run(): Promise<RunResult> {
     consensusByTicker.set(t, (consensusByTicker.get(t) ?? 0) + 1);
   }
   const positions = (posRes.data ?? []) as Position[];
+  // Stilgevallen aandelen: zelfde regel als het Potje (xinix-sim-background). Een week geen handel,
+  // gemeten vanaf de poll, of twee weken geen geslaagde poll.
   const priceByTicker = new Map<string, number>();
+  const stilgevallen = new Set<string>();
   for (const p of (summaryRes.data ?? [])) {
     if (p.last_close != null) priceByTicker.set(p.ticker as string, Number(p.last_close));
+    const poll = Date.parse(p.updated_at as string);
+    const handel = p.last_trade_date ? Date.parse(p.last_trade_date as string) : NaN;
+    if (now.getTime() - poll >= 14 * 86_400_000 || poll - handel >= 7 * 86_400_000) stilgevallen.add(p.ticker as string);
   }
-  // Crypto-favorieten (hartje in het crypto-tabblad) koopt de papieren portefeuille niet.
+  // Crypto-favorieten (hartje in het crypto-tabblad) en stilgevallen aandelen koopt de papieren
+  // portefeuille niet.
   const allTickers = ((tickersRes.data ?? []) as Array<{
     ticker: string; company: string | null; sector: string | null;
     goud_score: number | null; buy_limit: number | null; first_price_date: string | null; no_sim: boolean | null;
-  }>).filter((t) => !t.no_sim);
+  }>).filter((t) => !t.no_sim && !stilgevallen.has(t.ticker));
   const signalsByTicker = new Map<string, Array<{ signal_type: string; severity: string }>>();
   for (const s of (signalsRes.data ?? [])) {
     const arr = signalsByTicker.get(s.ticker as string) ?? [];

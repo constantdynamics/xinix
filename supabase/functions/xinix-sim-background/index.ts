@@ -854,7 +854,7 @@ async function run() {
       .select("ticker, sector, goud_score, buy_limit, medal_gold, is_hikkertje, is_poefie, dividend_yield, first_price_date, no_sim")
       .eq("active", true).eq("price_benched", false).order("id").range(f, t)),
     fetchAllPages((f, t) => sb.from("signal_price_summary")
-      .select("ticker, last_close").order("ticker").range(f, t)),
+      .select("ticker, last_close, last_trade_date, updated_at").order("ticker").range(f, t)),
     // Alle actieve (niet-verlopen) signalen. Voorheen .limit(3000) terwijl er
     // ~7000 actief zijn: oudere-maar-geldige signalen vielen stilletjes weg uit
     // rankScore en uit de signaalverval-check.
@@ -911,9 +911,17 @@ async function run() {
     openByStrategy.set(p.strategy_id, arr);
   }
 
+  // Stilgevallen aandelen (geschorst, overgenomen, nieuwe ticker) koopt het Potje niet: Yahoo geeft
+  // dan gewoon de laatste koers terug (CRNX werd in oktober gekocht op de slotkoers van 31 augustus).
+  // De week geen handel telt vanaf de poll, niet vanaf nu, want overige aandelen worden maar één keer
+  // per week opgehaald. Twee weken geen geslaagde poll (een Yahoo-404) telt ook als stilgevallen.
   const priceMap = new Map<string, number>();
+  const stilgevallen = new Set<string>();
   for (const r of (summaryRes.data ?? [])) {
     if (r.last_close != null) priceMap.set(r.ticker as string, Number(r.last_close));
+    const poll = Date.parse(r.updated_at as string);
+    const handel = r.last_trade_date ? Date.parse(r.last_trade_date as string) : NaN;
+    if (now.getTime() - poll >= 14 * 86_400_000 || poll - handel >= 7 * 86_400_000) stilgevallen.add(r.ticker as string);
   }
 
   // ── Koers-artefact-guard ─────────────────────────────────────────────────────
@@ -938,8 +946,9 @@ async function run() {
     return raw;
   }
 
-  // Crypto-favorieten (hartje in het crypto-tabblad) koopt het Potje niet; open posities lopen gewoon af.
-  const tickers = ((tickersRes.data ?? []) as TickerRow[]).filter((t) => !t.no_sim);
+  // Crypto-favorieten (hartje in het crypto-tabblad) en stilgevallen aandelen koopt het Potje niet;
+  // open posities lopen gewoon af.
+  const tickers = ((tickersRes.data ?? []) as TickerRow[]).filter((t) => !t.no_sim && !stilgevallen.has(t.ticker));
   const sigsByTicker = new Map<string, SigRow[]>();
   for (const s of (signalsRes.data ?? []) as SigRow[]) {
     const arr = sigsByTicker.get(s.ticker) ?? [];
