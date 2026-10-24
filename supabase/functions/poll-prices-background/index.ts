@@ -332,7 +332,11 @@ Deno.serve(runBackground("poll-prices", async (req) => {
       const avgVol = validVolumes.reduce((a, b) => a + b, 0) / (validVolumes.length || 1);
       const lastVol = last.volume ?? 0;
       const volRatio = avgVol > 0 ? lastVol / avgVol : 0;
-      const summary = { ticker, last_close: last.close, last_volume: lastVol, low_90d: low90, high_90d: high90, pct_above_90d_low: low90 > 0 ? pct(last.close, low90) : 0, pct_change_1d: prev ? pct(last.close, prev.close) : 0, pct_change_5d: fiveAgo ? pct(last.close, fiveAgo.close) : 0, pct_change_22d: twentyTwoAgo ? pct(last.close, twentyTwoAgo.close) : null, pct_change_6mo: sixMonthsAgo ? pct(last.close, sixMonthsAgo.close) : null, avg_volume_30d: Math.round(avgVol), volume_ratio: Number(volRatio.toFixed(2)), updated_at: new Date().toISOString() };
+      // Laatste dagkoers met volume. Voor een geschorst of verdwenen aandeel blijft
+      // Yahoo de oude koers gewoon teruggeven, en updated_at zegt alleen wanneer
+      // we keken; de simulaties kopen niets dat bij het ophalen een week stil lag.
+      const lastTrade = [...valid].reverse().find((b) => (b.volume ?? 0) > 0) ?? last;
+      const summary = { ticker, last_close: last.close, last_volume: lastVol, low_90d: low90, high_90d: high90, pct_above_90d_low: low90 > 0 ? pct(last.close, low90) : 0, pct_change_1d: prev ? pct(last.close, prev.close) : 0, pct_change_5d: fiveAgo ? pct(last.close, fiveAgo.close) : 0, pct_change_22d: twentyTwoAgo ? pct(last.close, twentyTwoAgo.close) : null, pct_change_6mo: sixMonthsAgo ? pct(last.close, sixMonthsAgo.close) : null, avg_volume_30d: Math.round(avgVol), volume_ratio: Number(volRatio.toFixed(2)), last_trade_date: lastTrade.date, updated_at: new Date().toISOString() };
       await sb.from("signal_price_summary").upsert(summary, { onConflict: "ticker" });
       if (ruweLaatste != null && Math.abs(Math.log(last.close / ruweLaatste)) > 1) eenheidGecorrigeerd++;
       // Nieuwe splits vastleggen; de database rekent de open posities meteen om
