@@ -1,9 +1,12 @@
--- Watchlist-opschoning na de skyshot-scan van 22 okt.: 102 aandelen waar Yahoo geen (verse) koers
--- meer voor had, nagelopen op overnames, faillissementen en nieuwe tickers. Keuzes van de gebruiker
--- (2026-10-24): 1c dubbele/oude tickers verwijderen, 2a overzetten naar de opvolger, 3a overgenomen,
--- failliete en stilgevallen aandelen op inactief zonder hartje, 4a ongeldige Potje-posities ongedaan,
--- 5a niets meer kopen waarvan de laatste echte handelsdag een week of langer geleden is.
--- Alles wat verandert of verdwijnt staat eerst als momentopname in xinix_watchlist_cleanup.
+-- Watchlist-opschoning, deel 1 van 2: alles wat niets wist. Na de skyshot-scan van 22 okt. zijn de 102
+-- aandelen waar Yahoo geen (verse) koers meer voor had nagelopen op overnames, faillissementen en nieuwe
+-- tickers. Keuzes van de gebruiker (24–25 okt. 2026): 1c dubbele/oude tickers wissen, 2a overzetten naar
+-- de opvolger, 3a overgenomen, failliete en stilgevallen aandelen op inactief zonder hartje, 4a posities
+-- ongedaan die gekocht zijn toen het aandeel al niet meer handelde (ook SAVE.L) en 5a niets meer kopen
+-- wat een week niet handelt. Supabase vraagt bij het wissen van rijen om een bevestiging die niet bij de
+-- gebruiker aankwam, dus het wissen staat apart in 2026-10-25_watchlist_cleanup_wissen.sql. Tot dat draait
+-- staan de oude hartjes nog in xinix_favorites, op een inactief aandeel.
+-- Alles wat verandert staat eerst als momentopname in xinix_watchlist_cleanup, met het plan erbij.
 
 create table if not exists public.xinix_watchlist_cleanup (
   id bigserial primary key,
@@ -11,30 +14,39 @@ create table if not exists public.xinix_watchlist_cleanup (
   actie text not null check (actie in ('verwijderd', 'opgevolgd', 'opvolger', 'inactief', 'positie_ongedaan')),
   opvolger text,
   toelichting text,
+  plan jsonb,
   snapshot jsonb,
   created_at timestamptz not null default now()
 );
 alter table public.xinix_watchlist_cleanup enable row level security;
 revoke all on public.xinix_watchlist_cleanup from anon, authenticated;
 
--- ── 4a: posities die het Potje kocht terwijl het aandeel al niet meer handelde ──────────────────
--- De koerspuller hield een bevroren slotkoers vers, dus de sim kocht CRNX op 2–10 okt. (laatste
--- handelsdag 31 aug.), NOTV op 29 jun. (failliet, handel gestopt 10 jun.) en LSH op 22 sep. (heette
--- sinds 4 aug. QNME). Ongedaan tegen de instapprijs: de inleg plus 0,1% kosten gaan terug naar de cash.
 do $$
 begin
+  if exists (select 1 from xinix_watchlist_cleanup) then
+    raise exception 'de opschoning is al uitgevoerd';
+  end if;
   if exists (select 1 from xinix_strategy_positions
-             where closed_at is null and ticker in ('CRNX', 'NOTV', 'LSH')
-               and partial_exits is not null and partial_exits <> '[]'::jsonb) then
+             where closed_at is null and (ticker in ('CRNX', 'NOTV', 'LSH') or (ticker = 'SAVE.L' and entry_date >= '2026-07-01'))
+               and partial_exits is not null and partial_exits <> '[]'::jsonb)
+     or exists (select 1 from xinix_paper_positions
+                where closed_at is null and ticker = 'SAVE.L' and entry_date >= '2026-07-01'
+                  and partial_exits is not null and partial_exits <> '[]'::jsonb) then
     raise exception 'onverwacht: een te annuleren positie heeft deelverkopen';
   end if;
 end $$;
 
+-- ── 4a: posities die gekocht zijn terwijl het aandeel al niet meer handelde ──────────────────────
+-- De koerspuller hield een bevroren slotkoers vers. Zo kocht het Potje CRNX op 2–10 okt. (laatste
+-- handelsdag 31 aug.), NOTV op 29 jun. (failliet, handel gestopt 10 jun.), LSH op 22 sep. (heette sinds
+-- 4 aug. QNME) en SAVE.L van 18 aug. tot 26 sep. (geen handel sinds 30 jun.; Yahoo geeft elke dag
+-- 5,51 pence met volume 0). Ongedaan tegen de instapprijs: de inleg plus 0,1% kosten gaan terug.
 with v as (
-  select * from xinix_strategy_positions where closed_at is null and ticker in ('CRNX', 'NOTV', 'LSH')
+  select * from xinix_strategy_positions
+  where closed_at is null and (ticker in ('CRNX', 'NOTV', 'LSH') or (ticker = 'SAVE.L' and entry_date >= '2026-07-01'))
 ), logged as (
   insert into xinix_watchlist_cleanup (ticker, actie, toelichting, snapshot)
-  select ticker, 'positie_ongedaan', 'Gekocht terwijl het aandeel al niet meer handelde; inleg en kosten terug', to_jsonb(v)
+  select ticker, 'positie_ongedaan', 'Potje: gekocht terwijl het aandeel al niet meer handelde; inleg en kosten terug', to_jsonb(v)
   from v
 ), refund as (
   update xinix_strategy_state s set cash = s.cash + r.bedrag
@@ -47,13 +59,31 @@ set closed_at = now(), closed_price = p.avg_price, return_usd = 0, return_pct = 
     closed_reason = case p.ticker
       when 'CRNX' then 'Ongedaan: gekocht na de laatste handelsdag (31 aug.); overgenomen door Vertex'
       when 'NOTV' then 'Ongedaan: gekocht na het faillissement (laatste handelsdag 10 jun.)'
-      else 'Ongedaan: gekocht nadat LSH al QNME heette (laatste handelsdag 3 aug.)'
+      when 'LSH' then 'Ongedaan: gekocht nadat LSH al QNME heette (laatste handelsdag 3 aug.)'
+      else 'Ongedaan: gekocht terwijl SAVE.L niet handelde (laatste handelsdag 30 jun., koers bevroren op 5,51 pence)'
     end
 from v where p.id = v.id;
 
--- ── 3a: overgenomen, failliet of stilgevallen → inactief, hartje en sterren weg ─────────────────
-create temp table cleanup_inactief (ticker text primary key, reden text not null);
-insert into cleanup_inactief values
+with v as (
+  select * from xinix_paper_positions where closed_at is null and ticker = 'SAVE.L' and entry_date >= '2026-07-01'
+), logged as (
+  insert into xinix_watchlist_cleanup (ticker, actie, toelichting, snapshot)
+  select ticker, 'positie_ongedaan', 'Papieren portefeuille: gekocht terwijl het aandeel al niet meer handelde; inleg en kosten terug', to_jsonb(v)
+  from v
+), refund as (
+  update xinix_paper_state s set cash = s.cash + r.bedrag
+  from (select sum(qty * avg_price * 1.001) as bedrag from v having count(*) > 0) r
+  where s.id = 1
+)
+update xinix_paper_positions p
+set closed_at = now(), closed_price = p.avg_price, return_usd = 0, return_pct = 0,
+    hold_days = greatest(0, floor(extract(epoch from now() - p.entry_date) / 86400))::int,
+    closed_reason = 'Ongedaan: gekocht terwijl SAVE.L niet handelde (laatste handelsdag 30 jun., koers bevroren op 5,51 pence)'
+from v where p.id = v.id;
+
+-- ── 3a: overgenomen, failliet of stilgevallen → inactief ────────────────────────────────────────
+-- Het hartje wist deel 2; in de favorietenlijst staat een inactief aandeel nu al niet meer.
+with d(ticker, reden) as (values
   ('AMWD', 'opgegaan in MasterBrand (MBC), mei 2026'),
   ('APGE', 'overgenomen door AbbVie voor $135,11, sep. 2026'),
   ('APLS', 'overgenomen door Biogen voor $41 + CVR, mei 2026'),
@@ -92,31 +122,31 @@ insert into cleanup_inactief values
   ('AREN', 'geen handel meer sinds 28 aug. 2026, oorzaak niet gevonden'),
   ('ADG.V', 'geen handel meer op de TSXV sinds 14 sep. 2026, alleen nog OTC (ARCUF)'),
   ('GREE', 'Yahoo kent het aandeel niet meer, oorzaak niet gevonden'),
-  ('CLE', 'kapotte invoer zonder bedrijfsnaam of beurs');
-
-insert into xinix_watchlist_cleanup (ticker, actie, toelichting, snapshot)
-select t.ticker, 'inactief', d.reden,
-       jsonb_build_object('signal_tickers', to_jsonb(t),
-                          'favoriet', (select to_jsonb(f) from xinix_favorites f where f.ticker = t.ticker))
-from signal_tickers t join cleanup_inactief d using (ticker);
-
-delete from xinix_favorites f using cleanup_inactief d where f.ticker = d.ticker;
-
+  ('CLE', 'kapotte invoer zonder bedrijfsnaam of beurs')
+), logged as (
+  insert into xinix_watchlist_cleanup (ticker, actie, toelichting, snapshot)
+  select t.ticker, 'inactief', d.reden,
+         jsonb_build_object('signal_tickers', to_jsonb(t),
+                            'favoriet', (select to_jsonb(f) from xinix_favorites f where f.ticker = t.ticker))
+  from signal_tickers t join d using (ticker)
+)
 update signal_tickers t
 set active = false, updated_at = now(),
-    notes = concat_ws(E'\n', nullif(t.notes, ''), 'Van de watchlist gehaald op 24 okt. 2026: ' || d.reden || '.')
-from cleanup_inactief d where t.ticker = d.ticker;
+    notes = concat_ws(E'\n', nullif(t.notes, ''), 'Van de watchlist gehaald op 25 okt. 2026: ' || d.reden || '.')
+from d where t.ticker = d.ticker;
 
 -- ── 2a: nieuwe naam, ticker of beurs → opvolger op de watchlist, oude op inactief ──────────────
 -- Hartje, sterren en notitie gaan mee. De aankooplimiet alleen bij dezelfde munt, zonder bekende
 -- reverse split en als de koers bij de overgang hooguit ×3 verschilt (anders is de aandelenbasis
 -- waarschijnlijk veranderd); zonder limiet vult compute-extremes zelf 5-jaarsbodem +10% in.
-create temp table cleanup_opvolger (
-  oud text primary key, nieuw text not null, bedrijf text not null, beurs text not null,
-  munt_oud text not null, munt_nieuw text not null, koers_nieuw numeric not null, split boolean not null,
-  reden text not null
-);
-insert into cleanup_opvolger values
+insert into xinix_watchlist_cleanup (ticker, actie, opvolger, toelichting, plan, snapshot)
+select t.ticker, 'opgevolgd', m.nieuw, m.reden,
+       jsonb_build_object('bedrijf', m.bedrijf, 'beurs', m.beurs, 'munt_oud', m.munt_oud, 'munt_nieuw', m.munt_nieuw,
+                          'koers_nieuw', m.koers_nieuw, 'split', m.split),
+       jsonb_build_object('signal_tickers', to_jsonb(t),
+                          'signal_price_summary', (select to_jsonb(s) from signal_price_summary s where s.ticker = t.ticker),
+                          'favoriet', (select to_jsonb(f) from xinix_favorites f where f.ticker = t.ticker))
+from (values
   ('AII.TO', 'ALM', 'Almonty Industries Inc.', 'NasdaqCM', 'CAD', 'USD', 8.75, false, 'Almonty verhuisde van de TSX naar Nasdaq'),
   ('LSH', 'QNME', 'Quanome Technologies, Inc.', 'NasdaqCM', 'USD', 'USD', 0.4427, false, 'Lakeside Holding heet sinds 4 aug. 2026 Quanome Technologies'),
   ('ATLN', 'CIRC', 'Circle8 Group, Inc.', 'NasdaqGM', 'USD', 'USD', 0.2889, false, 'Atlantic International heet sinds jul. 2026 Circle8 Group'),
@@ -163,121 +193,88 @@ insert into cleanup_opvolger values
   ('WKEY', 'WQEY', 'WISeQey Corp.', 'NasdaqGM', 'USD', 'USD', 8.85, false, 'WISeKey heet nu WISeQey'),
   ('XWIN', 'XMAX', 'XMax Inc.', 'NasdaqCM', 'USD', 'USD', 8.75, false, 'XMax handelt nu als XMAX'),
   ('YOOV', 'CIGL', 'Concorde International Group Ltd.', 'NasdaqCM', 'USD', 'USD', 0.2057, false, 'Concorde International Group handelt nu als CIGL'),
-  ('ZBAI', 'AUC', 'ATIF Holdings Limited', 'NasdaqCM', 'USD', 'USD', 8.55, false, 'ATIF Holdings handelt nu als AUC');
-
--- Per opvolger één bronrij; voor TALA.TO is dat TALA.V (2★, ouder dan het hartje op FMT.V).
-create temp view cleanup_bron as
-select distinct on (m.nieuw)
-       m.*, o.sector, o.notes, o.buy_limit, o.crypto_cat, o.no_sim, o.modality, o.disease_area, o.phase,
-       o.market_cap_bucket, o.commodity, o.jurisdiction, o.deposit_type, o.yahoo_sector, o.yahoo_industry,
-       (m.munt_oud = m.munt_nieuw and not m.split and o.buy_limit is not null and ps.last_close > 0
-        and ps.last_close / m.koers_nieuw between 1 / 3.0 and 3) as limiet_mee
-from cleanup_opvolger m
-join signal_tickers o on o.ticker = m.oud
-left join signal_price_summary ps on ps.ticker = m.oud
-order by m.nieuw, (m.oud = 'TALA.V') desc;
-
-insert into xinix_watchlist_cleanup (ticker, actie, opvolger, toelichting, snapshot)
-select t.ticker, 'opgevolgd', m.nieuw, m.reden,
-       jsonb_build_object('signal_tickers', to_jsonb(t),
-                          'favoriet', (select to_jsonb(f) from xinix_favorites f where f.ticker = t.ticker))
-from signal_tickers t join cleanup_opvolger m on m.oud = t.ticker;
+  ('ZBAI', 'AUC', 'ATIF Holdings Limited', 'NasdaqCM', 'USD', 'USD', 8.55, false, 'ATIF Holdings handelt nu als AUC')
+) as m(oud, nieuw, bedrijf, beurs, munt_oud, munt_nieuw, koers_nieuw, split, reden)
+join signal_tickers t on t.ticker = m.oud;
 
 -- Opvolgers die al op de watchlist stonden (inactief, uit de explosie-motor) eerst vastleggen.
 insert into xinix_watchlist_cleanup (ticker, actie, toelichting, snapshot)
 select t.ticker, 'opvolger', 'bestond al; weer actief gezet', jsonb_build_object('signal_tickers', to_jsonb(t))
-from signal_tickers t where t.ticker in (select nieuw from cleanup_bron);
+from signal_tickers t
+where t.ticker in (select opvolger from xinix_watchlist_cleanup where actie = 'opgevolgd');
 
-insert into signal_tickers (ticker, company, sector, exchange, active, notes, buy_limit, crypto_cat, no_sim,
-                            modality, disease_area, phase, market_cap_bucket, commodity, jurisdiction, deposit_type,
-                            yahoo_sector, yahoo_industry)
-select b.nieuw, b.bedrijf, b.sector, b.beurs, true,
-       concat_ws(E'\n', 'Opvolger van ' || b.oud || ': ' || b.reden || '. Op de watchlist sinds 24 okt. 2026.', nullif(b.notes, '')),
-       case when b.limiet_mee then b.buy_limit end,
-       b.crypto_cat, coalesce(b.no_sim, false), b.modality, b.disease_area, b.phase, b.market_cap_bucket,
-       b.commodity, b.jurisdiction, b.deposit_type, b.yahoo_sector, b.yahoo_industry
-from cleanup_bron b
-where not exists (select 1 from signal_tickers t where t.ticker = b.nieuw);
-
+-- Eén bronrij per opvolger; voor TALA.TO is dat TALA.V (2★, ouder dan het hartje op FMT.V). Nieuwe
+-- opvolgers komen erbij, bestaande worden weer actief. Het UPDATE ziet de nieuwe rijen van het INSERT
+-- in dezelfde opdracht niet, dus raakt alleen de opvolgers die er al stonden.
+with bron as (
+  select distinct on (c.opvolger)
+         c.opvolger as nieuw, c.ticker as oud, c.toelichting as reden, c.plan,
+         o.sector, o.notes, o.buy_limit, o.crypto_cat, o.no_sim, o.modality, o.disease_area, o.phase,
+         o.market_cap_bucket, o.commodity, o.jurisdiction, o.deposit_type, o.yahoo_sector, o.yahoo_industry,
+         (c.plan->>'munt_oud' = c.plan->>'munt_nieuw' and not (c.plan->>'split')::boolean and o.buy_limit is not null
+          and ps.last_close > 0 and ps.last_close / (c.plan->>'koers_nieuw')::numeric between 1 / 3.0 and 3) as limiet_mee
+  from xinix_watchlist_cleanup c
+  join signal_tickers o on o.ticker = c.ticker
+  left join signal_price_summary ps on ps.ticker = c.ticker
+  where c.actie = 'opgevolgd'
+  order by c.opvolger, (c.ticker = 'TALA.V') desc
+), nieuw as (
+  insert into signal_tickers (ticker, company, sector, exchange, active, notes, buy_limit, crypto_cat, no_sim,
+                              modality, disease_area, phase, market_cap_bucket, commodity, jurisdiction, deposit_type,
+                              yahoo_sector, yahoo_industry)
+  select b.nieuw, b.plan->>'bedrijf', b.sector, b.plan->>'beurs', true,
+         concat_ws(E'\n', 'Opvolger van ' || b.oud || ': ' || b.reden || '. Op de watchlist sinds 25 okt. 2026.', nullif(b.notes, '')),
+         case when b.limiet_mee then b.buy_limit end,
+         b.crypto_cat, coalesce(b.no_sim, false), b.modality, b.disease_area, b.phase, b.market_cap_bucket,
+         b.commodity, b.jurisdiction, b.deposit_type, b.yahoo_sector, b.yahoo_industry
+  from bron b
+  where not exists (select 1 from signal_tickers t where t.ticker = b.nieuw)
+  returning ticker
+)
 update signal_tickers t
-set active = true, company = b.bedrijf, exchange = b.beurs, sector = b.sector,
+set active = true, company = b.plan->>'bedrijf', exchange = b.plan->>'beurs', sector = b.sector,
     buy_limit = case when b.limiet_mee then b.buy_limit else t.buy_limit end,
     crypto_cat = coalesce(t.crypto_cat, b.crypto_cat),
     price_benched = false, price_fail_count = 0, updated_at = now(),
     notes = concat_ws(E'\n', nullif(t.notes, ''),
-                      'Weer actief op 24 okt. 2026 als opvolger van ' || b.oud || ': ' || b.reden || '.', nullif(b.notes, ''))
-from cleanup_bron b
-where t.ticker = b.nieuw and t.ticker in ('ALM', 'QNME', 'CIRC', 'IRON.CN');
-
--- Zoals "terugzetten" in het tijdelijke lijstje: wie weer actief is, gaat van die lijst af.
-delete from xinix_temp_list where ticker in ('ALM', 'QNME', 'CIRC', 'IRON.CN');
+                      'Weer actief op 25 okt. 2026 als opvolger van ' || b.oud || ': ' || b.reden || '.', nullif(b.notes, ''))
+from bron b
+where t.ticker = b.nieuw;
 
 insert into xinix_favorites (ticker, created_at, rating)
-select m.nieuw, min(f.created_at), max(f.rating)
-from cleanup_opvolger m join xinix_favorites f on f.ticker = m.oud
-group by m.nieuw
+select c.opvolger, min(f.created_at), max(f.rating)
+from xinix_watchlist_cleanup c
+join xinix_favorites f on f.ticker = c.ticker
+where c.actie = 'opgevolgd'
+group by c.opvolger
 on conflict (ticker) do update set rating = greatest(xinix_favorites.rating, excluded.rating);
-
-delete from xinix_favorites f using cleanup_opvolger m where f.ticker = m.oud;
 
 update signal_tickers t
 set active = false, updated_at = now(),
-    notes = concat_ws(E'\n', nullif(t.notes, ''), 'Opgevolgd door ' || m.nieuw || ' op 24 okt. 2026: ' || m.reden || '.')
-from cleanup_opvolger m where t.ticker = m.oud;
+    notes = concat_ws(E'\n', nullif(t.notes, ''), 'Opgevolgd door ' || c.opvolger || ' op 25 okt. 2026: ' || c.toelichting || '.')
+from xinix_watchlist_cleanup c
+where c.actie = 'opgevolgd' and t.ticker = c.ticker;
 
-drop view cleanup_bron;
-
--- ── 1c: oude tickers en nevennoteringen waarvan de opvolger al op de watchlist staat → verwijderen ─
--- signal_price_summary, signal_events, signal_catalysts, signal_trials en signal_filings gaan via
--- ON DELETE CASCADE mee. Historie blijft staan: Potje- en papieren posities, het meldingenlogboek,
--- track records (hippo/sprint/event-voorspellingen), splits en koersreparaties.
-create temp table cleanup_weg (ticker text primary key, opvolger text not null);
-insert into cleanup_weg values
+-- ── 1c: oude tickers en nevennoteringen waarvan de opvolger al op de watchlist staat ────────────
+-- Nu inactief, deel 2 wist ze helemaal. Hartje en sterren gaan bewust niet mee naar de opvolger.
+with w(ticker, opvolger) as (values
   ('0SZI.L', 'CRBP'), ('0T6G.L', 'QTTB'), ('ALTS', 'AIFC'), ('GCMDA.AX', 'GCM.AX'), ('GGA.V', 'GORO.V'),
   ('HMMC.V', 'HMMC.TO'), ('MIGI', 'BGDE'), ('NICU.V', 'NICU.TO'), ('MJRX.CN', 'MJRX-X.CN'), ('ASGN', 'EFOR'),
-  ('EKSO', 'CHRN'), ('VBIX', 'QXL'), ('NBY', 'SDEV'), ('BITF.TO', 'KEEL');
-
-do $$
-begin
-  if exists (select 1 from cleanup_weg w left join signal_tickers t on t.ticker = w.opvolger where t.ticker is null or not t.active) then
-    raise exception 'een opvolger staat niet (actief) op de watchlist';
-  end if;
-  if exists (select 1 from xinix_strategy_positions p join cleanup_weg w using (ticker) where p.closed_at is null) then
-    raise exception 'een te verwijderen ticker heeft nog een open Potje-positie';
-  end if;
-end $$;
-
-insert into xinix_watchlist_cleanup (ticker, actie, opvolger, toelichting, snapshot)
-select t.ticker, 'verwijderd', w.opvolger, 'oude ticker of nevennotering; de opvolger stond al op de watchlist',
-       jsonb_build_object('signal_tickers', to_jsonb(t),
-                          'signal_price_summary', (select to_jsonb(s) from signal_price_summary s where s.ticker = t.ticker),
-                          'favoriet', (select to_jsonb(f) from xinix_favorites f where f.ticker = t.ticker),
-                          'gezien', (select to_jsonb(g) from xinix_seen g where g.ticker = t.ticker))
-from signal_tickers t join cleanup_weg w using (ticker);
-
-delete from xinix_favorites where ticker in (select ticker from cleanup_weg);
-delete from xinix_seen where ticker in (select ticker from cleanup_weg);
-delete from xinix_notify_mute where ticker in (select ticker from cleanup_weg);
-delete from xinix_fav_alert_state where ticker in (select ticker from cleanup_weg);
-delete from xinix_temp_list where ticker in (select ticker from cleanup_weg);
-delete from xinix_skyshots where ticker in (select ticker from cleanup_weg);
-delete from xinix_skyshot_tickers where ticker in (select ticker from cleanup_weg);
-delete from xinix_hippo_scores where ticker in (select ticker from cleanup_weg);
-delete from xinix_hippo_history where ticker in (select ticker from cleanup_weg);
-delete from xinix_rocket_scores where ticker in (select ticker from cleanup_weg);
-delete from xinix_sprint_scores where ticker in (select ticker from cleanup_weg);
-delete from xinix_star_scan_results where ticker in (select ticker from cleanup_weg);
-delete from xinix_event_history where ticker in (select ticker from cleanup_weg);
-delete from xinix_price_flags where ticker in (select ticker from cleanup_weg);
-delete from signal_scores where ticker in (select ticker from cleanup_weg);
-delete from signal_tickers where ticker in (select ticker from cleanup_weg);
-
-drop table cleanup_weg;
-drop table cleanup_opvolger;
-drop table cleanup_inactief;
+  ('EKSO', 'CHRN'), ('VBIX', 'QXL'), ('NBY', 'SDEV'), ('BITF.TO', 'KEEL')
+), logged as (
+  insert into xinix_watchlist_cleanup (ticker, actie, opvolger, toelichting, snapshot)
+  select t.ticker, 'inactief', w.opvolger, 'oude ticker of nevennotering; de opvolger stond al op de watchlist (wordt gewist)',
+         jsonb_build_object('signal_tickers', to_jsonb(t),
+                            'favoriet', (select to_jsonb(f) from xinix_favorites f where f.ticker = t.ticker))
+  from signal_tickers t join w using (ticker)
+)
+update signal_tickers t
+set active = false, updated_at = now(),
+    notes = concat_ws(E'\n', nullif(t.notes, ''), 'Van de watchlist gehaald op 25 okt. 2026: oude ticker of nevennotering van ' || w.opvolger || '.')
+from w where t.ticker = w.ticker;
 
 -- ── 5a: laatste echte handelsdag ────────────────────────────────────────────────────────────────
 -- Yahoo geeft voor een geschorst of verdwenen aandeel de laatste koers gewoon terug, en de koerspuller
 -- zette updated_at dan op nu. poll-prices vult hier de datum van de laatste dagkoers met volume; de
--- simulaties kopen niets waarvan die 7 dagen of ouder is, en Favorieten dimt zo'n aandeel.
+-- simulaties kopen niets dat bij het ophalen een week stil lag, en Favorieten dimt zo'n aandeel.
 alter table public.signal_price_summary add column if not exists last_trade_date date;
