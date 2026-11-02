@@ -421,8 +421,9 @@ export function SettingsView({ data }: { data?: Dashboard }) {
   );
 }
 
-// Volledige data-export — kennisbehoud. Wekelijks automatisch; hier handmatig
-// te draaien of te downloaden.
+// Volledige data-export: kennisbehoud. De wekelijkse automatische export staat
+// sinds 2026-11-02 uit (Disk IO-budget van de database); hier handmatig te
+// draaien of te downloaden.
 function DataExportCard() {
   const [busy, setBusy] = useState<"export" | "download" | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -456,17 +457,23 @@ function DataExportCard() {
       <SectionHeader
         eyebrow="Kennisbehoud"
         title="Volledige data-export"
-        subtitle="Alle opgebouwde data + uitleg, wekelijks automatisch bewaard."
+        subtitle="Alle opgebouwde data + uitleg, met de hand te maken."
       />
       <Card className="p-4 space-y-3 text-sm">
         <p className="text-neutral-300 leading-relaxed">
-          Elke maandag wordt automatisch een volledige export gemaakt van alle
-          waardevolle data — de watchlist, alle strategieën met posities, de
-          single portfolio, signalen, catalysts, scores en kennis-exports —
-          inclusief een uitleg per tabel. De export wordt naar de Git-repo
-          gecommit (<code className="text-neutral-400">docs/data-export/</code>),
-          die los staat van deze site. Zo blijft alle kennis behouden, ook als
-          de website ooit verdwijnt.
+          Een volledige export bevat alle waardevolle data (de watchlist, alle
+          strategieën met posities, de single portfolio, signalen, catalysts,
+          scores en kennis-exports), inclusief een uitleg per tabel.
+        </p>
+        <p className="text-neutral-400 leading-relaxed">
+          De wekelijkse automatische export (maandag 05:00 UTC) staat sinds
+          2 november uit: hij schreef elke keer ±33 MB in één keer naar de
+          database, en op 2 november liep die direct daarna ruim anderhalf uur
+          vast.
+          Met de hand exporteren kan nog; doe dat op een rustig moment, want het
+          belast de database flink. De kopie naar de Git-repo
+          (<code className="text-neutral-500">docs/data-export/</code>) lukt al
+          sinds eind juni niet meer.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="primary" onClick={download} disabled={busy !== null}>
