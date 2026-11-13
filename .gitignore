@@ -7,3 +7,8 @@ dist
 .DS_Store
 tsconfig.tsbuildinfo
 supabase/.temp/
+
+# onderzoeksdata van SUPERsprinters (groot, opnieuw te maken)
+scripts/supersprinters/ssdata/
+scripts/supersprinters/onderzoek/engine_ref.ts
+__pycache__/
