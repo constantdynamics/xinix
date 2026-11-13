@@ -31,30 +31,27 @@ Begin met meten (het track record en het verbruik), ontwerp en test daarna, en b
   vervalt voor SUPERsprinters, ook voor het meten van nieuws. Voor Sprinters zelf blijft ze gelden.
 - **Te koop bij Saxo Investor**: een vaste lijst beurzen plus uitsluitingen: geen OTC, warrants, rechten, units,
   preferente aandelen, fondsen of ETF's, en geen SPAC zonder eigen bedrijf. De TradingView-filter in `tvMarket`
-  (alleen primaire gewone aandelen) is een begin. Controleer de beurzenlijst één keer tegen Saxo's eigen overzicht
-  en noteer de bron. Twijfel je of Saxo een beurs aanbiedt (bijvoorbeeld CSE of NEO in Canada), zet dat dan in je
-  rapport.
-- **Minimumkoers $0,50**, omgerekend naar dollars (let op pence, ZAc en ILA; zie `_shared/units.ts`). De
-  ondergrens voor de omzet blijft $10.000 per dag, zoals in Sprinters. FNGR, een van de drie geslaagde
-  Sprinters-meldingen, kostte $0,15 en valt hier dus buiten.
+  (alleen primaire gewone aandelen) is een begin. De gebruiker kan NIOB.CN niet kopen bij Saxo, dus de Canadian
+  Securities Exchange (CSE, suffix `.CN`, 567 aandelen in `xinix_universe`) valt eruit. Controleer de rest van de
+  lijst één keer tegen Saxo's eigen overzicht en noteer de bron. Twijfel je of Saxo een beurs aanbiedt
+  (bijvoorbeeld NEO in Canada), zet dat dan in je rapport.
+- **Minimumkoers $0,50**, alleen voor SUPERsprinters, omgerekend naar dollars (let op pence, ZAc en ILA; zie
+  `_shared/units.ts`). De ondergrens voor de omzet blijft $10.000 per dag, zoals in Sprinters. FNGR, een van de
+  drie geslaagde Sprinters-meldingen, kostte $0,15 en valt hier dus buiten. Sprinters zelf blijft zoals het is.
 - **Model**: alles mag: nieuwe kenmerken, een ander soort model, een andere kalibratie. Voorwaarde: een eerlijke
   test op een periode die het model niet heeft gezien laat zien dat het beter is dan het huidige `h14`-model, op
   dezelfde aandelen en dezelfde dagen.
 - **Bronnen**: wat Xinix al heeft, plus gratis bronnen zoals short interest (FINRA), aankopen door bestuurders
   (SEC Form 4), de FDA-kalender en het aantal vrij verhandelbare aandelen. Claude via de API om nieuws te lezen
   mag alleen als het aantoonbaar minder dan $1 per dag kost (zie "Wat je eerst vraagt").
-- **Meldingen**: zoals nu: hoogstens 3 per week en vanaf 15%.
+- **Meldingen**: hoogstens 3 per week en vanaf 15%, zoals nu. Alleen SUPERsprinters meldt, zodra het in de
+  eerlijke test beter blijkt dan Sprinters. Vanaf dat moment stopt Sprinters met melden; tot die tijd meldt
+  Sprinters zoals nu.
+- **Hartje**: een hartje in SUPERsprinters zet het aandeel bij de favorieten en op de watchlist met
+  `no_sim = true`, zoals `adopt` in `xinix-crypto`. De papieren portefeuille koopt het dus niet. Er gaat niets
+  vanzelf naar de watchlist; `universe_auto_add` blijft uit.
 - **Middelen**: de gebruiker vraagt uitdrukkelijk om een slim mechanisme, zodat de database en de andere middelen
   geen problemen krijgen. Zie "Zuinig met middelen".
-
-Aannames (de gebruiker heeft ze nog niet bevestigd):
-
-- Sprinters blijft bestaan, als vergelijking. Sprinters en SUPERsprinters delen samen de grens van 3 meldingen per
-  week. Bij plaatsgebrek gaat SUPERsprinters voor, en een aandeel wordt maar door één van de twee gemeld.
-- De minimumkoers van $0,50 geldt voor alle sprint-meldingen. Het tabblad Sprinters toont goedkopere aandelen nog
-  wel, maar gedimd.
-- Een hartje in SUPERsprinters zet het aandeel bij de favorieten en op de watchlist met `no_sim = true`, zoals
-  `adopt` in `xinix-crypto`. Er gaat niets vanzelf naar de watchlist; `universe_auto_add` blijft uit.
 
 ## Hoe het er nu voor staat (gemeten op 13 november 2026)
 
@@ -122,15 +119,17 @@ de belangrijkste randvoorwaarde. Ontwerp het zo dat het ruim binnen de grenzen b
   alleen wat nu genoteerd staat), splits en eenheidsfouten (`_shared/units.ts` en de schoonmaak in `engine.ts`)
   en stijgingen zonder volume.
 - Is het nieuwe model na eerlijk testen niet beter, zet dan geen meldingen aan vanuit SUPERsprinters, en schrijf
-  op wat je probeerde en waarom het niet werkte. Het tabblad mag dan wel live, met een duidelijke vermelding.
+  op wat je probeerde en waarom het niet werkte. Sprinters blijft dan melden zoals nu. Het tabblad mag wel live,
+  met een duidelijke vermelding.
 
 ## Wat je zelf mag doen
 
 Zonder te vragen: alles lezen en meten; nieuwe tabellen, kolommen, indexen, functies en edge functions toevoegen
 en uitrollen; pg_cron-jobs inplannen binnen het budget; het tabblad bouwen en testen op desktop- en
 telefoonbreedte; PR's maken, mergen en de deploy controleren zoals CLAUDE.md beschrijft; CLAUDE.md en `docs/`
-bijwerken. In `xinix-sprint` mag je de meldingsregels aanpassen voor de gedeelde weekgrens en de minimumkoers, en
-in het tabblad Sprinters goedkopere aandelen dimmen. De kansberekening van Sprinters blijft gelijk.
+bijwerken. Sprinters blijft verder zoals het is, met één uitzondering: zodra de meldingen van SUPERsprinters aan
+gaan, zet je die van Sprinters uit, op een manier die met één instelling terug te draaien is. De kansberekening en
+het tabblad Sprinters veranderen niet.
 
 ## Wat je eerst vraagt
 
@@ -160,6 +159,7 @@ die nodig is voor riskante of onomkeerbare stappen.
 - SUPERsprinters staat live onder Favorieten, werkt op telefoonbreedte en toont per aandeel de kans, de redenen,
   het nieuws, de beurs, de koers en de omzet, plus het eigen track record naast dat van Sprinters.
 - Een tik op een melding opent SUPERsprinters op dat aandeel.
+- Staan de meldingen van SUPERsprinters aan, dan staan die van Sprinters uit, terug te zetten met één instelling.
 - Het nieuwe track record legt per aandeel per dag de kans en de instapkoers vast, en bij een melding ook de kans
   op dat moment.
 - `docs/supersprinters-rapport.md` bevat de testresultaten en het gemeten verbruik. CLAUDE.md heeft een regel in
