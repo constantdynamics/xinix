@@ -15,7 +15,7 @@ const NEWS_TOP = 12;
 // Dagbudget. Gewoon verbruik: 5 runs, ±25 TradingView-verzoeken, ±120 Yahoo-verzoeken, ±800 rijen.
 export const BUDGET = { runs: 30, tv: 80, yahoo: 400, rows: 2500 };
 const BRAKE_FAILS = 3, BRAKE_HOURS = 24;
-const REALERT_DAYS = 10, REALERT_GAIN = 5, PENDING_MAX_H = 20;
+const REALERT_DAYS = 10, REALERT_GAIN = 5, PENDING_MAX_H = 30;
 const RESOLVE_AFTER_DAYS = 16, RESOLVE_TICKERS = 80, GIVE_UP_DAYS = 45;
 const SEED_URL = "https://constantdynamics.github.io/xinix/ss-breadth-seed.json";
 const DAY = C.DAY;
@@ -137,7 +137,7 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
   }
   if (reached === 0) throw new Error(`TradingView gaf niets terug: ${errors.slice(0, 3).join("; ")}`);
   if (!fresh.length) {
-    const fl = await flush(ctx);
+    const fl = await flush(ctx, day);
     return { ok: errors.length === 0, message: `${region}: geen nieuwe sessie (${closed.join(", ")} dicht); ${fl.message ?? ""}`, metrics: { universe, closed: closed.length } };
   }
 
@@ -225,9 +225,13 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
     await sleep(100);
   }
 
+  // Vangnet: is de ochtendmelding niet gelukt (stille uren, storing), dan nu alsnog. Alleen de
+  // kandidaten van eerdere dagen: die van vandaag wachten op de andere regio's.
+  const fl = await flush(ctx, day);
+
   // 6. Wegschrijven: de kopgroep in één opdracht, het track record erbij.
   const fresh3 = isoMinus(day, 3);
-  const scoreRows: Json[] = [], predRows: Json[] = [], cands: Cand[] = [];
+  const scoreRows: Json[] = [], predRows: Json[] = [], cands: string[] = [];
   const rankIn = new Map<number, number>();
   top.forEach((s) => {
     const r = s.row, p = prev.get(r.ticker), nw = news.get(r.ticker);
@@ -243,13 +247,12 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
       prob, prob_base: r2(s.base * 100), raw: s.raw, rank: i + 1, reasons,
       news: nw ?? p?.news ?? null, news_at: nw ? nowIso : (p?.news_at ?? null),
       session_date: day, scored_at: nowIso, first_seen: p?.first_seen ?? day,
+      // Boven de meldgrens: kandidaat voor de ochtendmelding (zie flush).
+      alert_pending: prob >= minProb, alert_note: null,
     });
     const grp = nw ? [...new Set(nw.filter((n) => n.d >= fresh3).map((n) => n.g))] : [];
     predRows.push({ ticker: r.ticker, made_on: day, region: r.region, prob, prob_base: r2(s.base * 100), raw: s.raw, rank: i + 1, entry_close: r.close, news_grp: grp.length ? grp : null });
-    if (prob >= minProb) cands.push({
-      ticker: r.ticker, name: r.name, region: r.region, exchange: r.exchange, currency: r.currency, close: r.close, close_usd: s.pxUsd, change_1d: fin(r.change), perf_1m: fin(r.perf1m),
-      dvol_usd: s.dvolUsd, prob, reasons, news: nw ?? null, session_date: day, base_rate: model.base_rate_pct,
-    });
+    if (prob >= minProb) cands.push(r.ticker);
   });
   must(await sb.from("xinix_ss_scores").upsert(scoreRows, { onConflict: "ticker" }), "scores");
   must(await sb.from("xinix_ss_predictions").upsert(predRows, { onConflict: "ticker,made_on", ignoreDuplicates: true }), "track record");
@@ -257,28 +260,28 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
   must(await sb.from("xinix_ss_state").upsert({ key: `round:${region}`, updated_at: nowIso, value: { markets: fp, day, at: nowIso, universe, eligible: elig.length, top: top.length, mult, model: model.version } }), "toestand");
   meter.rows += scoreRows.length + predRows.length + todayB.length + 1;
 
-  // 7. Melden (eerst wat nog wachtte uit de stille uren, dan deze ronde).
-  const fl = await flush(ctx);
-  const al = await sendAlerts(ctx, cands);
+  // 7. Melden doet deze ronde niet zelf: wie boven de meldgrens staat, wacht op de ochtendmelding.
   const head = top.slice(0, 5).map((s) => `${s.row.ticker} ${r2(s.prob * 100)}%`).join(", ");
   return {
     ok: errors.length === 0,
     message: `${region} ${day}: ${universe} aandelen opgehaald, ${elig.length} doen mee, ${top.length} bewaard; top ${head}; ` +
-      `boven ${minProb}%: ${cands.length}, ${al.text}` + (fl.metrics?.pending ? `; wachtend: ${fl.message}` : "") +
+      `boven ${minProb}%: ${cands.length} (kandidaat voor de ochtendmelding)` + (fl.metrics?.pending ? `; ${fl.message}` : "") +
       (closed.length ? `; dicht: ${closed.join(", ")}` : "") + (seeded ? `; ${seeded} startwaarden marktklimaat` : "") +
       (errors.length ? `; fouten: ${errors.slice(0, 4).join("; ")}` : ""),
-    metrics: { universe, eligible: elig.length, top: top.length, candidates: cands.length, sent: al.sent, held: al.held, capped: al.capped, blocked: al.blocked, pending: al.pending, closed: closed.length, mult, tv: meter.tv, yahoo: meter.yahoo, rows: meter.rows },
+    metrics: { universe, eligible: elig.length, top: top.length, candidates: cands.length, closed: closed.length, mult, tv: meter.tv, yahoo: meter.yahoo, rows: meter.rows },
   };
 }
 
 // ── Meldingen ───────────────────────────────────────────────────────────────
-interface AlertOut { sent: number; held: number; capped: number; blocked: number; pending: number; text: string }
+interface AlertOut { sent: number; held: number; capped: number; blocked: number; failed: boolean; text: string }
+const MAX_CHECKS = 8;      // hoogstens zoveel kandidaten per keer bij Yahoo controleren
 
+/** Verstuurt de meldingen voor `cands` (hoogste kans eerst) en legt per kandidaat vast wat ermee gebeurde. */
 async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
-  const out: AlertOut = { sent: 0, held: 0, capped: 0, blocked: 0, pending: 0, text: "" };
+  const out: AlertOut = { sent: 0, held: 0, capped: 0, blocked: 0, failed: false, text: "" };
   const { sb, settings: s, meter } = ctx;
   const done = (why?: string): AlertOut => {
-    out.text = why ?? `gemeld ${out.sent}, wacht op einde stille uren ${out.pending}, weekplafond ${out.capped}, tegengehouden ${out.blocked}, niet te controleren ${out.held}`;
+    out.text = why ?? `gemeld ${out.sent}, weekplafond ${out.capped}, tegengehouden ${out.blocked}, niet te controleren ${out.held}` + (out.failed ? ", versturen mislukt (later opnieuw)" : "");
     return out;
   };
   if (!cands.length) return done("geen kandidaten");
@@ -299,41 +302,53 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
   const seen = new Set(((se.data ?? []) as Array<{ ticker: string }>).map((x) => x.ticker.toUpperCase()));
   const last = new Map(((pr.data ?? []) as Array<{ ticker: string; alerted_at: string | null; alerted_prob: number | null }>).map((r) => [r.ticker, r]));
   let room = maxWeek > 0 ? Math.max(0, maxWeek - (wk.count ?? 0)) : cands.length;
-  const quiet = inQuietHours(s);
   const log: Array<{ ticker: string; source: string; alert_key: string; priority: number }> = [];
-  const note = (ticker: string, patch: Json) => sb.from("xinix_ss_scores").update(patch).eq("ticker", ticker);
+  // Wat er met de niet-gemelde kandidaten gebeurde, per reden in één opdracht weggeschreven.
+  const notes = new Map<string, string[]>();
+  const skip = (ticker: string, why: string) => { (notes.get(why) ?? notes.set(why, []).get(why)!).push(ticker); };
+  let checks = 0;
 
   for (const c of [...cands].sort((a, b) => b.prob - a.prob)) {
     if (c.prob < minProb) continue;
     const up = c.ticker.toUpperCase();
     // Gedempt of gezien wijkt alleen voor een kans vanaf de override-grens (zoals bij Sprinters).
-    if ((muted.has(up) || seen.has(up)) && c.prob < override) { out.blocked++; await note(c.ticker, { alert_pending: false, alert_note: "gedempt of gezien" }); continue; }
+    if ((muted.has(up) || seen.has(up)) && c.prob < override) { out.blocked++; skip(c.ticker, "niet gemeld: gedempt of gezien"); continue; }
     const l = last.get(c.ticker);
     if (l?.alerted_at && nowMs - Date.parse(l.alerted_at) < REALERT_DAYS * DAY && !(l.alerted_prob != null && c.prob >= Number(l.alerted_prob) + REALERT_GAIN)) {
-      out.blocked++; await note(c.ticker, { alert_pending: false }); continue;
+      out.blocked++; skip(c.ticker, "niet opnieuw gemeld: minder dan 10 dagen geleden al gemeld"); continue;
     }
-    if (room <= 0) { out.capped++; await note(c.ticker, { alert_pending: false, alert_note: `weekplafond van ${maxWeek} meldingen bereikt` }); continue; }
-    if (quiet) { out.pending++; await note(c.ticker, { alert_pending: true, alert_note: "wacht tot na de stille uren" }); continue; }
+    if (room <= 0) { out.capped++; skip(c.ticker, `niet gemeld: weekplafond van ${maxWeek} meldingen bereikt`); continue; }
     // Tweede bron: klopt de koers bij Yahoo? Zo niet, dan is ook het track record niet af te rekenen.
-    if (yahooLeft(ctx) <= 0) { out.held++; await note(c.ticker, { alert_pending: false, alert_note: "dagbudget Yahoo op: niet gecontroleerd, niet gemeld" }); continue; }
+    if (yahooLeft(ctx) <= 0 || checks >= MAX_CHECKS) { out.held++; skip(c.ticker, "niet gemeld: niet meer bij Yahoo te controleren (budget)"); continue; }
+    checks++;
     try {
       meter.yahoo++;
-      const b = await C.yahooBars(c.ticker, "5d");
-      const q = b.close[b.close.length - 1] / c.close;
+      const b = await C.yahooBars(c.ticker, "1mo");
+      // Het slot van de sessiedag zelf (in Azië loopt de volgende sessie dan al).
+      const made = C.dayNumber(c.session_date);
+      let t = -1;
+      for (let i = 0; i < b.day.length; i++) { if (b.day[i] <= made) t = i; else break; }
+      if (t < 0) throw new Error("geen koers bij Yahoo op de sessiedag");
+      const q = b.close[t] / c.close;
       const ok = (x: number) => Math.abs(x - 1) <= 0.03;
-      if (!(ok(q) || ok(q * 100) || ok(q / 100))) throw new Error(`slot bij Yahoo ${C.fmtPrice(b.close[b.close.length - 1])}, bij TradingView ${C.fmtPrice(c.close)}`);
+      if (!(ok(q) || ok(q * 100) || ok(q / 100))) throw new Error(`slot bij Yahoo ${C.fmtPrice(b.close[t])}, bij TradingView ${C.fmtPrice(c.close)}`);
     } catch (e) {
-      out.held++; await note(c.ticker, { alert_pending: false, alert_note: `niet gemeld: ${msg(e).slice(0, 120)}` }); continue;
+      out.held++; skip(c.ticker, `niet gemeld: ${msg(e).slice(0, 110)}`); continue;
     }
     const sent = await sendNtfy(s, c);
-    if (!sent.ok) { meter.errors++; await note(c.ticker, { alert_note: `melding mislukt: ${sent.error?.slice(0, 100)}` }); continue; }
+    // Versturen mislukt: stoppen en de rest laten wachten; de eerstvolgende ronde probeert het opnieuw.
+    if (!sent.ok) { meter.errors++; out.failed = true; out.text = sent.error ?? ""; break; }
     out.sent++; room--; meter.alerts++;
     const at = new Date().toISOString();
-    await note(c.ticker, { alerted_at: at, alerted_prob: c.prob, alert_pending: false, alert_note: null });
+    await sb.from("xinix_ss_scores").update({ alerted_at: at, alerted_prob: c.prob, alert_pending: false, alert_note: null }).eq("ticker", c.ticker);
     // De kans en de koers van het moment van melden komen in het track record te staan.
     await sb.from("xinix_ss_predictions").update({ alerted_at: at, alerted_prob: c.prob, alert_close: c.close }).eq("ticker", c.ticker).eq("made_on", c.session_date);
     meter.rows += 2;
     log.push({ ticker: c.ticker, source: "supersprint", alert_key: "supersprint_50_10d", priority: 5 });
+  }
+  for (const [why, tickers] of notes) {
+    await sb.from("xinix_ss_scores").update({ alert_pending: false, alert_note: why }).in("ticker", tickers);
+    meter.rows += tickers.length;
   }
   if (log.length) await sb.rpc("xinix_notify_record", { p_items: log });
   return done();
@@ -347,11 +362,11 @@ async function sendNtfy(s: Settings, c: Cand): Promise<{ ok: boolean; error?: st
     `${C.safeTicker(c.ticker)}${c.name ? ` · ${c.name}` : ""}`,
     `${C.REGION_NL[c.region]} · ${c.exchange ?? ""}`,
     `🚀 Kans op +50% binnen 10 handelsdagen: ${p}% (${Math.round(c.prob / c.base_rate)}× de basiskans van ${c.base_rate.toFixed(1).replace(".", ",")}%)`,
-    `💲 Slot ${C.fmtPrice(c.close)} ${c.currency ?? ""}${usd} · vandaag ${pctS(c.change_1d)} · maand ${pctS(c.perf_1m)}`,
-    c.dvol_usd != null ? `📊 Omzet ${C.fmtUsd(c.dvol_usd)} per dag` : "",
+    `💲 Slot ${C.fmtPrice(c.close).replace(".", ",")} ${c.currency ?? ""}${usd.replace(".", ",")} op ${c.session_date} · die dag ${pctS(c.change_1d)} · maand ${pctS(c.perf_1m)}`,
+    c.dvol_usd != null ? `📊 Omzet ${C.fmtUsd(c.dvol_usd)} per dag${c.dvol_usd < 100_000 ? " ⚠️ laag: een grotere order beweegt de koers" : ""}` : "",
     "",
     "Waarom:",
-    ...c.reasons.filter((r) => r.f > 1).slice(0, 3).map((r) => `• ×${String(r.f).replace(".", ",")} ${r.label}: ${r.t}`),
+    ...c.reasons.filter((r) => r.f > 1).slice(0, 3).map((r) => `• ×${(r.f >= 10 ? r.f.toFixed(0) : r.f.toFixed(1)).replace(".", ",")} ${r.label}: ${r.t}`),
     c.news?.[0] ? `📰 ${c.news[0].t}` : "",
     "",
     `📲 ${C.appUrl(c.ticker)}`,
@@ -368,14 +383,19 @@ async function sendNtfy(s: Settings, c: Cand): Promise<{ ok: boolean; error?: st
   } catch (e) { return { ok: false, error: msg(e) }; }
 }
 
-/** Meldingen die in de stille uren bleven wachten alsnog versturen (zolang ze vers zijn). */
-export async function flush(ctx: Ctx): Promise<RunResult> {
+/**
+ * De ochtendmelding: één keer per dag, na de stille uren, over de slotstanden van de dag ervoor.
+ * Alle regio's samen, hoogste kans eerst, tot het weekplafond. Zo is het ook getest: per dag de
+ * kandidaten van de hele markt op kans gerangschikt. Zou elke ronde zelf melden, dan neemt een
+ * kandidaat van 15% uit Azië een weekplek in vóórdat een van 24% uit de VS aan de beurt is.
+ */
+export async function flush(ctx: Ctx, beforeDay: string | null = null): Promise<RunResult> {
   const { sb } = ctx;
-  const rows = (must(await sb.from("xinix_ss_scores")
+  const rows = ((must(await sb.from("xinix_ss_scores")
     .select("ticker, name, region, exchange, currency, close, close_usd, change_1d, perf_1m, dvol_usd, prob, reasons, news, session_date, scored_at")
-    .eq("alert_pending", true), "wachtende meldingen") ?? []) as Array<Json>;
-  if (!rows.length) return { ok: true, message: "niets wachtend", metrics: { pending: 0 } };
-  if (inQuietHours(ctx.settings)) return { ok: true, message: `${rows.length} wachten op het einde van de stille uren`, metrics: { pending: rows.length } };
+    .eq("alert_pending", true), "kandidaten") ?? []) as Array<Json>).filter((r) => beforeDay == null || String(r.session_date) < beforeDay);
+  if (!rows.length) return { ok: true, message: "geen kandidaten voor de ochtendmelding", metrics: { pending: 0 } };
+  if (inQuietHours(ctx.settings)) return { ok: true, message: `${rows.length} kandidaten wachten op het einde van de stille uren`, metrics: { pending: rows.length } };
   const freshRows = rows.filter((r) => ctx.nowMs - Date.parse(String(r.scored_at)) <= PENDING_MAX_H * 3600_000);
   const old = rows.filter((r) => !freshRows.includes(r)).map((r) => String(r.ticker));
   if (old.length) await sb.from("xinix_ss_scores").update({ alert_pending: false, alert_note: "verlopen: te lang gewacht" }).in("ticker", old);
@@ -386,7 +406,14 @@ export async function flush(ctx: Ctx): Promise<RunResult> {
     perf_1m: r.perf_1m == null ? null : Number(r.perf_1m), dvol_usd: r.dvol_usd == null ? null : Number(r.dvol_usd), prob: Number(r.prob),
     reasons: (r.reasons as C.Reason[]) ?? [], news: (r.news as C.NewsItem[]) ?? null, session_date: String(r.session_date), base_rate: model.base_rate_pct,
   })));
-  return { ok: true, message: `wachtende meldingen (${rows.length}): ${al.text}${old.length ? `; ${old.length} verlopen` : ""}`, metrics: { pending: rows.length, sent: al.sent, expired: old.length } };
+  // Wie nu niet gemeld is, hoeft niet te blijven wachten: morgen is er een nieuwe stand. Alleen als het
+  // versturen zelf mislukte blijven ze staan, voor een nieuwe poging bij de eerstvolgende ronde.
+  const left = freshRows.map((r) => String(r.ticker));
+  if (left.length && !al.failed) await sb.from("xinix_ss_scores").update({ alert_pending: false }).in("ticker", left).eq("alert_pending", true);
+  return {
+    ok: true, message: `ochtendmelding over ${freshRows.length} kandidaten: ${al.text}${old.length ? `; ${old.length} verlopen` : ""}`,
+    metrics: { pending: rows.length, sent: al.sent, capped: al.capped, blocked: al.blocked, held: al.held, expired: old.length },
+  };
 }
 
 // ── Track record afrekenen ──────────────────────────────────────────────────

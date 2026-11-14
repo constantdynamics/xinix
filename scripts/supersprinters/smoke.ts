@@ -43,6 +43,9 @@ function sb() {
         if (op !== "select") {
           const list = Array.isArray(payload) ? (payload as Row[]) : [payload as Row];
           writes.push({ table, op, n: list.length, sample: list[0] });
+          if (op === "update") {
+            for (const r of tables[table] ?? []) if (filters.every((f) => f(r))) Object.assign(r, payload as Row);
+          }
           if (op === "upsert" || op === "insert") {
             const key = table === "xinix_ss_state" ? "key" : table === "xinix_ss_scores" ? "ticker" : null;
             for (const r of list) {
@@ -69,6 +72,23 @@ function sb() {
 
 const t0 = performance.now();
 const res = await R.guarded(sb(), (ctx) => R.round(ctx, region, date));
+// Daarna de ochtendmelding, tegen een nagebootste ntfy-server (of een onbereikbare, met NTFY=down).
+if (alertsFlag === "alerts") {
+  const http = await import("node:http");
+  const got: string[] = [];
+  const server = http.createServer((req, rs) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { got.push(b); rs.writeHead(200); rs.end("{}"); }); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const port = (server.address() as { port: number }).port;
+  tables.signal_settings[0].ntfy_server = process.env.NTFY === "down" ? "http://127.0.0.1:9/nergens" : `http://127.0.0.1:${port}/`;
+  const fl = await R.guarded(sb(), (ctx) => R.flush(ctx));
+  console.log("OCHTENDMELDING:", fl.message, JSON.stringify(fl.metrics));
+  for (const g of got) { const j = JSON.parse(g); console.log("--- melding ---\n" + j.title + "\n" + j.message + "\nklik: " + j.click + "\nknop: " + JSON.stringify(j.actions)); }
+  server.close();
+  const sc = tables.xinix_ss_scores as Row[];
+  const notes = new Map<string, number>();
+  for (const r of sc) if (r.alert_note) notes.set(String(r.alert_note), (notes.get(String(r.alert_note)) ?? 0) + 1);
+  console.log("notities:", JSON.stringify([...notes]), "| nog wachtend:", sc.filter((r) => r.alert_pending).length, "| gemeld:", sc.filter((r) => r.alerted_at).length);
+}
 console.log(`looptijd ${Math.round(performance.now() - t0)} ms`);
 console.log(res.message);
 console.log(JSON.stringify(res.metrics));
