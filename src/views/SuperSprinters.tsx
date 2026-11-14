@@ -96,7 +96,7 @@ function Detail({ r, threshold }: { r: SuperSprintItem; threshold: number }) {
         {(r.alerted_at || r.alert_note || r.alert_pending) && (
           <div className="text-neutral-400">
             {r.alerted_at ? `🚀 Gemeld op ${fmtTime(r.alerted_at)} bij ${nl(Number(r.alerted_prob ?? 0), 0)}%. ` : ""}
-            {r.alert_pending ? "Melding wacht tot na de stille uren. " : r.alert_note ? `${r.alert_note}.` : ""}
+            {r.alert_pending ? "Kandidaat voor de eerstvolgende ochtendmelding (de hoogste kansen gaan voor). " : r.alert_note ? `${r.alert_note}.` : ""}
           </div>
         )}
         {r.prob >= threshold && (r.dvol_usd ?? 0) < 100_000 && (
@@ -354,8 +354,9 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
         </p>
         <p className="leading-relaxed mt-2">
           <b>Meldingen</b>: vanaf {threshold}%, hoogstens {data?.settings?.ss_alert_max_per_week ?? 3} per week, en per aandeel
-          hoogstens één keer per 10 dagen (tenzij de kans 5 punten hoger is). Een tik op de melding opent dit tabblad op dat
-          aandeel. <b>Hartje</b>: favoriet en op de watchlist, maar het aandeel doet niet mee in het Potje en de papieren
+          hoogstens één keer per 10 dagen (tenzij de kans 5 punten hoger is). Ze gaan één keer per dag uit, 's ochtends na de
+          stille uren, over de slotstanden van de dag ervoor: alle regio's samen, de hoogste kans eerst. Een tik op de melding
+          opent dit tabblad op dat aandeel. <b>Hartje</b>: favoriet en op de watchlist, maar het aandeel doet niet mee in het Potje en de papieren
           portefeuille. <b>Gezien</b> (verrekijker): weg uit deze lijst. Niet meegenomen: de Canadian Securities Exchange en
           Cboe Canada, want die biedt Saxo niet aan; van de Londense AIM is dat niet zeker.
         </p>
@@ -535,7 +536,7 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
                         {top ? `×${nl(top.f, top.f >= 10 ? 0 : 1)} ${top.label}: ${top.t}` : ""}
                       </td>
                       <td className="px-2 py-1.5 text-right text-[11px] text-neutral-500 whitespace-nowrap hidden md:table-cell">
-                        {r.alerted_at ? `🚀 ${fmtDate(r.alerted_at)}` : r.alert_pending ? "wacht" : ""}
+                        {r.alerted_at ? `🚀 ${fmtDate(r.alerted_at)}` : r.alert_pending ? "kandidaat" : ""}
                       </td>
                     </tr>
                     {open && (
