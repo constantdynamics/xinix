@@ -227,9 +227,18 @@ export function SprintersView() {
           Je aandelen met minstens {"★".repeat(minRating)} gerangschikt op de kans dat ze binnen{" "}
           <strong>10 handelsdagen minimaal +50%</strong> stijgen (en een dag later nog minstens +20% staan). De kans
           komt uit 10 jaar dagkoersen van ~6000 aandelen, elke 2 uur op werkdagen opnieuw berekend met verse koersen,
-          en aangevuld met nieuws dat aantoonbaar verschil maakt, zoals biotech-goedkeuringen of sterke boorresultaten.
-          Vanaf {threshold}% krijg je meteen een ntfy-melding (hoogstens {data?.settings?.sprint_alert_max_per_week ?? 3}{" "}
-          per week).
+          en aangevuld met nieuws dat aantoonbaar verschil maakt, zoals biotech-goedkeuringen of sterke boorresultaten.{" "}
+          {threshold > 0 ? (
+            <>
+              Vanaf {threshold}% krijg je meteen een ntfy-melding (hoogstens {data?.settings?.sprint_alert_max_per_week ?? 3} per
+              week).
+            </>
+          ) : (
+            <>
+              De meldingen van Sprinters staan uit: SUPERsprinters meldt nu (terugzetten kan in dat tabblad of bij
+              Instellingen, door de meldgrens weer op 15% te zetten).
+            </>
+          )}
         </p>
         <p className="text-xs text-neutral-500 leading-relaxed mt-2">
           Eerlijk over wat haalbaar is: gemiddeld haalt een aandeel dit op {base != null ? `${base}%` : "~2,5%"} van de
@@ -241,7 +250,7 @@ export function SprintersView() {
 
       <div className="flex flex-wrap items-center gap-3">
         <Stat label="Aandelen" value={`${measured.length}/${items.length}`} hint="gemeten / met genoeg sterren" />
-        <Stat label="Boven drempel" value={String(above)} hint={`≥ ${threshold}%`} />
+        <Stat label="Boven drempel" value={threshold > 0 ? String(above) : "—"} hint={threshold > 0 ? `≥ ${threshold}%` : "meldingen uit"} />
         <Stat label="Hoogste nu" value={measured.length ? `${Math.max(...measured.map((r) => r.prob ?? 0)).toFixed(1)}%` : "—"} />
         <Stat label="Basiskans" value={base != null ? `${base}%` : "—"} hint="gemiddeld aandeel" />
         <Stat label="Plafond" value={ceiling != null ? `${ceiling}%` : "—"} hint="hoogste gemeten klasse" />
