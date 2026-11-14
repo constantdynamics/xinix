@@ -36,6 +36,9 @@ In 2026 alleen is het verschil met het model zoals het nu draait klein (hoofdstu
 - **De meldingen van SUPERsprinters staan aan en die van Sprinters staan uit** sinds 14 november. De
   eerste drie meldingen zijn die dag verstuurd (NOMA, DRIO en DUKR). Sprinters zelf draait gewoon door;
   alleen het melden staat uit.
+- **Bijgesteld op 14 november, na dit verslag** (keuzes van de gebruiker, zie hoofdstuk 5): de meldgrens
+  is 20% in plaats van 15%, een melding gaat alleen uit bij minstens $100.000 omzet per dag, en de
+  vastgelopen taak `xinix-deep-scan` is gerepareerd.
 
 **Wat je moet weten voordat je op een melding koopt** (hoofdstuk 4): een melding zegt dat de kans op
 zo'n sprong ongeveer 1 op 5 is, tegen 1 op 135 voor een willekeurig aandeel. Het zegt niet dat kopen
@@ -93,7 +96,9 @@ eerst wordt gemeten of een soort nieuws iets toevoegt (hoofdstuk 5, punt 2).
 **Meldingen.** Eén keer per dag, om 04:12 UTC (direct na de stille uren), over de slotstanden van de dag
 ervoor. Alle regio's samen, de hoogste kans eerst:
 
-- vanaf 15% (`ss_alert_min_prob`);
+- vanaf 20% (`ss_alert_min_prob`; bij de start 15%, op 14 november verhoogd);
+- alleen bij een omzet van minstens $100.000 per dag (`ss_alert_min_dvol`; de lijst zelf begint bij
+  $10.000);
 - hoogstens 3 per week (`ss_alert_max_per_week`): een melding over de beursdag van dag d telt mee tot en
   met dag d+6;
 - hetzelfde aandeel pas na 10 dagen opnieuw, tenzij de kans 5 punten hoger is;
@@ -260,7 +265,9 @@ meldingen hadden $19.000, $81.000 en $34.000 omzet per dag: een order van een pa
 daar de koers. *Gemeten:* een eis van $100.000 omzet per dag voor meldingen (niet voor de lijst) kost
 niets aan trefkans: 2025–2026 42 van 230 = 18,3% tegen 18,1%, 2020–2024 18,3% tegen 18,8%. *Voorstel:*
 zo'n aparte omzeteis voor meldingen als instelling toevoegen. Jij koos $10.000 als ondergrens, dus dit
-is jouw keuze; het is een kleine wijziging.
+is jouw keuze; het is een kleine wijziging. *Besluit (14 november): gedaan.* De instelling
+`ss_alert_min_dvol` staat op $100.000; een kandidaat eronder krijgt in het tabblad de notitie "niet
+gemeld: omzet onder $100k per dag".
 
 **4. De weekplekken gaan naar de eerste dag met kandidaten.** Op 13 november stonden er 30 aandelen
 boven 15% (in 2026 gemiddeld 11 per dag), dus de drie meldingen van een week gaan meestal op dezelfde
@@ -276,7 +283,9 @@ geeft minder maar betere meldingen:
 
 *Voorstel:* wil je liever één goede melding per week dan drie, zet de meldgrens dan op 20%
 (`ss_alert_min_prob`). In beide perioden gaf dat ongeveer 24% raak. Dat kan nu al, zonder wijziging aan
-de code.
+de code. *Besluit (14 november): gedaan, de meldgrens staat op 20%.* Samen met de omzeteis gaf dat in de
+test 0,5 tot 0,7 meldingen per week. Op de slotstanden van 13 november stonden er twee aandelen boven
+20% (NOMA en DRIO), allebei onder $100.000 omzet: die dag zou er dus geen melding zijn uitgegaan.
 
 **5. Eén bijsturing voor de hele wereld.** De bijsturing is één getal, maar de regio's lopen uiteen:
 over de laatste vier maanden kwam in de VS 99% uit van wat voorspeld was, in Europa 87%, in Azië en
@@ -306,7 +315,12 @@ ongeveer een kwart procent van wat de database per dag schrijft (hoofdstuk 8). M
 bij elke run: 72 keer per dag haalt hij dezelfde 21 aandelen opnieuw op bij Yahoo (ruim 1.500 verzoeken
 per dag) en loopt dan vast op het wegschrijven van zijn track record. Het track record van de
 explosie-motor wordt daardoor sinds begin november niet meer bijgewerkt. Dit is een bestaande functie,
-dus niet aangeraakt. *Voorstel:* laten repareren; het is vermoedelijk een kleine wijziging.
+dus niet aangeraakt. *Voorstel:* laten repareren; het is vermoedelijk een kleine wijziging. *Besluit
+(14 november): gerepareerd.* De oorzaak: bij het terugschrijven van een afgerekende voorspelling
+ontbraken drie verplichte kolommen. Hersteld in de database (`2026-11-14_xinix_deep_scan_repair.sql`),
+zonder de functie opnieuw uit te rollen; daarbij komt een aandeel nu pas in de wachtrij als afrekenen
+echt kan, anders was dezelfde lus in december teruggekomen. Daarna zijn de 90 verlopen voorspellingen
+afgerekend en is de wachtrij leeg.
 
 ## 6. Wat geprobeerd is en niet hielp, of niet gebouwd is
 
@@ -439,7 +453,7 @@ later: gemiddeld 0,04 procentpunt, hoogstens 0,9.
 |---|---|
 | Meldingen van SUPERsprinters uit, die van Sprinters weer aan | Knop onderaan het tabblad (beheertoken), of `update signal_settings set ss_alerts = false, sprint_alert_min_prob = 15 where id = 1;` |
 | Alles van SUPERsprinters stilzetten (het tabblad blijft leesbaar) | Knop in het tabblad, of `update signal_settings set ss_enabled = false where id = 1;` |
-| Minder of betere meldingen | `ss_alert_min_prob` (nu 15) en `ss_alert_max_per_week` (nu 3) in `signal_settings` |
+| Minder of betere meldingen | `ss_alert_min_prob` (nu 20), `ss_alert_min_dvol` (nu 100000) en `ss_alert_max_per_week` (nu 3) in `signal_settings` |
 | De vijf taken pauzeren | `select cron.alter_job(jobid, active := false) from cron.job where jobname like 'xinix-ss-%';` |
 
 Er hoeft nergens iets gewist te worden. De tabellen `xinix_ss_*` en de functie `xinix-supersprint`
@@ -447,8 +461,9 @@ kunnen blijven staan; ze kosten niets als ze stilstaan.
 
 ## 11. Open punten
 
-- **Jouw keuzes uit hoofdstuk 5**: een tweede maatstaf vanaf de opening (punt 1), een omzeteis voor
-  meldingen (punt 3), de meldgrens (punt 4), en de reparatie van `xinix-deep-scan` (punt 9).
+- **Een tweede maatstaf vanaf de opening** (hoofdstuk 5, punt 1): op 14 november akkoord om te laten
+  onderzoeken, samen met nieuws, de weekplekken en de bijsturing per regio. De omzeteis, de meldgrens
+  en de reparatie van `xinix-deep-scan` zijn die dag uitgevoerd.
 - **AIM en First North Helsinki** doen mee terwijl niet zeker is dat Saxo ze aanbiedt (hoofdstuk 7).
 - **Beurswaarde bij de explosie-motor.** TradingView geeft de beurswaarde in de lokale munt; de
   explosie-motor slaat die op als dollars (`mcap_usd` in `xinix_universe`). SUPERsprinters rekent hem
