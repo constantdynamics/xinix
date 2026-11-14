@@ -91,7 +91,7 @@ function Detail({ r, threshold }: { r: SuperSprintItem; threshold: number }) {
           beurswaarde {fmtUsd(r.mcap_usd)} · vrij verhandelbaar {fmtCount(r.float_shares)} aandelen
           {r.rel_vol != null ? ` · volume ${nl(r.rel_vol)}× normaal` : ""}
           {r.first_seen ? ` · in de kopgroep sinds ${fmtDate(r.first_seen)}` : ""}
-          {r.prob_base != null && Math.abs(r.prob_base - r.prob) >= 0.3 ? ` · zonder bijsturing ${nl(r.prob_base)}%` : ""}
+          {r.prob_base != null && Math.abs(r.prob_base - r.prob) >= 0.3 ? ` · vóór bijsturing en demping ${nl(r.prob_base)}%` : ""}
         </div>
         {(r.alerted_at || r.alert_note || r.alert_pending) && (
           <div className="text-neutral-400">
