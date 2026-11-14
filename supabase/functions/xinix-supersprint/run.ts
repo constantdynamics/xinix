@@ -292,15 +292,21 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
   if (!(minProb > 0)) return done("meldgrens 0: uit");
   const ct = cands.map((c) => c.ticker);
   const nowMs = Date.now();
+  // Week en herhaling tellen in beursdagen, niet in uren: een melding over de sessie van dag d telt
+  // mee tot en met dag d+6 (week) en d+9 (herhaling). Zo zijn de regels ook getest, en zo schuift
+  // een vaste melddag niet elke week een dag op doordat de vorige melding een paar seconden later viel.
+  const sessionDay = cands.reduce((m, c) => (c.session_date > m ? c.session_date : m), "");
   const [mu, se, pr, wk] = await Promise.all([
     sb.from("xinix_notify_mute").select("ticker, muted_until").in("ticker", ct),
     sb.from("xinix_seen").select("ticker").in("ticker", ct),
-    sb.from("xinix_ss_scores").select("ticker, alerted_at, alerted_prob").in("ticker", ct),
-    sb.from("xinix_ss_predictions").select("ticker", { count: "exact", head: true }).gte("alerted_at", new Date(nowMs - 7 * DAY).toISOString()),
+    sb.from("xinix_ss_predictions").select("ticker, made_on, alerted_prob").in("ticker", ct).not("alerted_at", "is", null).gte("made_on", isoMinus(sessionDay, REALERT_DAYS - 1)).order("made_on"),
+    sb.from("xinix_ss_predictions").select("ticker", { count: "exact", head: true }).not("alerted_at", "is", null).gte("made_on", isoMinus(sessionDay, 6)),
   ]);
   const muted = new Set(((mu.data ?? []) as Array<{ ticker: string; muted_until: string | null }>).filter((m) => !m.muted_until || Date.parse(m.muted_until) > nowMs).map((m) => m.ticker.toUpperCase()));
   const seen = new Set(((se.data ?? []) as Array<{ ticker: string }>).map((x) => x.ticker.toUpperCase()));
-  const last = new Map(((pr.data ?? []) as Array<{ ticker: string; alerted_at: string | null; alerted_prob: number | null }>).map((r) => [r.ticker, r]));
+  // Oplopend op datum: de laatste melding per aandeel blijft staan.
+  const last = new Map((must(pr, "eerdere meldingen") as Array<{ ticker: string; made_on: string; alerted_prob: number | null }>).map((r) => [r.ticker, r]));
+  if (wk.error) throw new Error(`weekplafond: ${wk.error.message}`);
   let room = maxWeek > 0 ? Math.max(0, maxWeek - (wk.count ?? 0)) : cands.length;
   const log: Array<{ ticker: string; source: string; alert_key: string; priority: number }> = [];
   // Wat er met de niet-gemelde kandidaten gebeurde, per reden in één opdracht weggeschreven.
@@ -314,7 +320,7 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
     // Gedempt of gezien wijkt alleen voor een kans vanaf de override-grens (zoals bij Sprinters).
     if ((muted.has(up) || seen.has(up)) && c.prob < override) { out.blocked++; skip(c.ticker, "niet gemeld: gedempt of gezien"); continue; }
     const l = last.get(c.ticker);
-    if (l?.alerted_at && nowMs - Date.parse(l.alerted_at) < REALERT_DAYS * DAY && !(l.alerted_prob != null && c.prob >= Number(l.alerted_prob) + REALERT_GAIN)) {
+    if (l && !(l.alerted_prob != null && c.prob >= Number(l.alerted_prob) + REALERT_GAIN)) {
       out.blocked++; skip(c.ticker, "niet opnieuw gemeld: minder dan 10 dagen geleden al gemeld"); continue;
     }
     if (room <= 0) { out.capped++; skip(c.ticker, `niet gemeld: weekplafond van ${maxWeek} meldingen bereikt`); continue; }

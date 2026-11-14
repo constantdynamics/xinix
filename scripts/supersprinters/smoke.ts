@@ -1,6 +1,8 @@
 // Droogloop van een hele ronde tegen het echte TradingView en Yahoo, met een nagebootste database:
 //   NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/supersprinters/smoke.ts <ronde> <datum> <fx.json> [alerts]
 // Er wordt niets weggeschreven en niets gemeld; het script laat zien wát er geschreven zou worden.
+// Met "alerts" volgt de ochtendmelding tegen een nagebootste ntfy-server. QUIET=0 zet de stille uren
+// uit, NTFY=down maakt de server onbereikbaar, PRE='[…]' zet eerdere meldingen klaar (weekplafond, herhaling).
 import * as fs from "node:fs";
 import * as C from "../../supabase/functions/xinix-supersprint/core.ts";
 import * as R from "../../supabase/functions/xinix-supersprint/run.ts";
@@ -33,6 +35,7 @@ function sb() {
       gt(k: string, v: string | number) { filters.push((r) => (r[k] as string | number) > v); return b; },
       lte(k: string, v: string | number) { filters.push((r) => (r[k] as string | number) <= v); return b; },
       is(k: string, v: unknown) { filters.push((r) => (r[k] ?? null) === v); return b; },
+      not(k: string, _op: string, v: unknown) { filters.push((r) => (r[k] ?? null) !== v); return b; },
       order(k: string, o?: { ascending?: boolean }) { rows.sort((a, c) => (String(a[k]) < String(c[k]) ? -1 : 1) * (o?.ascending === false ? -1 : 1)); return b; },
       limit(n: number) { rows = rows.slice(0, n); return b; },
       maybeSingle() { single = true; return b; }, single() { single = true; return b; },
@@ -73,21 +76,34 @@ function sb() {
 const t0 = performance.now();
 const res = await R.guarded(sb(), (ctx) => R.round(ctx, region, date));
 // Daarna de ochtendmelding, tegen een nagebootste ntfy-server (of een onbereikbare, met NTFY=down).
+// PRE zet eerdere meldingen klaar; een lijst van lijsten draait meerdere gevallen na elkaar op dezelfde ronde:
+//   PRE='[[],[{"ticker":"X","made_on":"2026-11-07","alerted_prob":20}]]'
 if (alertsFlag === "alerts") {
   const http = await import("node:http");
-  const got: string[] = [];
-  const server = http.createServer((req, rs) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { got.push(b); rs.writeHead(200); rs.end("{}"); }); });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
-  const port = (server.address() as { port: number }).port;
-  tables.signal_settings[0].ntfy_server = process.env.NTFY === "down" ? "http://127.0.0.1:9/nergens" : `http://127.0.0.1:${port}/`;
-  const fl = await R.guarded(sb(), (ctx) => R.flush(ctx));
-  console.log("OCHTENDMELDING:", fl.message, JSON.stringify(fl.metrics));
-  for (const g of got) { const j = JSON.parse(g); console.log("--- melding ---\n" + j.title + "\n" + j.message + "\nklik: " + j.click + "\nknop: " + JSON.stringify(j.actions)); }
-  server.close();
-  const sc = tables.xinix_ss_scores as Row[];
-  const notes = new Map<string, number>();
-  for (const r of sc) if (r.alert_note) notes.set(String(r.alert_note), (notes.get(String(r.alert_note)) ?? 0) + 1);
-  console.log("notities:", JSON.stringify([...notes]), "| nog wachtend:", sc.filter((r) => r.alert_pending).length, "| gemeld:", sc.filter((r) => r.alerted_at).length);
+  const parsed = JSON.parse(process.env.PRE ?? "[[]]") as Row[] | Row[][];
+  const scenarios = (Array.isArray(parsed[0]) || parsed.length === 0 ? parsed : [parsed]) as Row[][];
+  const snap = structuredClone(tables);
+  for (const pre of scenarios.length ? scenarios : [[]]) {
+    for (const k of Object.keys(tables)) tables[k] = structuredClone(snap[k]);
+    const got: string[] = [];
+    const server = http.createServer((req, rs) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { got.push(b); rs.writeHead(200); rs.end("{}"); }); });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const port = (server.address() as { port: number }).port;
+    tables.signal_settings[0].ntfy_server = process.env.NTFY === "down" ? "http://127.0.0.1:9/nergens" : `http://127.0.0.1:${port}/`;
+    for (const p of pre) tables.xinix_ss_predictions.push({ ...p, alerted_at: `${p.made_on}T04:12:05Z` });
+    const fl = await R.guarded(sb(), (ctx) => R.flush(ctx));
+    console.log(`\nOCHTENDMELDING (eerdere meldingen: ${pre.length ? pre.map((p) => `${p.ticker} ${p.made_on} ${p.alerted_prob}%`).join(", ") : "geen"}):`, fl.message, JSON.stringify(fl.metrics));
+    for (const g of got) {
+      const j = JSON.parse(g);
+      if (scenarios.length > 1) console.log("  gemeld: " + j.title);
+      else console.log("--- melding ---\n" + j.title + "\n" + j.message + "\nklik: " + j.click + "\nknop: " + JSON.stringify(j.actions));
+    }
+    server.close();
+    const sc = tables.xinix_ss_scores as Row[];
+    const notes = new Map<string, number>();
+    for (const r of sc) if (r.alert_note) notes.set(String(r.alert_note), (notes.get(String(r.alert_note)) ?? 0) + 1);
+    console.log("notities:", JSON.stringify([...notes]), "| nog wachtend:", sc.filter((r) => r.alert_pending).length, "| gemeld:", sc.filter((r) => r.alerted_at).length);
+  }
 }
 console.log(`looptijd ${Math.round(performance.now() - t0)} ms`);
 console.log(res.message);

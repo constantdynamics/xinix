@@ -19,7 +19,7 @@
 // precies wat in de repo staat. Na een wijziging in run.ts of core.ts: eerst mergen, dan hieronder de
 // commit bijwerken en dit bestand opnieuw uitrollen (deploy_edge_function, verify_jwt uit).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import * as R from "https://raw.githubusercontent.com/constantdynamics/xinix/3553e46161f051cf61ac0bc0c527a4981a0abbf3/supabase/functions/xinix-supersprint/run.ts";
+import * as R from "https://raw.githubusercontent.com/constantdynamics/xinix/d40467127b3a12149c51ad1c3dcf024a7aef9db5/supabase/functions/xinix-supersprint/run.ts";
 
 const ALLOWED = new Set(["https://constantdynamics.github.io", "http://localhost:5173", "http://localhost:4173"]);
 function cors(req: Request): Record<string, string> {
