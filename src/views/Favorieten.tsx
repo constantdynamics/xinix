@@ -27,6 +27,7 @@ import { PriceChartModal } from "./PriceChartModal";
 import { RakettenView } from "./Raketten";
 import { HipposView } from "./Hippos";
 import { SprintersView } from "./Sprinters";
+import { SuperSprintersView } from "./SuperSprinters";
 import { TempListView } from "./TempList";
 import { StarScannerView } from "./StarScanner";
 import { CryptoView } from "./Crypto";
@@ -94,8 +95,8 @@ const OPLOPEND_EERST = new Set<SortKey>(["ticker", "company", "chg_1d", "chg_1w"
 const VIEW_KEY = "xinix_favorieten_view";
 const SUBTAB_KEY = "xinix_favorieten_subtab";
 
-type FavSubTab = "lijst" | "verdubbelaars" | "hippos" | "sprinters" | "scanner" | "tijdelijk" | "crypto" | "skyshots";
-const SUBTABS: FavSubTab[] = ["lijst", "verdubbelaars", "hippos", "sprinters", "scanner", "tijdelijk", "crypto", "skyshots"];
+type FavSubTab = "lijst" | "verdubbelaars" | "hippos" | "sprinters" | "supersprinters" | "scanner" | "tijdelijk" | "crypto" | "skyshots";
+const SUBTABS: FavSubTab[] = ["lijst", "verdubbelaars", "hippos", "sprinters", "supersprinters", "scanner", "tijdelijk", "crypto", "skyshots"];
 
 function fmtPrice(v: number | null): string {
   if (v == null) return "—";
@@ -837,6 +838,7 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
           ["verdubbelaars", "🚀 Raketten"],
           ["hippos", "🦛 Hippos"],
           ["sprinters", "⚡ Sprinters"],
+          ["supersprinters", "⚡⚡ SUPERsprinters"],
           ["scanner", "🌟 Scanner"],
           ["tijdelijk", "🗂️ Tijdelijk"],
           ["crypto", "🪙 Crypto"],
@@ -862,6 +864,9 @@ export function FavorietenView({ initialDashboard, initialScans }: FavorietenVie
         <HipposView />
       ) : subTab === "sprinters" ? (
         <SprintersView />
+      ) : subTab === "supersprinters" ? (
+        // Een hartje zet het aandeel op de watchlist: het dashboard buiten de cache om herladen, zoals bij Crypto.
+        <SuperSprintersView onAdopted={() => { fetchDashboard(true).then(setDashboard).catch(() => {}); }} />
       ) : subTab === "scanner" ? (
         <StarScannerView scans={scans} />
       ) : subTab === "tijdelijk" ? (

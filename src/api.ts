@@ -1517,6 +1517,77 @@ export async function cryptoAdopt(ticker: string): Promise<{ ok: boolean; added:
   return (await res.json()) as { ok: boolean; added: boolean };
 }
 
+// ── SUPERsprinters (Favorieten → SUPERsprinters) ──────────────────────────
+// xinix-supersprint: alle aandelen op de Saxo-beurzen, gerangschikt op de kans op +50% binnen
+// 10 handelsdagen. Drie rondes per handelsdag, elk kort na het slot van de eigen beurzen.
+export interface SuperSprintReason { g: string; label: string; f: number; t: string }
+export interface SuperSprintNews { t: string; u: string | null; p: string | null; d: string; g: string }
+export interface SuperSprintItem {
+  ticker: string; market: string; region: number; exchange: string | null; name: string | null; currency: string | null; sector: string | null;
+  close: number | null; close_usd: number | null; change_1d: number | null; perf_1m: number | null; vol_m: number | null; rel_vol: number | null;
+  dvol_usd: number | null; mcap_usd: number | null; float_shares: number | null;
+  prob: number; prob_base: number | null; rank: number | null;
+  reasons: SuperSprintReason[] | null; news: SuperSprintNews[] | null; news_at: string | null;
+  session_date: string; scored_at: string; first_seen: string | null;
+  alerted_at: string | null; alerted_prob: number | null; alert_pending: boolean; alert_note: string | null;
+}
+export interface SuperSprintTrack extends SprintTrackRecord { alerts: { n: number; hits: number; open: number; avg_prob?: number | null } }
+export interface SuperSprintBudgetDay { day: string; runs: number; tv: number; yahoo: number; rows_written: number; ms: number; errors: number; alerts: number }
+export interface SuperSprintResponse {
+  items: SuperSprintItem[];
+  track_record: SuperSprintTrack | null;
+  sprint_track_record: SprintTrackRecord | null;
+  settings: {
+    ss_enabled: boolean; ss_alerts: boolean; ss_alert_min_prob: number; ss_alert_max_per_week: number; ss_override_min_prob: number;
+    sprint_alert_min_prob: number; quiet_hours_start: number | null; quiet_hours_end: number | null;
+  } | null;
+  state: Record<string, Record<string, unknown>>;
+  budget: { limits: { runs: number; tv: number; yahoo: number; rows: number }; days: SuperSprintBudgetDay[] };
+  breadth: Array<{ region: number; day: string; n: number; b1_20: number; b1_10: number; bm_50: number }>;
+  news_lift: Array<{ grp: string; n: number; hits: number; expected: number; lift: number | null }>;
+  top_n: number;
+  computed_at: string | null;
+  error: string | null;
+}
+export async function fetchSuperSprint(): Promise<SuperSprintResponse> {
+  const res = await fetch(apiUrl("/api/xinix-supersprint"));
+  if (!res.ok) throw new Error(`xinix-supersprint ${res.status}`);
+  return (await res.json()) as SuperSprintResponse;
+}
+/** Hartje in SUPERsprinters: op de watchlist, maar niet in het Potje en de papieren portefeuille. */
+export async function superSprintAdopt(ticker: string): Promise<{ ok: boolean; added: boolean }> {
+  const res = await fetch(apiUrl("/api/xinix-supersprint"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ticker, action: "adopt" }),
+  });
+  if (!res.ok) throw new Error(`op de watchlist zetten mislukt (${res.status}): ${await res.text()}`);
+  return (await res.json()) as { ok: boolean; added: boolean };
+}
+export async function superSprintSettings(patch: { ss_enabled?: boolean; ss_alerts?: boolean }): Promise<void> {
+  const res = await fetch(apiUrl("/api/xinix-supersprint"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ action: "settings", ...patch }),
+  });
+  if (!res.ok) throw new Error(`instelling opslaan mislukt (${res.status}): ${await res.text()}`);
+}
+// Uitkomsten van de eerlijke test (public/ss-holdout.json, gemaakt bij het trainen van het model).
+export interface SuperSprintTestModel {
+  n: number; days: number; base_pct: number; explosions: number; auc: number; ap: number; brier_e4: number; logloss: number;
+  alerts: { alerts: number; resolved: number; hits: number; hit_pct: number | null; avg_prob: number | null; per_week: number; stocks: number };
+  top5: { hit_pct: number; explosions: number }; top10: { hit_pct: number; explosions: number };
+  lead: { explosions: number; top10_day_before_pct: number; top20_day_before_pct: number; top50_day_before_pct: number; top50_any5_pct: number; median_rank_day_before: number; median_rank_5_before: number };
+  calib: Array<{ band: string; n: number; pred: number | null; real: number | null }>;
+}
+export interface SuperSprintTestBlock { label: string; oudA: SuperSprintTestModel; oudB: SuperSprintTestModel; new: SuperSprintTestModel }
+export interface SuperSprintTest { model: string; made: string; holdout: SuperSprintTestBlock; dev: SuperSprintTestBlock }
+export async function fetchSuperSprintTest(): Promise<SuperSprintTest> {
+  const res = await fetch(`${import.meta.env.BASE_URL}ss-holdout.json`);
+  if (!res.ok) throw new Error(`ss-holdout ${res.status}`);
+  return (await res.json()) as SuperSprintTest;
+}
+
 // ── Skyshots (Favorieten → Skyshots) ──────────────────────────────────────
 // Wekelijkse scan door xinix-skyshots: handelsdagen waarop de hoogste koers
 // minstens +50% boven het vorige slot lag (het tabblad kiest de drempel), over

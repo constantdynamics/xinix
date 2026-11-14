@@ -13,8 +13,13 @@
 // het model uit public/ss-model.json en schrijft alleen de kopgroep weg. Yahoo is alleen nodig voor
 // nieuws bij de bovenste aandelen, een controle vóór een melding en het afrekenen van het track record.
 // Uitzetten: signal_settings.ss_enabled = false. Zie docs/supersprinters-rapport.md.
+//
+// Uitrollen: alleen dit bestand gaat naar Supabase. Het eigenlijke werk (run.ts en core.ts) wordt bij
+// het uitrollen opgehaald uit de openbare repository, vastgepind op één commit. Zo draait in productie
+// precies wat in de repo staat. Na een wijziging in run.ts of core.ts: eerst mergen, dan hieronder de
+// commit bijwerken en dit bestand opnieuw uitrollen (deploy_edge_function, verify_jwt uit).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import * as R from "./run.ts";
+import * as R from "https://raw.githubusercontent.com/constantdynamics/xinix/03452f3ee6fb1465e8fa476d91e15a0b7a7b5c03/supabase/functions/xinix-supersprint/run.ts";
 
 const ALLOWED = new Set(["https://constantdynamics.github.io", "http://localhost:5173", "http://localhost:4173"]);
 function cors(req: Request): Record<string, string> {

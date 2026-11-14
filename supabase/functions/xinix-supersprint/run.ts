@@ -8,10 +8,11 @@ export type Json = Record<string, unknown>;
 export interface RunResult { ok: boolean; message?: string; metrics?: Json }
 
 // ── Zuinigheid ──────────────────────────────────────────────────────────────
-// Per ronde hoogstens zoveel aandelen wegschrijven; de rest van de markt blijft in het geheugen.
+// Per regio hoogstens zoveel aandelen wegschrijven; de rest van de markt blijft in het geheugen.
+// (De ronde "amerika" telt twee regio's: de VS en Canada hebben elk hun eigen kopgroep.)
 export const TOP_N = 100, TOP_MIN = 25, MIN_BASE = 0.01;
 const NEWS_TOP = 12;
-// Dagbudget. Gewoon verbruik: 5 runs, ±30 TradingView-verzoeken, ±120 Yahoo-verzoeken, ±650 rijen.
+// Dagbudget. Gewoon verbruik: 5 runs, ±25 TradingView-verzoeken, ±120 Yahoo-verzoeken, ±800 rijen.
 export const BUDGET = { runs: 30, tv: 80, yahoo: 400, rows: 2500 };
 const BRAKE_FAILS = 3, BRAKE_HOURS = 24;
 const REALERT_DAYS = 10, REALERT_GAIN = 5, PENDING_MAX_H = 20;
@@ -202,7 +203,13 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
     scored.push({ row: e.r, pxUsd: e.pxUsd, dvolUsd: e.dvolUsd, x, raw, base, prob: C.finalProb(model, base, mult) });
   }
   const ranked = scored.filter((s) => !C.isSpac(s.row.name)).sort((a, b) => b.raw - a.raw);
-  const top = ranked.filter((s, i) => i < TOP_MIN || (i < TOP_N && s.base >= MIN_BASE));
+  const seenPerRegion = new Map<number, number>();
+  const top = ranked.filter((s) => {
+    const i = seenPerRegion.get(s.row.region) ?? 0;
+    const keep = i < TOP_MIN || (i < TOP_N && s.base >= MIN_BASE);
+    if (keep) seenPerRegion.set(s.row.region, i + 1);
+    return keep;
+  });
   const ref = C.medianVector(model, scored.map((s) => s.x));
   const tickers = top.map((s) => s.row.ticker);
   const prevRows = must(await sb.from("xinix_ss_scores").select("ticker, first_seen, news, news_at").in("ticker", tickers), "vorige stand") as Array<{ ticker: string; first_seen: string | null; news: C.NewsItem[] | null; news_at: string | null }>;
@@ -221,8 +228,11 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
   // 6. Wegschrijven: de kopgroep in één opdracht, het track record erbij.
   const fresh3 = isoMinus(day, 3);
   const scoreRows: Json[] = [], predRows: Json[] = [], cands: Cand[] = [];
-  top.forEach((s, i) => {
+  const rankIn = new Map<number, number>();
+  top.forEach((s) => {
     const r = s.row, p = prev.get(r.ticker), nw = news.get(r.ticker);
+    const i = rankIn.get(r.region) ?? 0;          // plaats binnen de eigen regio
+    rankIn.set(r.region, i + 1);
     const reasons = C.explain(model, s, ref, bmap.get(r.region)!);
     const mcapUsd = r.mcap * (C.usdPer(r.mcapCur ?? r.currency, perEur) ?? NaN);
     const prob = r2(s.prob * 100);
@@ -427,7 +437,7 @@ export async function resolve(ctx: Ctx): Promise<RunResult> {
 // ── Lezen (tabblad) ─────────────────────────────────────────────────────────
 export async function read(sb: SB): Promise<Json> {
   const today = new Date().toISOString().slice(0, 10);
-  const [sc, tr, st, se, sta, bu, br, li] = await Promise.all([
+  const [sc, tr, se, st, sta, bu, br, li] = await Promise.all([
     sb.from("xinix_ss_scores").select("ticker, market, region, exchange, name, currency, sector, close, close_usd, change_1d, perf_1m, vol_m, rel_vol, dvol_usd, mcap_usd, float_shares, prob, prob_base, rank, reasons, news, news_at, session_date, scored_at, first_seen, alerted_at, alerted_prob, alert_pending, alert_note")
       .gte("session_date", isoMinus(today, 6)).order("prob", { ascending: false }).limit(600),
     sb.rpc("xinix_ss_track_record"),
