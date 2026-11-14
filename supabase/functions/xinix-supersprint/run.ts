@@ -255,7 +255,12 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
       alert_pending: prob >= minProb, alert_note: null,
     });
     const grp = nw ? [...new Set(nw.filter((n) => n.d >= fresh3).map((n) => n.g))] : [];
-    predRows.push({ ticker: r.ticker, made_on: day, region: r.region, prob, prob_base: r2(s.base * 100), raw: s.raw, rank: i + 1, entry_close: r.close, news_grp: grp.length ? grp : null });
+    // Omzet, beurswaarde en vrij verhandelbare aandelen gaan mee het track record in: de stand per aandeel
+    // wordt elke dag overschreven, en het aantal vrij verhandelbare aandelen is later nergens terug te vinden.
+    predRows.push({
+      ticker: r.ticker, made_on: day, region: r.region, prob, prob_base: r2(s.base * 100), raw: s.raw, rank: i + 1, entry_close: r.close, news_grp: grp.length ? grp : null,
+      dvol_usd: Math.round(s.dvolUsd), mcap_usd: Number.isFinite(mcapUsd) ? Math.round(mcapUsd) : null, float_shares: Number.isFinite(r.float) ? Math.round(r.float) : null,
+    });
     if (prob >= minProb) cands.push(r.ticker);
   });
   must(await sb.from("xinix_ss_scores").upsert(scoreRows, { onConflict: "ticker" }), "scores");
