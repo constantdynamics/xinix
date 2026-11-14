@@ -19,7 +19,17 @@ node --experimental-strip-types scripts/supersprinters/smoke.ts amerika 2026-11-
 ```
 
 Droogloop van een hele ronde tegen het echte TradingView en Yahoo met een nagebootste database: laat
-zien wat er geschreven zou worden, zonder iets te schrijven of te melden.
+zien wat er geschreven zou worden, zonder iets te schrijven of te melden. Met `alerts` erachter volgt de
+ochtendmelding tegen een nagebootste ntfy-server; `PRE='[[…],[…]]'` zet eerdere meldingen klaar en draait
+meerdere gevallen na elkaar (weekplafond, herhaalregel), `NTFY=down` maakt de server onbereikbaar.
+
+```bash
+node --experimental-strip-types scripts/supersprinters/smoke.ts resolve <open.json> <fx.json>
+```
+
+Rekent voorspellingen af tegen echte Yahoo-koersen. `open.json` is een lijst `{ticker, made_on, y}`; met
+`y` (de uitkomst uit het onderzoek) erbij vergelijkt het script de twee. Zo getest op 138 voorspellingen
+uit oktober 2026 in alle vier de regio's: 138 gelijk.
 
 ## Het onderzoek opnieuw doen (map `onderzoek/`)
 
@@ -40,7 +50,9 @@ Nodig: Python met numpy, pandas, pyarrow, lightgbm, scikit-learn, aiohttp, reque
 
 Overig: `check_tv.py` (definities van de TradingView-velden tegen de dagkoersen), `policy.py` en
 `calib_exp.py` (ijking en meldregels), `finra.py` en `si_feat.py` (short interest: getest, voegt niets toe),
-`compare.py` (tussentijdse vergelijkingen).
+`compare.py` (tussentijdse vergelijkingen), `productie_check.py` (drie keuzes in de productiecode nagerekend
+op de testvoorspellingen: hoeveel aandelen per run het afrekenen van het track record nodig heeft, de
+bijsturing over de bewaarde kopgroep in plaats van de top 300, en de opstartregel van de bijsturing).
 
 Na opnieuw trainen: `public/ss-model.json` vervangen, het controlegetal (`MODEL_SHA256`) in
 `supabase/functions/xinix-supersprint/core.ts` bijwerken, `test_core.ts` draaien en de functie opnieuw
