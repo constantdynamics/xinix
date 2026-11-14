@@ -3,10 +3,10 @@
 --
 -- Zuinig ontwerp (de database draait op Micro-compute, zie 2026-11-02_xinix_disk_io.sql):
 --   * de hele markt (±20.000 aandelen) wordt in het geheugen van de functie gescoord; alleen de
---     kopgroep per ronde (hoogstens 100 aandelen) wordt weggeschreven, in één opdracht;
+--     kopgroep per regio (hoogstens 100 aandelen) wordt weggeschreven, in één opdracht per ronde;
 --   * er is geen index op kolommen die elke dag veranderen, zodat bijwerken op dezelfde pagina kan;
 --   * niets wordt gewist: scores worden per aandeel overschreven, het track record groeit met
---     hoogstens 300 kleine rijen per handelsdag;
+--     hoogstens 400 kleine rijen per handelsdag;
 --   * een dagbudget (xinix_ss_budget) dat de functie zelf bewaakt, een schakelaar (ss_enabled) en een
 --     rem die na drie mislukte runs een etmaal pauzeert (xinix_ss_state, sleutel 'brake').
 
@@ -42,7 +42,7 @@ create table if not exists public.xinix_ss_scores (
   prob numeric(5,2) not null,            -- kans in %, na ijking, bijsturing en demping
   prob_base numeric(5,2),                -- kans in % vóór de bijsturing met het eigen track record
   raw real,                              -- modeluitkomst (0–1): bepaalt de volgorde
-  rank smallint,                         -- plaats binnen de ronde
+  rank smallint,                         -- plaats binnen de eigen regio
   reasons jsonb,                         -- hoogstens 5 × {g, label, f, t}
   news jsonb,                            -- hoogstens 3 × {t, u, p, d, g}
   news_at timestamptz,
@@ -51,7 +51,7 @@ create table if not exists public.xinix_ss_scores (
   first_seen date,
   alerted_at timestamptz,
   alerted_prob numeric(5,2),
-  alert_pending boolean not null default false,   -- melding wacht tot na de stille uren
+  alert_pending boolean not null default false,   -- kandidaat voor de eerstvolgende ochtendmelding
   alert_note text
 ) with (fillfactor = 80);
 
@@ -162,6 +162,7 @@ end $$;
 
 -- Bijsturing: verhouding tussen wat uitkwam en wat voorspeld was over de laatste 120 dagen (plus de
 -- 16 dagen die een voorspelling nodig heeft). Zonder eigen uitkomsten geldt de waarde uit het onderzoek.
+-- (Vervangen door de versie met een opstartregel in 2026-11-14_xinix_ss_bijsturing.sql.)
 create or replace function public.xinix_ss_calib_refresh(p_seed numeric)
 returns jsonb
 language plpgsql

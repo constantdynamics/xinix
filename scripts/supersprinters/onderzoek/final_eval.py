@@ -91,7 +91,9 @@ for _ in range(2000):
 res["bootstrap_top5"] = {k: {"mean_pp": float(100 * np.mean(v)), "p2.5": float(100 * np.percentile(v, 2.5)), "p97.5": float(100 * np.percentile(v, 97.5)), "share_positive": float(np.mean(np.array(v) > 0))} for k, v in boot.items()}
 print("bootstrap top-5 (eindtest), verschil in procentpunten:", json.dumps(res["bootstrap_top5"]))
 res["curves"] = {str(k): v for k, v in curves.items()}
-res["mult_last"] = float(df.mult.iloc[-1])
+# De bijsturing van de laatste dág. (df staat op jaar en rijnummer, dus de laatste rij is een
+# willekeurige dag: zo kwam er eerst ×1,02 van 21 mei 2026 in het model in plaats van ×0,89.)
+res["mult_last"] = float(df.loc[df.day == df.day.max(), "mult"].iloc[0])
 res["mult_by_year"] = {str(y): float(df[df.yr == y].mult.mean()) for y in YEARS}
 json.dump(res, open(OUTJ, "w"))
 print("klaar")

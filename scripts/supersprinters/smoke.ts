@@ -20,6 +20,7 @@ const tables: Record<string, Row[]> = {
   xinix_ss_breadth: seed.map((s: Row) => ({ ...s, n: 0 })),
 };
 const writes: Array<{ table?: string; op?: string; n?: number; rpc?: string; sample?: unknown }> = [];
+const resolved: Row[] = [];
 
 function sb() {
   const from = (table: string) => {
@@ -68,12 +69,31 @@ function sb() {
     from,
     rpc: (name: string, args: Row) => {
       writes.push({ rpc: name, sample: name === "xinix_ss_budget_add" ? args : undefined });
+      if (name === "xinix_ss_resolve") { resolved.push(...(args.p_rows as Row[])); return Promise.resolve({ data: (args.p_rows as Row[]).length, error: null }); }
       return Promise.resolve({ data: name === "xinix_ss_calib_refresh" ? { mult: 1.02, hits: 0, expected: 0, n: 0 } : 0, error: null });
     },
   };
 }
 
 const t0 = performance.now();
+// Afrekenen van het track record tegen echte Yahoo-koersen:
+//   … smoke.ts resolve <open.json> <fx.json>      open.json = [{ticker, made_on, y?}], y = de bekende uitkomst
+if (region === "resolve") {
+  const open = JSON.parse(fs.readFileSync(date, "utf8")) as Array<{ ticker: string; made_on: string; y?: number }>;
+  tables.xinix_ss_predictions = open.map((o) => ({ ticker: o.ticker, made_on: o.made_on, resolved_at: null }));
+  const r = await R.guarded(sb(), (ctx) => R.resolve(ctx));
+  console.log(r.message, JSON.stringify(r.metrics), `| looptijd ${Math.round(performance.now() - t0)} ms`);
+  const want = new Map(open.filter((o) => o.y != null).map((o) => [`${o.ticker}|${o.made_on}`, o.y === 1]));
+  let same = 0, diff = 0, err = 0;
+  for (const u of resolved) {
+    const w = want.get(`${u.ticker}|${u.made_on}`);
+    if (u.error) { err++; console.log(`  fout ${u.ticker} ${u.made_on}: ${u.error}`); continue; }
+    if (w == null) continue;
+    if (w === u.hit) same++; else { diff++; console.log(`  anders ${u.ticker} ${u.made_on}: afgerekend ${u.hit}, verwacht ${w}`); }
+  }
+  console.log(`vergeleken met de bekende uitkomst: ${same} gelijk, ${diff} anders, ${err} met een fout, ${open.length - resolved.length} niet afgerekend`);
+  process.exit(0);
+}
 const res = await R.guarded(sb(), (ctx) => R.round(ctx, region, date));
 // Daarna de ochtendmelding, tegen een nagebootste ntfy-server (of een onbereikbare, met NTFY=down).
 // PRE zet eerdere meldingen klaar; een lijst van lijsten draait meerdere gevallen na elkaar op dezelfde ronde:

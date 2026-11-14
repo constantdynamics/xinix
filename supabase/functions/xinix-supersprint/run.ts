@@ -12,11 +12,15 @@ export interface RunResult { ok: boolean; message?: string; metrics?: Json }
 // (De ronde "amerika" telt twee regio's: de VS en Canada hebben elk hun eigen kopgroep.)
 export const TOP_N = 100, TOP_MIN = 25, MIN_BASE = 0.01;
 const NEWS_TOP = 12;
-// Dagbudget. Gewoon verbruik: 5 runs, ±25 TradingView-verzoeken, ±120 Yahoo-verzoeken, ±800 rijen.
+// Dagbudget. Gewoon verbruik: 5 runs, ±25 TradingView-verzoeken, ±300 Yahoo-verzoeken (waarvan ±240
+// voor het afrekenen van het track record), ±1.200 rijen.
 export const BUDGET = { runs: 30, tv: 80, yahoo: 400, rows: 2500 };
 const BRAKE_FAILS = 3, BRAKE_HOURS = 24;
 const REALERT_DAYS = 10, REALERT_GAIN = 5, PENDING_MAX_H = 30;
-const RESOLVE_AFTER_DAYS = 16, RESOLVE_TICKERS = 80, GIVE_UP_DAYS = 45;
+// Afrekenen: per dag komen er ±380 voorspellingen bij, van ±100 nieuwe aandelen. Met 240 aandelen per
+// run blijft de wachtrij kort (nagerekend op 2025–2026); met 80 liep hij onbeperkt op.
+const RESOLVE_AFTER_DAYS = 16, RESOLVE_TICKERS = 240, RESOLVE_PARALLEL = 3, RESOLVE_MAX_MS = 100_000;
+const GIVE_UP_DAYS = 45, UNKNOWN_AFTER_DAYS = 19;
 const SEED_URL = "https://constantdynamics.github.io/xinix/ss-breadth-seed.json";
 const DAY = C.DAY;
 
@@ -427,6 +431,7 @@ export async function resolve(ctx: Ctx): Promise<RunResult> {
   const { sb, meter } = ctx;
   const cutoff = isoMinus(ctx.today, RESOLVE_AFTER_DAYS);
   const giveUp = isoMinus(ctx.today, GIVE_UP_DAYS);
+  const unknownDay = isoMinus(ctx.today, UNKNOWN_AFTER_DAYS);
   const open = (must(await sb.from("xinix_ss_predictions").select("ticker, made_on").is("resolved_at", null).lte("made_on", cutoff).order("made_on").limit(2000), "open voorspellingen") ?? []) as Array<{ ticker: string; made_on: string }>;
   const byT = new Map<string, string[]>();
   for (const r of open) {
@@ -434,20 +439,30 @@ export async function resolve(ctx: Ctx): Promise<RunResult> {
     (byT.get(r.ticker) ?? byT.set(r.ticker, []).get(r.ticker)!).push(r.made_on);
   }
   const updates: Json[] = [];
-  let failed = 0, waiting = 0;
-  for (const [ticker, dates] of byT) {
-    if (yahooLeft(ctx) <= 0) break;
-    meter.yahoo++;
-    let bars: C.YBars | null = null, err = "";
-    try { bars = await C.yahooBars(ticker, "3mo"); } catch (e) { failed++; err = msg(e).slice(0, 150); }
-    for (const d of dates) {
-      const o = bars ? C.outcome10(bars, d) : null;
-      if (o && "hit" in o) updates.push({ ticker, made_on: d, hit: o.hit, touched: o.touched, error: null });
-      else if (o && "error" in o) updates.push({ ticker, made_on: d, hit: null, touched: null, error: o.error });
-      // Geen koersen (meer): na anderhalve maand geven we het op, anders blijft hij eeuwig open.
-      else if (d <= giveUp) updates.push({ ticker, made_on: d, hit: null, touched: null, error: err || "te weinig koersen na de voorspeldag" });
-      else waiting++;
-    }
+  let failed = 0, waiting = 0, fetched = 0;
+  const list = [...byT];
+  for (let i = 0; i < list.length; i += RESOLVE_PARALLEL) {
+    const part = list.slice(i, i + RESOLVE_PARALLEL);
+    // Rem: het dagbudget voor Yahoo en de looptijd van één run. Wat overblijft komt morgen.
+    if (yahooLeft(ctx) < part.length || Date.now() - ctx.nowMs > RESOLVE_MAX_MS) break;
+    meter.yahoo += part.length; fetched += part.length;
+    const got = await Promise.all(part.map(async ([ticker]) => {
+      try { return { bars: await C.yahooBars(ticker, "3mo"), err: "" }; } catch (e) { return { bars: null, err: msg(e).slice(0, 150) }; }
+    }));
+    part.forEach(([ticker, dates], k) => {
+      const { bars, err } = got[k];
+      if (!bars) failed++;
+      // Kent Yahoo het aandeel niet (meer), dan sluiten we na drie dagen af; een storing wacht langer.
+      const gone = !bars && /HTTP 404|no data found|delisted/i.test(err);
+      for (const d of dates) {
+        const o = bars ? C.outcome10(bars, d) : null;
+        if (o && "hit" in o) updates.push({ ticker, made_on: d, hit: o.hit, touched: o.touched, error: null });
+        else if (o && "error" in o) updates.push({ ticker, made_on: d, hit: null, touched: null, error: o.error });
+        // Geen koersen (meer): na anderhalve maand geven we het op, anders blijft hij eeuwig open.
+        else if (d <= giveUp || (gone && d <= unknownDay)) updates.push({ ticker, made_on: d, hit: null, touched: null, error: err || "te weinig koersen na de voorspeldag" });
+        else waiting++;
+      }
+    });
     await sleep(100);
   }
   let resolved = 0;
@@ -460,10 +475,13 @@ export async function resolve(ctx: Ctx): Promise<RunResult> {
   const lifts = must(await sb.rpc("xinix_ss_news_lift_refresh"), "nieuwsmeting");
   meter.rows += 1 + Number(lifts ?? 0);
   const hits = updates.filter((u) => u.hit === true).length;
+  const left = Math.max(0, open.length - updates.length - waiting);
   return {
     ok: true,
-    message: `track record: ${resolved} afgerekend over ${byT.size} aandelen (${hits} raak, ${failed} zonder koersen, ${waiting} wachten nog); nog ${Math.max(0, open.length - updates.length - waiting)} open; bijsturing ×${calib.mult} (${calib.hits} raak tegen ${calib.expected} verwacht, ${calib.n} voorspellingen)`,
-    metrics: { resolved, hits, tickers: byT.size, failed, waiting, mult: calib.mult, yahoo: meter.yahoo },
+    message: `track record: ${resolved} afgerekend over ${fetched} aandelen (${hits} raak, ${failed} zonder koersen, ${waiting} wachten nog); ` +
+      `${left ? `nog ${left}${open.length >= 2000 ? " of meer" : ""} open voor een volgende run` : "niets blijft liggen"}; ` +
+      `bijsturing ×${calib.mult} (${calib.hits} raak tegen ${calib.expected} verwacht, ${calib.n} voorspellingen)`,
+    metrics: { resolved, hits, tickers: fetched, failed, waiting, left, mult: calib.mult, yahoo: meter.yahoo },
   };
 }
 

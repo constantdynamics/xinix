@@ -10,7 +10,7 @@
 // gecontroleerd (zie docs/supersprinters-rapport.md); verander ze niet zonder opnieuw te trainen.
 
 export const MODEL_URL = "https://constantdynamics.github.io/xinix/ss-model.json";
-export const MODEL_SHA256 = "32e40ffe85de1dc1ec91f6f3a0076b99f01b5248d35ad07413b18ff06694d6a6";
+export const MODEL_SHA256 = "f98000a154c6da8ebcbdbc3d34f826a114c94ff401588357245f2b0255c5893c";
 export const DAY = 86400000;
 
 // ── Markten ─────────────────────────────────────────────────────────────────
