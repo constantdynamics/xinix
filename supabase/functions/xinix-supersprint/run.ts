@@ -27,6 +27,7 @@ const DAY = C.DAY;
 export interface Settings {
   ntfy_topic: string | null; ntfy_server: string | null; quiet_hours_start: number | null; quiet_hours_end: number | null;
   ss_enabled: boolean | null; ss_alerts: boolean | null; ss_alert_min_prob: number | null; ss_alert_max_per_week: number | null; ss_override_min_prob: number | null;
+  ss_alert_min_dvol?: number | null;
 }
 export interface Meter { tv: number; yahoo: number; rows: number; alerts: number; errors: number }
 export interface Ctx { sb: SB; settings: Settings; meter: Meter; spent: { yahoo: number }; today: string; nowMs: number }
@@ -53,7 +54,7 @@ export async function guarded(sb: SB, fn: (ctx: Ctx) => Promise<RunResult>): Pro
   const nowMs = Date.now();
   const today = new Date(nowMs).toISOString().slice(0, 10);
   const [st, br, bu] = await Promise.all([
-    sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob").eq("id", 1).maybeSingle(),
+    sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol").eq("id", 1).maybeSingle(),
     sb.from("xinix_ss_state").select("value").eq("key", "brake").maybeSingle(),
     sb.from("xinix_ss_budget").select("runs, tv, yahoo, rows_written").eq("day", today).maybeSingle(),
   ]);
@@ -298,6 +299,8 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
   if (!s.ntfy_topic || !s.ntfy_server) return done("geen ntfy ingesteld");
   const minProb = Number(s.ss_alert_min_prob ?? 15), override = Number(s.ss_override_min_prob ?? 15);
   const maxWeek = Math.max(0, Number(s.ss_alert_max_per_week ?? 3));
+  // Omzeteis alleen voor meldingen: de lijst begint bij $10.000 per dag, maar daar beweegt een order de koers.
+  const minDvol = Math.max(0, Number(s.ss_alert_min_dvol ?? 100_000));
   if (!(minProb > 0)) return done("meldgrens 0: uit");
   const ct = cands.map((c) => c.ticker);
   const nowMs = Date.now();
@@ -328,6 +331,7 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
     const up = c.ticker.toUpperCase();
     // Gedempt of gezien wijkt alleen voor een kans vanaf de override-grens (zoals bij Sprinters).
     if ((muted.has(up) || seen.has(up)) && c.prob < override) { out.blocked++; skip(c.ticker, "niet gemeld: gedempt of gezien"); continue; }
+    if (minDvol > 0 && !((c.dvol_usd ?? 0) >= minDvol)) { out.blocked++; skip(c.ticker, `niet gemeld: omzet onder ${C.fmtUsd(minDvol)} per dag`); continue; }
     const l = last.get(c.ticker);
     if (l && !(l.alerted_prob != null && c.prob >= Number(l.alerted_prob) + REALERT_GAIN)) {
       out.blocked++; skip(c.ticker, "niet opnieuw gemeld: minder dan 10 dagen geleden al gemeld"); continue;
@@ -498,7 +502,7 @@ export async function read(sb: SB): Promise<Json> {
       .gte("session_date", isoMinus(today, 6)).order("prob", { ascending: false }).limit(600),
     sb.rpc("xinix_ss_track_record"),
     sb.rpc("xinix_sprint_track_record"),
-    sb.from("signal_settings").select("ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, sprint_alert_min_prob, quiet_hours_start, quiet_hours_end").eq("id", 1).maybeSingle(),
+    sb.from("signal_settings").select("ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol, sprint_alert_min_prob, quiet_hours_start, quiet_hours_end").eq("id", 1).maybeSingle(),
     sb.from("xinix_ss_state").select("key, value, updated_at"),
     sb.from("xinix_ss_budget").select("*").gte("day", isoMinus(today, 7)).order("day", { ascending: false }),
     sb.from("xinix_ss_breadth").select("region, day, n, b1_20, b1_10, bm_50").gte("day", isoMinus(today, 7)).gt("n", 0).order("day", { ascending: false }),
@@ -560,6 +564,7 @@ export async function saveSettings(sb: SB, body: Json): Promise<{ status: number
     if (body[k] != null && Number.isFinite(v) && v >= lo && v <= hi) patch[k] = v;
   };
   numIn("ss_alert_min_prob", 0, 90); numIn("ss_alert_max_per_week", 0, 50); numIn("ss_override_min_prob", 0, 90);
+  numIn("ss_alert_min_dvol", 0, 1_000_000_000);
   if (!Object.keys(patch).length) return { status: 400, body: { error: "niets te wijzigen" } };
   const { error } = await sb.from("signal_settings").update(patch).eq("id", 1);
   if (error) return { status: 500, body: { error: error.message } };

@@ -69,7 +69,7 @@ function probTone(p: number, threshold: number): string {
 }
 const pctTone = (v: number | null) => (v == null ? "text-neutral-500" : v >= 0 ? "text-fog-gain" : "text-fog-loss");
 
-function Detail({ r, threshold }: { r: SuperSprintItem; threshold: number }) {
+function Detail({ r, threshold, minDvol }: { r: SuperSprintItem; threshold: number; minDvol: number }) {
   const reasons = r.reasons ?? [];
   const news = r.news ?? [];
   return (
@@ -99,8 +99,11 @@ function Detail({ r, threshold }: { r: SuperSprintItem; threshold: number }) {
             {r.alert_pending ? "Kandidaat voor de eerstvolgende ochtendmelding (de hoogste kansen gaan voor). " : r.alert_note ? `${r.alert_note}.` : ""}
           </div>
         )}
-        {r.prob >= threshold && (r.dvol_usd ?? 0) < 100_000 && (
-          <div className="text-amber-300">Let op: de omzet is laag ({fmtUsd(r.dvol_usd)} per dag). Een grotere order beweegt de koers.</div>
+        {r.prob >= threshold && (r.dvol_usd ?? 0) < Math.max(minDvol, 100_000) && (
+          <div className="text-amber-300">
+            Let op: de omzet is laag ({fmtUsd(r.dvol_usd)} per dag). Een grotere order beweegt de koers
+            {minDvol > 0 && (r.dvol_usd ?? 0) < minDvol ? `, en onder ${fmtUsd(minDvol)} per dag gaat er geen melding uit.` : "."}
+          </div>
         )}
       </div>
       <div className="space-y-1.5">
@@ -276,6 +279,7 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
   }, [focusRow]);
 
   const threshold = Number(data?.settings?.ss_alert_min_prob ?? 15) || 15;
+  const alertMinDvol = Math.max(0, Number(data?.settings?.ss_alert_min_dvol ?? 100_000));
   const alertsOn = data?.settings?.ss_alerts === true;
   const enabled = data?.settings?.ss_enabled !== false;
   const isFocus = (r: SuperSprintItem) => focusRow != null && r.ticker === focusRow.ticker;
@@ -348,13 +352,19 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
         </p>
         <p className="leading-relaxed mt-2">
           <b>Eerlijk over wat haalbaar is.</b> Gemiddeld haalt een aandeel dit op ongeveer {nl(BASE_RATE)}% van de dagen. De
-          hoogste kansen liggen rond de 20 à 25%: van vijf meldingen komt er dan gemiddeld één uit. Bovenaan staan vaak kleine,
-          hard gevallen aandelen met weinig omzet. Kijk daarom naar de omzet per dag voordat je koopt, en reken erop dat vier
-          van de vijf niet raak zijn.
+          hoogste kansen liggen rond de 20 à 25%: van vier à vijf meldingen komt er dan gemiddeld één uit. Bovenaan staan vaak
+          kleine, hard gevallen aandelen met weinig omzet.
         </p>
         <p className="leading-relaxed mt-2">
-          <b>Meldingen</b>: vanaf {threshold}%, hoogstens {data?.settings?.ss_alert_max_per_week ?? 3} per week, en per aandeel
-          hoogstens één keer per 10 dagen (tenzij de kans 5 punten hoger is). Ze gaan één keer per dag uit, 's ochtends na de
+          <b>Een melding is geen koopsignaal.</b> De kans telt vanaf het slot van de dag van de voorspelling, terwijl je pas bij
+          de volgende opening kunt kopen. Wie in de testjaren elke melding bij die opening kocht en tien handelsdagen vasthield,
+          kwam gemiddeld rond nul uit: een paar grote uitschieters, terwijl de middelste melding 5 tot 13% verloor. Gebruik de
+          lijst om zelf te beoordelen (nieuws, grafiek, omzet).
+        </p>
+        <p className="leading-relaxed mt-2">
+          <b>Meldingen</b>: vanaf {threshold}%{alertMinDvol > 0 ? ` en een omzet vanaf ${fmtUsd(alertMinDvol)} per dag` : ""}, hoogstens{" "}
+          {data?.settings?.ss_alert_max_per_week ?? 3} per week, en per aandeel hoogstens één keer per 10 dagen (tenzij de kans
+          5 punten hoger is). Ze gaan één keer per dag uit, 's ochtends na de
           stille uren, over de slotstanden van de dag ervoor: alle regio's samen, de hoogste kans eerst. Een tik op de melding
           opent dit tabblad op dat aandeel. <b>Hartje</b>: favoriet en op de watchlist, maar het aandeel doet niet mee in het Potje en de papieren
           portefeuille. <b>Gezien</b> (verrekijker): weg uit deze lijst. Niet meegenomen: de Canadian Securities Exchange en
@@ -542,7 +552,7 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
                     {open && (
                       <tr>
                         <td colSpan={11} className="p-0">
-                          <Detail r={r} threshold={threshold} />
+                          <Detail r={r} threshold={threshold} minDvol={alertMinDvol} />
                         </td>
                       </tr>
                     )}

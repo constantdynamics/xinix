@@ -1538,7 +1538,7 @@ export interface SuperSprintResponse {
   track_record: SuperSprintTrack | null;
   sprint_track_record: SprintTrackRecord | null;
   settings: {
-    ss_enabled: boolean; ss_alerts: boolean; ss_alert_min_prob: number; ss_alert_max_per_week: number; ss_override_min_prob: number;
+    ss_enabled: boolean; ss_alerts: boolean; ss_alert_min_prob: number; ss_alert_max_per_week: number; ss_override_min_prob: number; ss_alert_min_dvol?: number | null;
     sprint_alert_min_prob: number; quiet_hours_start: number | null; quiet_hours_end: number | null;
   } | null;
   state: Record<string, Record<string, unknown>>;
