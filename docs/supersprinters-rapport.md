@@ -939,6 +939,41 @@ hulpfunctie `xinix-ss-sec-onderzoek` (bron: `onderzoek/sec_proxy.ts`). Die schri
 laat alleen drie modellen toe, geen hulpmiddelen (dus geen zoekkosten), en heeft een noodrem op het aantal
 opdrachten. Na de proef wordt hij weer vervangen door een lege functie.
 
-**Stand op 15 november:** de teksten zijn opgehaald (4.892 van de 4.940; de rest wordt opnieuw geprobeerd),
-de vraagstelling en de scripts staan klaar en zijn met verzonnen antwoorden doorgetest. De proef zelf wacht
-op de sleutel.
+**Stand op 15 november:** de teksten zijn opgehaald (4.938 van de 4.940), de steekproef van 300 is getrokken,
+de vraagstelling en de scripts staan klaar en zijn met verzonnen antwoorden doorgetest. Het deel zonder
+Claude (K1–K5) is geteld: zie 14.14. Het lezen door Claude wacht op de sleutel. De kleine bestanden die
+nodig zijn om de proef af te maken staan in `scripts/supersprinters/onderzoek/proefdata/`.
+
+### 14.14 Kas en verwatering uit de verslagen (het deel van de proef zonder Claude)
+
+Een bedrijf met weinig geld in kas moet aandelen uitgeven, en doet dat het liefst als de koers net is
+gesprongen. Daarom is uit de jaar- en kwartaalverslagen (XBRL bij de SEC) per kandidaat-dag gehaald wat
+toen al gepubliceerd was: de kas, de kasstroom uit de bedrijfsvoering en het aantal uitstaande aandelen
+(`kas_haal.py`, `kas_test.py`). Voor 85% van de 13.696 kandidaat-dagen zijn kas en kasstroom bekend, voor
+72% de groei van het aantal aandelen. Op de kandidaat-dagen waar het bedrijf geld verbruikt, is er bij de
+helft kas voor minder dan 8 maanden en bij een kwart voor minder dan 3 maanden; op 27% van de dagen is de
+kasstroom positief.
+
+Kandidaat-dagen met een dagbeweging tot 30%, met het feit tegenover zonder:
+
+| Feit | Kandidaat-dagen met het feit | Raak vanaf het slot 2020–2024 | Raak 2025–2026 | Grote verliezers 2020–2024 | Grote verliezers 2025–2026 |
+|---|---|---|---|---|---|
+| K1 kas voor minder dan 6 maanden | 2.346 en 812 | 17,1% / 16,6% | 12,7% / 13,3% | 9,4% / 8,0% | 23,0% / 15,1% |
+| K2 kas voor minder dan 12 maanden | 3.303 en 1.090 | 16,6% / 16,9% | 14,0% / 11,4% | 8,7% / 8,2% | 22,4% / 13,0% |
+| K3 positieve kasstroom | 2.355 en 266 | 18,6% / 16,0% | 10,2% / 13,5% | 7,0% / 9,0% | 13,9% / 19,5% |
+| K4 aantal aandelen in een jaar meer dan +50% | 1.887 en 432 | 17,3% / 16,6% | 13,2% / 15,3% | 9,2% / 7,1% | 21,5% / 14,9% |
+| K5 aantal aandelen in een jaar meer dan +200% | 804 en 235 | 20,3% / 16,3% | 13,2% / 15,0% | 10,6% / 7,3% | 17,0% / 16,9% |
+
+- **Geen feit haalt de lat** (beide perioden dezelfde kant op, minstens 5 punten).
+- Weinig kas en veel nieuwe aandelen gaan in beide perioden samen met meer grote verliezers, maar in
+  2020–2024 scheelt het 1 tot 2 punten en pas in 2025–2026 7 tot 9. Per jaar wijst kas voor minder dan 6
+  maanden in vijf van de zes jaren die kant op; in 2024 andersom (9% tegen 21%).
+- Voor de trefkans maakt het niets uit of het wisselt van kant.
+- Als regel op de meldingen werkt het niet. Bij de lat van 20% hadden de meldingen met weinig kas in
+  2020–2024 juist iets minder grote verliezers (8,7% van 172 tegen 10,9% van 442); in 2025–2026 meer
+  (7 van de 18 tegen 4 van de 25).
+
+**Besluit:** geen regel. Het is hetzelfde beeld als bij de registraties in 14.11: het verband met grote
+verliezen bestaat, maar is te zwak en te wisselend om meldingen op tegen te houden. Het hoort wel in de
+toelichting bij een melding ("kas voor ongeveer vier maanden"). Voor het lezen door Claude betekent dit
+dat de verwachting bescheiden moet zijn: de feiten over geld ophalen gaan over hetzelfde mechanisme.

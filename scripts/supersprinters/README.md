@@ -93,6 +93,10 @@ Het ophalen loopt daarom via een tijdelijke hulpfunctie in Supabase, met dezelfd
 | o | `SEC_KEY=… python3 tekst_haal.py ssdata <url>` | de tekst van die stukken ophalen (hervatbaar; `OPNIEUW=6-K` haalt 6-K's zonder bijlage opnieuw op) |
 | p | `SEC_KEY=… python3 kas_haal.py ssdata <url>` | kas, kasstroom en aantal aandelen uit de jaar- en kwartaalverslagen (XBRL) |
 | q | `SEC_KEY=… python3 tekst_batch.py ssdata <url> <opdracht>` | Claude de stukken laten lezen: steekproef, tokens tellen, in bulk versturen, uitkomsten ophalen, kasboek met plafond; de sleutel voor de Claude API staat alleen in Supabase |
+| r | `kas_test.py ssdata` | het deel zonder Claude: kas voor minder dan 6 of 12 maanden, positieve kasstroom, groei van het aantal aandelen (geen feit haalt de lat) |
+| s | `tekst_test.py ssdata` | de meting op de antwoorden van Claude: de vooraf vastgelegde feiten met en zonder, als klein model naast de kans en als regel op de meldingen (`vlaggen.py` = de tabel en de lat, `tekst_feiten.py` = de afleiding van feiten per stuk) |
+
+De kleine bestanden van deze proef (kandidaat-dagen met uitkomst, gekozen stukken, steekproef, later het kasboek en de antwoorden) staan in `onderzoek/proefdata/`, met uitleg hoe ze terug te zetten zijn.
 
 Na opnieuw trainen: `public/ss-model.json` vervangen, het controlegetal (`MODEL_SHA256`) in
 `supabase/functions/xinix-supersprint/core.ts` bijwerken, `test_core.ts` draaien en de functie opnieuw
