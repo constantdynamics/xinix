@@ -19,9 +19,11 @@ node --experimental-strip-types scripts/supersprinters/smoke.ts amerika 2026-11-
 ```
 
 Droogloop van een hele ronde tegen het echte TradingView en Yahoo met een nagebootste database: laat
-zien wat er geschreven zou worden, zonder iets te schrijven of te melden. Met `alerts` erachter volgt de
-ochtendmelding tegen een nagebootste ntfy-server; `PRE='[[…],[…]]'` zet eerdere meldingen klaar en draait
+zien wat er geschreven zou worden, zonder iets te schrijven of te melden. Met `alerts` erachter volgt het
+meldmoment tegen een nagebootste ntfy-server; `PRE='[[…],[…]]'` zet eerdere meldingen klaar en draait
 meerdere gevallen na elkaar (weekplafond, herhaalregel), `NTFY=down` maakt de server onbereikbaar.
+`MIN_PROB`, `MIN_DVOL`, `MAX_VOLW`, `MAX_WEEK` en `REGIONS` zetten de meldregels (lat, omzeteis, grens op
+de beweeglijkheid, weekplafond, regio's die mogen melden).
 
 ```bash
 node --experimental-strip-types scripts/supersprinters/smoke.ts resolve <open.json> <fx.json>
@@ -29,7 +31,9 @@ node --experimental-strip-types scripts/supersprinters/smoke.ts resolve <open.js
 
 Rekent voorspellingen af tegen echte Yahoo-koersen. `open.json` is een lijst `{ticker, made_on, y}`; met
 `y` (de uitkomst uit het onderzoek) erbij vergelijkt het script de twee. Zo getest op 138 voorspellingen
-uit oktober 2026 in alle vier de regio's: 138 gelijk.
+uit oktober 2026 in alle vier de regio's: 138 gelijk. Met `yo`, `r10o` en `gap1` erbij (de uitkomsten
+vanaf de opening van de volgende dag) worden ook die vergeleken: 105 voorspellingen uit september en
+oktober 2026, alle gelijk.
 
 ## Het onderzoek opnieuw doen (map `onderzoek/`)
 
@@ -53,6 +57,24 @@ Overig: `check_tv.py` (definities van de TradingView-velden tegen de dagkoersen)
 `compare.py` (tussentijdse vergelijkingen), `productie_check.py` (drie keuzes in de productiecode nagerekend
 op de testvoorspellingen: hoeveel aandelen per run het afrekenen van het track record nodig heeft, de
 bijsturing over de bewaarde kopgroep in plaats van de top 300, en de opstartregel van de bijsturing).
+
+### Tweede ronde (15 november 2026): uitkomsten vanaf de opening en de meldregels
+
+Bouwt voort op stap 1 tot en met 8 (de dataset in `ssdata/all` en de testvoorspellingen in `ssdata/runs`).
+
+| Stap | Script | Wat het doet |
+|---|---|---|
+| a | `labels_open.py ssdata` | uitkomsten gerekend vanaf de opening van de dag na de voorspelling |
+| b | `rsplit.py ssdata` en `mask_open.py ssdata` | gemiste omgekeerde splits en onbruikbare openingskoersen opsporen en weglaten |
+| c | `open_modellen.sh` (`exp_open.py`) | vijf modellen op die uitkomsten, elk testjaar met een model dat het jaar niet zag |
+| d | `reduce_open.py ssdata/runs/final_lite_v3_rows.parquet ssdata/runs/open_red` | per jaar alleen de rijen die ertoe doen (kandidaten en de hoogste 40 per dag) |
+| e | `eval_open.py ssdata/runs/open_red` | rangschikkingen en meldregels vergeleken op kopen bij de opening |
+| f | `ronde2_regels.py ssdata/runs/final_lite_v3_rows.parquet ssdata/runs/open_red` | bijsturing per regio, het weekplafond, een dag later instappen, de lat |
+| g | `ronde2_risico.py ssdata/runs/open_red` | verliesrisico: de beweeglijkheid van de week als aanwijzer, de regel op meldingen |
+| h | `ronde2_keuzes.py ssdata ssdata/runs/open_red` | de regels van 15 november: lat zonder weekplafond, per regio, limietorder en verkooplimiet nagespeeld |
+
+`gap_rule.py` en `region_open.py` zijn de eerste verkenningen van de opening en de regio's. De uitkomsten
+staan in hoofdstuk 14 van `docs/supersprinters-rapport.md`.
 
 Na opnieuw trainen: `public/ss-model.json` vervangen, het controlegetal (`MODEL_SHA256`) in
 `supabase/functions/xinix-supersprint/core.ts` bijwerken, `test_core.ts` draaien en de functie opnieuw

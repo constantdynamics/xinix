@@ -1,4 +1,4 @@
-# SUPERsprinters: rapport (13–14 november 2026)
+# SUPERsprinters: rapport (13–15 november 2026)
 
 SUPERsprinters is een tabblad onder Favorieten dat op alle beurzen die Saxo aanbiedt de aandelen zoekt
 die binnen 10 handelsdagen minstens 50% kunnen stijgen, en meldt over de beste. Een treffer is hetzelfde
@@ -7,6 +7,11 @@ voorspelling, en staat een dag later nog minstens 20% hoger.
 
 Dit rapport is geschreven voor iemand die het werk niet heeft gezien. Alle cijfers zijn na te rekenen
 met de scripts in `scripts/supersprinters/` (zie hoofdstuk 12).
+
+**Bijgewerkt op 15 november.** Hoofdstuk 14 beschrijft de tweede ronde: de meldregels zijn opnieuw
+doorgerekend en aangepast (lat 26% zonder weekplafond, geen melding voor heel beweeglijke aandelen,
+Europa meldt voorlopig niet), en het track record legt nu ook vast wat kopen bij de opening oplevert.
+Waar hoofdstuk 1 tot en met 13 over meldregels gaan, geldt wat in hoofdstuk 14 staat.
 
 ## 1. Uitkomst in het kort
 
@@ -39,6 +44,9 @@ In 2026 alleen is het verschil met het model zoals het nu draait klein (hoofdstu
 - **Bijgesteld op 14 november, na dit verslag** (keuzes van de gebruiker, zie hoofdstuk 5): de meldgrens
   is 20% in plaats van 15%, een melding gaat alleen uit bij minstens $100.000 omzet per dag, en de
   vastgelopen taak `xinix-deep-scan` is gerepareerd.
+- **Bijgesteld op 15 november** (hoofdstuk 14): de meldgrens is 26% zonder weekplafond, aandelen die in
+  de week ervoor gemiddeld meer dan 30% per dag bewogen krijgen geen melding, Europa meldt voorlopig
+  niet, en Azië en Australië worden gemeld direct na hun ronde.
 
 **Wat je moet weten voordat je op een melding koopt** (hoofdstuk 4): een melding zegt dat de kans op
 zo'n sprong ongeveer 1 op 5 is, tegen 1 op 135 voor een willekeurig aandeel. Het zegt niet dat kopen
@@ -93,14 +101,19 @@ meldgrens, ingedeeld in soorten (uitgifte van aandelen, medisch, overname, contr
 omgekeerde split). Het wordt getoond en per voorspelling vastgelegd, maar telt nog niet mee in de kans:
 eerst wordt gemeten of een soort nieuws iets toevoegt (hoofdstuk 5, punt 2).
 
-**Meldingen.** Eén keer per dag, om 04:12 UTC (direct na de stille uren), over de slotstanden van de dag
-ervoor. Alle regio's samen, de hoogste kans eerst:
+**Meldingen.** Twee meldmomenten per dag, elk vóór de volgende opening van de eigen beurzen: om 09:33
+UTC voor Azië en Australië (een kwartier na hun ronde) en om 04:12 UTC, direct na de stille uren, voor
+de VS, Canada en Europa. Wat op een melding wacht gaat uit met de hoogste kans eerst. De regels sinds
+15 november (hoofdstuk 14):
 
-- vanaf 20% (`ss_alert_min_prob`; bij de start 15%, op 14 november verhoogd);
+- vanaf 26% (`ss_alert_min_prob`; bij de start 15%, op 14 november 20%);
 - alleen bij een omzet van minstens $100.000 per dag (`ss_alert_min_dvol`; de lijst zelf begint bij
   $10.000);
-- hoogstens 3 per week (`ss_alert_max_per_week`): een melding over de beursdag van dag d telt mee tot en
-  met dag d+6;
+- niet als het aandeel in de week ervoor gemiddeld meer dan 30% per dag bewoog
+  (`ss_alert_max_volw`; 0 = geen grens);
+- alleen uit de VS, Canada en Azië-Pacific (`ss_alert_regions`); Europa staat in de lijst maar meldt
+  voorlopig niet;
+- geen weekplafond (`ss_alert_max_per_week = 0`; tot 15 november hoogstens 3 per week);
 - hetzelfde aandeel pas na 10 dagen opnieuw, tenzij de kans 5 punten hoger is;
 - vóór het versturen wordt het slot bij Yahoo nagekeken; wijkt dat meer dan 3% af van TradingView, dan
   gaat de melding niet uit (anders is ook het track record niet af te rekenen);
@@ -119,7 +132,10 @@ automatisch toegevoegd. "Gezien" haalt een aandeel uit de lijst.
 plaats in de regio, de instapkoers (het slot), het soort nieuws, de omzet, de beurswaarde en het aantal
 vrij verhandelbare aandelen. Bij een melding ook het moment, de kans en de koers van dat moment. Na 16
 dagen wordt elke voorspelling met de koersen van Yahoo afgerekend: raak, en apart of de +50% is
-aangeraakt zonder stand te houden.
+aangeraakt zonder stand te houden. Sinds 15 november ook: de beweeglijkheid van de week (voor de
+risicoklasse) en wat er gebeurde vanaf de opening van de dag na de voorspelling: hoe hoog hij opende,
+of +50% vanaf die opening gehaald werd, het rendement na 10 handelsdagen en het laagste en hoogste slot
+onderweg.
 
 ## 3. De eerlijke test
 
@@ -248,7 +264,11 @@ de praktijk aan hebt (hoofdstuk 4). *Voorstel:* een tweede maatstaf naast de kan
 opening van de volgende dag: de kans op +50% vanaf die opening, de kans op −30%, en het verwachte
 rendement na 10 handelsdagen. Die kan in het tabblad en in het track record komen, en de meldingen
 kunnen erop gerangschikt worden. Dit vraagt een onderzoek zoals dit (dezelfde data, een paar uur) en een
-eerlijke test voordat het meldingen stuurt. Tot die tijd: beoordeel elke melding zelf.
+eerlijke test voordat het meldingen stuurt. Tot die tijd: beoordeel elke melding zelf. *Uitgevoerd op
+15 november (hoofdstuk 14):* een model dat op de uitkomst vanaf de opening is getraind, rangschikt niet
+beter dan het huidige, en het verwachte rendement is nauwelijks te voorspellen. Wat wel hielp: een
+grens op heel beweeglijke aandelen en een hogere lat. Het track record houdt de uitkomst vanaf de
+opening nu bij.
 
 **2. Het model ziet geen nieuws.** De meeste eerste sprongen komen door een bericht (goedkeuring,
 financiering, contract, overname). Daardoor staat maar 7% van de sprongen de dag ervoor al in de top 50.
@@ -286,13 +306,18 @@ geeft minder maar betere meldingen:
 de code. *Besluit (14 november): gedaan, de meldgrens staat op 20%.* Samen met de omzeteis gaf dat in de
 test 0,5 tot 0,7 meldingen per week. Op de slotstanden van 13 november stonden er twee aandelen boven
 20% (NOMA en DRIO), allebei onder $100.000 omzet: die dag zou er dus geen melding zijn uitgegaan.
+*Besluit (15 november): geen weekplafond meer, lat 26%.* Het plafond zelf maakte in de test geen verschil
+voor de kwaliteit (1, 2, 3 of 5 per week: 24 tot 26% raak); de hoogte van de lat wel (hoofdstuk 14).
 
 **5. Eén bijsturing voor de hele wereld.** De bijsturing is één getal, maar de regio's lopen uiteen:
 over de laatste vier maanden kwam in de VS 99% uit van wat voorspeld was, in Europa 87%, in Azië en
 Australië 82% en in Canada 66%. Met een eigen bijsturing per regio waren de nagespeelde meldingen beter
 (2025–2026 64 van 267 = 24,0% tegen 18,7%; 2020–2024 21,8% tegen 20,6%). Dit is pas gevonden nadat de
 achtergehouden jaren bekeken waren, en geldt daarom niet als eerlijk getest. *Voorstel:* na drie maanden
-eigen track record (dat de regio vastlegt) beslissen; klopt het daar ook, dan overstappen.
+eigen track record (dat de regio vastlegt) beslissen; klopt het daar ook, dan overstappen. *Nagerekend
+op 15 november (hoofdstuk 14):* bij de lat van 20% geeft een bijsturing per regio geen duidelijke winst
+(2020–2024 28% tegen 26% raak, 2025–2026 24% tegen 25%). Niet ingevoerd. Wel meldt Europa voorlopig
+niet: daar kwam in geen van beide perioden uit wat voorspeld was.
 
 **6. Alleen aandelen die nog bestaan.** Zie hoofdstuk 3: de gemeten trefkans kan te hoog zijn doordat
 verdwenen aandelen ontbreken. *Voorstel:* niets bouwen, maar het eigen track record na twee tot drie
@@ -453,17 +478,23 @@ later: gemiddeld 0,04 procentpunt, hoogstens 0,9.
 |---|---|
 | Meldingen van SUPERsprinters uit, die van Sprinters weer aan | Knop onderaan het tabblad (beheertoken), of `update signal_settings set ss_alerts = false, sprint_alert_min_prob = 15 where id = 1;` |
 | Alles van SUPERsprinters stilzetten (het tabblad blijft leesbaar) | Knop in het tabblad, of `update signal_settings set ss_enabled = false where id = 1;` |
-| Minder of betere meldingen | `ss_alert_min_prob` (nu 20), `ss_alert_min_dvol` (nu 100000) en `ss_alert_max_per_week` (nu 3) in `signal_settings` |
-| De vijf taken pauzeren | `select cron.alter_job(jobid, active := false) from cron.job where jobname like 'xinix-ss-%';` |
+| Meer of minder meldingen | `ss_alert_min_prob` (nu 26), `ss_alert_min_dvol` (nu 100000), `ss_alert_max_per_week` (nu 0 = geen plafond), `ss_alert_max_volw` (nu 30; 0 = geen grens) en `ss_alert_regions` (nu `{0,1,3}`) in `signal_settings`. De grens op beweeglijkheid en Europa hebben ook een knop onderaan het tabblad |
+| Terug naar de regels van 14 november | `update signal_settings set ss_alert_min_prob = 20, ss_alert_max_per_week = 3, ss_alert_max_volw = 0, ss_alert_regions = '{0,1,2,3}' where id = 1;` |
+| Het meldmoment voor Azië uitzetten | `select cron.alter_job((select jobid from cron.job where jobname = 'xinix-ss-flush-apac'), active := false);` (de ochtendmelding neemt die kandidaten dan weer mee) |
+| De zes taken pauzeren | `select cron.alter_job(jobid, active := false) from cron.job where jobname like 'xinix-ss-%';` |
 
 Er hoeft nergens iets gewist te worden. De tabellen `xinix_ss_*` en de functie `xinix-supersprint`
 kunnen blijven staan; ze kosten niets als ze stilstaan.
 
 ## 11. Open punten
 
-- **Een tweede maatstaf vanaf de opening** (hoofdstuk 5, punt 1): op 14 november akkoord om te laten
-  onderzoeken, samen met nieuws, de weekplekken en de bijsturing per regio. De omzeteis, de meldgrens
-  en de reparatie van `xinix-deep-scan` zijn die dag uitgevoerd.
+- **Nieuws** (hoofdstuk 14.8): de enige bron die nog iets wezenlijks kan toevoegen. Berichten bij de
+  SEC zijn op geschiedenis te testen; een beoordeling door Claude wordt gemeten vanaf het moment dat de
+  sleutel in Supabase staat.
+- **Europa** meldt voorlopig niet. Opnieuw bekijken als het eigen track record drie maanden beslaat.
+- **De cijfers van hoofdstuk 14 zijn geen eerlijke test meer**: de jaren 2025–2026 waren al bekeken toen
+  de nieuwe regels gekozen werden. De keuzes zijn op 2020–2024 gemaakt; het eigen track record moet
+  laten zien of ze standhouden.
 - **AIM en First North Helsinki** doen mee terwijl niet zeker is dat Saxo ze aanbiedt (hoofdstuk 7).
 - **Beurswaarde bij de explosie-motor.** TradingView geeft de beurswaarde in de lokale munt; de
   explosie-motor slaat die op als dollars (`mcap_usd` in `xinix_universe`). SUPERsprinters rekent hem
@@ -480,12 +511,12 @@ Alles staat in `scripts/supersprinters/` (zie de `README.md` daar):
 
 - `test_core.ts`: de TypeScript-versie van het model geeft exact dezelfde uitkomst als LightGBM
   (grootste verschil 0,0000000000000001 op 600 testgevallen).
-- `smoke.ts`: droogloop van een hele ronde en de ochtendmelding tegen het echte TradingView en Yahoo,
-  met een nagebootste database en meldserver. Ook het afrekenen (`smoke.ts resolve`) en de meldregels
-  (`PRE=…`) zijn hiermee getest.
+- `smoke.ts`: droogloop van een hele ronde en het meldmoment tegen het echte TradingView en Yahoo,
+  met een nagebootste database en meldserver. Ook het afrekenen (`smoke.ts resolve`, ook vanaf de
+  opening) en de meldregels (`PRE=…`, `MAX_VOLW`, `MAX_WEEK`, `REGIONS`) zijn hiermee getest.
 - `onderzoek/`: het hele onderzoek, van het ophalen van de koersen tot het definitieve model.
   `final_eval.py` maakt de tabellen van hoofdstuk 3; `productie_check.py` rekent de keuzes van
-  hoofdstuk 9 na.
+  hoofdstuk 9 na; `labels_open.py` tot en met `ronde2_keuzes.py` zijn de tweede ronde (hoofdstuk 14).
 
 Het model zelf staat in `public/ss-model.json` (210 bomen). De functie weigert een model waarvan het
 controlegetal niet klopt met dat in `core.ts`.
@@ -498,5 +529,216 @@ Pages het nieuwe bestand serveert voordat de functie wordt uitgerold.
 
 ## 13. Vervolgcontroles
 
-Nog niet uitgevoerd. Gepland: 19 november 2026 (verbruik na drie handelsdagen) en 2 december 2026
-(eerste afgerekende voorspellingen).
+Nog niet uitgevoerd. Gepland: 19 november 2026 (verbruik na drie handelsdagen; ook de eerste automatische
+rondes met versie 8 van de functie en het tweede meldmoment) en 2 december 2026 (eerste afgerekende
+voorspellingen, ook vanaf de opening).
+
+## 14. Tweede ronde (15 november 2026): betrouwbaarder, en wat daarvan lukte
+
+Aanleiding: het verzoek van 14 november ("optimaliseren zodat het écht nog veel betrouwbaarder wordt,
+ook met onderzoek en nieuws en dunne handel en weekplekken en bijsturing; als het iets kost wil ik dat
+horen") en de keuzes van 15 november:
+
+- betrouwbaar betekent: vaak +50% én weinig grote verliezers;
+- liever één heel goede melding per maand dan drie matige per week;
+- geen weekplafond, maar een hoge lat;
+- alleen regio's waar de kansen aantoonbaar kloppen;
+- kopen met een limietorder rond het vorige slot, verkopen rond +50%;
+- de omzeteis van $100.000 per dag blijft;
+- alle nieuwsbronnen mogen onderzocht worden; een tweede bericht vlak voor de opening alleen als de
+  test laat zien dat het helpt.
+
+Alles is nagerekend op dezelfde opgeslagen testvoorspellingen als hoofdstuk 3 (elk jaar voorspeld door
+een model dat dat jaar niet zag). Keuzes zijn gemaakt op 2020–2024; 2025–2026 dient als controle. Die
+laatste twee jaren waren al bekeken, dus dit is geen eerlijke test meer in de zin van hoofdstuk 3: het
+eigen track record moet laten zien of het standhoudt.
+
+### 14.1 Uitkomst in het kort
+
+| Regels | 2020–2024 | 2025–2026 |
+|---|---|---|
+| 14 november: lat 20%, omzet ≥ $100.000, hoogstens 3 per week | 117 meldingen · 25,6% raak · 23,1% raak vanaf de opening · 19% eindigt 30% of meer lager | 79 meldingen · 25,3% · 19,0% · 30% |
+| 15 november: lat 26%, omzet ≥ $100.000, niet boven 30% dagbeweging, zonder Europa, geen plafond | 148 meldingen · 26,4% · 26,4% · 10% | 13 meldingen · 6 raak (46%) · 5 raak vanaf de opening (38%) · 2 eindigen 30% of meer lager (15%) |
+
+Wat dit zegt:
+
+- **Veel vaker raak wordt het niet.** Ook de beste meldingen komen ongeveer één op de vier keer uit. Een
+  hogere lat, een ander model en andere regels gaven in 2020–2024 geen hogere trefkans dan 25 à 27%. Met
+  alleen koersgegevens is dit het plafond.
+- **Wel veel minder grote verliezers, en de melding is ook raak als je pas de dag erna koopt.** Bij de
+  regels van 14 november eindigde één op de vijf tot één op de drie meldingen 30% of meer lager; nu één
+  op de tien (2020–2024) en 2 van de 13 (2026). De middelste melding stond na tien handelsdagen in de
+  plus (+6% in beide perioden); bij de oude regels was dat −0% en −15%.
+- **Het zijn er weinig.** In 2026 dertien meldingen, ongeveer één per maand. In 2022, 2023, 2024 en 2025
+  geen enkele. In 2020 en 2021 samen 164, met soms meerdere per dag (hoogstens 12).
+- De cijfers van 2025–2026 berusten op dertien meldingen. Dat is te weinig om er meer uit te lezen dan
+  "het wijst dezelfde kant op".
+
+### 14.2 Gerekend vanaf de opening
+
+De kans telt vanaf het slot van de voorspeldag, maar kopen kan pas daarna. Daarom is elke uitkomst ook
+gerekend vanaf de opening van de volgende handelsdag (`labels_open.py`): raak vanaf die opening, het
+rendement na 5 en 10 handelsdagen, het hoogste en laagste slot onderweg.
+
+- Van alle aandeel-dagen is 0,54% raak vanaf het slot en 0,51% vanaf de opening; 89% van de treffers
+  vanaf het slot is ook raak vanaf de opening.
+- Opschonen was nodig: bij 16.411 van de 26,5 miljoen rijen klopte de openingskoers niet (opening
+  buiten de koersen van die dag, of een omgekeerde split die de bron niet meldde en die eruitziet als
+  een sprong). Die tellen niet mee (`rsplit.py`, `mask_open.py`). Op de uitkomsten van hoofdstuk 3 heeft
+  dit geen merkbaar effect (83 van de 142.841 treffers; geen enkele melding in 2025–2026).
+- Vijf modellen zijn getraind op uitkomsten vanaf de opening, met dezelfde kenmerken en dezelfde
+  opzet als het huidige model (`exp_open.py`): raak vanaf de opening, idem met de opening zelf als
+  kenmerk, 30% of meer lager na tien dagen, 20% of meer hoger na tien dagen, en het verwachte rendement.
+
+Uitkomst (`eval_open.py`): **het model dat op de opening is getraind, rangschikt niet beter.** De vijf
+hoogste van elke dag waren vanaf de opening 15,9% raak tegen 15,4% bij het huidige model (2020–2024) en
+15,5% tegen 16,3% (2025–2026). Het verwachte rendement is nauwelijks te voorspellen: dat model stopte na
+1 tot 18 leerrondes en zijn kopgroep bestond uit rustige aandelen die vrijwel nooit +50% doen. Het
+huidige model blijft dus staan.
+
+### 14.3 Verliesrisico: hoe wild het aandeel de afgelopen week bewoog
+
+Het model voor "30% of meer lager" onderscheidt binnen de kandidaten wel degelijk (in elk van de zeven
+jaren; onderscheidend vermogen 0,56 tot 0,74, waarbij 0,5 niets is). Maar één bestaand kenmerk doet
+bijna hetzelfde (0,54 tot 0,71): de gemiddelde dagbeweging van de laatste week, het verschil tussen de
+hoogste en de laagste koers van de dag. Dat is gekozen, omdat het geen tweede model vraagt en een vaste
+eenheid heeft.
+
+Kandidaten vanaf 15% met minstens $100.000 omzet per dag, in vier klassen (`ronde2_risico.py`):
+
+| Dagbeweging deze week | 2020–2024: raak vanaf de opening | 30% of meer lager | 2025–2026: raak vanaf de opening | 30% of meer lager |
+|---|---|---|---|---|
+| laag (tot 12%) | 11,4% | 5,8% | 9,8% | 9,4% |
+| gemiddeld (12–21%) | 15,2% | 7,6% | 10,9% | 21,3% |
+| hoog (21–30%) | 16,4% | 11,5% | 16,6% | 25,9% |
+| zeer hoog (boven 30%) | 20,1% | 16,6% | 16,2% | 41,7% |
+
+De bovenste klasse had in elk van de zeven jaren het grootste aandeel grote verliezers (10 tot 45%). De
+trefkans loopt een beetje mee op, maar binnen de meldingen maakt dat niets uit: bij de lat van 20% waren
+de meldingen uit de bovenste klasse 19% en 23% raak vanaf de opening, tegen 23% en 19% voor alle
+meldingen, terwijl 38% en 45% ervan 30% of meer lager eindigde.
+
+**Regel: geen melding boven 30% dagbeweging** (`ss_alert_max_volw`). Bij de lat van 20% en het
+weekplafond van 3:
+
+| | 2020–2024 | 2025–2026 |
+|---|---|---|
+| Zonder de regel | 117 meldingen · 23,1% raak vanaf de opening · 19% op −30% of lager · gemiddeld +4,0% na tien dagen | 79 · 19,0% · 30% · −8,8% |
+| Met de regel | 109 · 22,0% · 10% · +7,4% | 70 · 20,0% · 26% · −4,5% |
+
+In vier van de vijf jaren met meldingen was het resultaat met de regel beter of gelijk. Het tabblad
+toont de klasse bij elk aandeel ("risico hoog", "risico zeer hoog") en de melding noemt hem.
+
+### 14.4 De lat en het weekplafond
+
+Zonder weekplafond, met de omzeteis en de grens op beweeglijkheid (`ronde2_keuzes.py`):
+
+| Lat | 2020–2024 | 2025–2026 |
+|---|---|---|
+| 20% | 1.120 meldingen · 17,1% raak vanaf de opening · 9% op −30% of lager | 94 · 19,1% · 25% |
+| 22% | 617 · 20,3% · 10% | 54 · 18,5% · 20% |
+| 24% | 328 · 21,3% · 11% | 23 · 34,8% · 26% |
+| 26% | 164 · 25,6% · 10% | 13 · 38,5% · 15% |
+| 28% | 73 · 27,4% · 4% | 10 · 40,0% · 10% |
+
+De lat van 26% is gekozen op 2020–2024: daar is het verschil tussen "raak" en "groot verlies" het
+grootst bij nog een redelijk aantal meldingen, en de middelste melding staat na tien dagen op +6%.
+Meldingen per jaar bij 26%: 2020: 62, 2021: 102, 2022 tot en met 2025: geen, 2026: 13 (januari 3,
+februari 1, maart 2, april 3, mei 2, juli 1, augustus 1).
+
+Het weekplafond zelf deed er voor de kwaliteit niet toe. Bij de lat van 20% gaf een plafond van 1, 2, 3
+of 5 per week steeds 24 tot 26% raak (2020–2024) en 22 tot 25% (2025–2026). Het plafond hield vooral in
+2020 en 2021 meldingen tegen: zonder plafond waren het er toen gemiddeld ruim vier per week. De plekken
+aan de rustigste aandelen geven in plaats van aan de hoogste kans was slechter (12% raak vanaf de
+opening tegen 22%).
+
+### 14.5 Regio's
+
+Komt uit wat voorspeld is, binnen de groep die een melding kan krijgen (omzet ≥ $100.000, dagbeweging
+tot 30%)? Voorspeld → werkelijk:
+
+| Kandidaten | VS | Canada | Europa | Azië-Pacific |
+|---|---|---|---|---|
+| vanaf 15%, 2020–2024 | 18,1 → 16,9% | 19,0 → 12,2% | 18,0 → 10,8% | 18,2 → 14,2% |
+| vanaf 15%, 2025–2026 | 16,6 → 13,3% | 15,9 → 7,7% (26 dagen) | 17,1 → 9,0% (78) | 17,8 → 19,9% |
+| vanaf 24%, 2020–2024 | 26,2 → 22,3% | 26,7 → 23,6% | 26,0 → 16,4% | 26,2 → 19,7% |
+| vanaf 24%, 2025–2026 | 27,4 → 20,0% (15) | geen | geen | 27,9 → 55,6% (18) |
+
+Europa blijft in elke regel waar gegevens zijn ver onder de voorspelling. De VS en Canada klopten in
+2020–2024 op het niveau van de meldingen, Azië-Pacific in 2025–2026. **Europa meldt daarom voorlopig
+niet** (`ss_alert_regions`); het staat wel in de lijst. Op de cijfers maakt dat weinig uit: bij de lat
+van 26% ging het om 16 meldingen in vijf jaar (3 raak) en geen enkele in 2025–2026. Eerlijk is ook: per
+regio zijn de aantallen op het niveau van de meldingen klein, en de VS en Azië-Pacific wisselden tussen
+de twee perioden van plaats (2026: 3 Amerikaanse meldingen, geen raak; 10 uit Azië-Pacific, 6 raak).
+
+Een eigen bijsturing per regio (hoofdstuk 5, punt 5) is opnieuw nagerekend en niet ingevoerd: bij de
+lat van 20% 28% tegen 26% raak in 2020–2024 en 24% tegen 25% in 2025–2026.
+
+### 14.6 Kopen met een limietorder, verkopen op +50%
+
+Nagespeeld op de dagkoersen (opening, hoogste, laagste, slot) voor de meldingen bij de lat van 26%:
+kopen zoals in de eerste kolom, verkopen met een limiet op +50%, anders na tien handelsdagen.
+
+| Kopen | 2020–2024 (164 meldingen) | 2025–2026 (13 meldingen) |
+|---|---|---|
+| Marktorder bij de opening | altijd gevuld · 35% haalt +50% · gemiddeld +14,7% (de middelste +7,6%) · 9% op −30% of lager | 5 van 13 halen +50% · gemiddeld +5,1% (de middelste −1,3%) · 3 op −30% of lager |
+| Limiet op het slot, één dag geldig | 79% gevuld · 36% · +14,3% (+8,5%) · 8% | 9 gevuld · 4 halen +50% · +5,6% (−4,4%) |
+| Limiet op het slot, drie dagen geldig | 88% gevuld · 36% · +14,7% (+9,1%) · 8% | 10 gevuld · 4 halen +50% · +3,1% (−11,9%) |
+| Limiet 5% boven het slot, één dag | 94% gevuld · 34% · +13,9% (+7,6%) · 10% | 10 gevuld · 2 halen +50% · −7,0% |
+
+- **Een limietorder op het slot werkt even goed als een marktorder.** Ongeveer één op de vijf orders
+  wordt niet gevuld; dat zijn vaak de aandelen die meteen wegliepen (38 tot 65% daarvan was raak). Het
+  gemiddelde resultaat van wat wel gevuld wordt is hetzelfde.
+- **Ruim één op de drie haalt de verkooplimiet van +50%.** Dat is meer dan "raak" in de tabellen
+  hierboven, omdat een verkooplimiet ook afgaat als de koers binnen de dag +50% aantikt.
+- **Opent een aandeel meer dan 30% boven het slot, sla het dan over.** Onder alle kandidaten vanaf 15%
+  gaf instappen op zo'n opening gemiddeld −16% (2020–2024) en −15% (2025–2026) na tien dagen. Tussen
+  +15% en +30% is het beeld niet eenduidig. Dit staat nu in elke melding. Een apart bericht vlak voor
+  de opening is niet gebouwd: buiten dit ene geval liet de test geen voordeel zien.
+- **Azië en Australië.** De ochtendmelding van 04:12 UTC kwam voor die markten als de volgende sessie
+  al uren liep. Een dag later instappen kostte in de test ongeveer een punt trefkans (12,5 → 11,7% en
+  15,4 → 14,8%). Sinds 15 november gaat die melding een kwartier na hun ronde uit (09:33 UTC), ruim
+  vóór de volgende opening. Azië-Pacific was goed voor een kwart van de meldingen.
+
+### 14.7 Dunne handel
+
+De omzeteis van $100.000 per dag blijft: die gaat over de vraag of je kunt kopen en verkopen, niet over
+de kwaliteit. Aandelen onder die grens deden het in de test niet slechter (kandidaten vanaf 15% met
+$10.000 tot $100.000 omzet: 13,8% en 15,8% raak vanaf de opening). Een bovengrens op de omzet helpt
+niet: binnen de rustige kandidaten vanaf 20% liep de trefkans in 2020–2024 juist op met de omzet (15%
+bij $100.000–250.000, 23% boven $10 miljoen). Geen nieuwe regel.
+
+### 14.8 Nieuws
+
+Het model ziet geen nieuws (hoofdstuk 5, punt 2). Wat er is en wat er kan:
+
+| Bron | Op geschiedenis te testen? | Kosten | Stand |
+|---|---|---|---|
+| Koppen van Yahoo met trefwoorden | nee (geen archief) | geen | draait sinds 13 november; per voorspelling vastgelegd, meting loopt |
+| Berichten bij de SEC (uitgiftes, prospectussen, 8-K) | ja, tien jaar, alleen Amerikaanse aandelen | geen | onderzoek gestart op 15 november, zie de aanvulling onderaan dit hoofdstuk |
+| Claude leest koppen en SEC-berichten per kandidaat | nee, wel te meten vanaf de start | enkele dollars per maand uit het tegoed van $100 | wacht op de sleutel in Supabase (`ANTHROPIC_API_KEY`) |
+| Finnhub (gratis sleutel): één jaar bedrijfsnieuws, alleen de VS | beperkt (één jaar) | geen | nog niet aangesloten |
+| Betaald nieuwsarchief met jaren geschiedenis | ja | vanaf enkele tientallen dollars per maand | niet aangeschaft; pas zinvol als de SEC-test iets laat zien |
+
+### 14.9 Wat er is gewijzigd
+
+- Instellingen (`signal_settings`): `ss_alert_min_prob` 26, `ss_alert_max_per_week` 0, nieuw
+  `ss_alert_max_volw` 30 en `ss_alert_regions` `{0,1,3}`.
+- Tabellen: `xinix_ss_scores.vol_w`; `xinix_ss_predictions.vol_w`, `gap_open`, `hit_open`, `ret10_open`,
+  `min10_open`, `max10_open`. Voor de 373 voorspellingen van 13 november is de beweeglijkheid achteraf
+  ingevuld (de beurzen waren sindsdien dicht; de maandwaarde was bij alle 373 gelijk aan wat toen was
+  opgeslagen).
+- Taak `xinix-ss-flush-apac` (werkdagen 09:33 UTC).
+- Functie versie 8; het tabblad toont het verliesrisico, de nieuwe regels en het track record vanaf de
+  opening en per risicoklasse.
+- Migratie: `supabase/migrations/2026-11-15_xinix_ss_ronde2.sql`.
+
+Getest: het afrekenen vanaf de opening tegen echte Yahoo-koersen op 105 voorspellingen in vier regio's
+(treffer vanaf het slot en vanaf de opening 105 van 105 gelijk aan het onderzoek; rendement en opening
+overal binnen één punt); een droogloop van de rondes met het meldmoment; het tabblad op desktop- en
+telefoonbreedte tegen de uitgerolde functie.
+
+### 14.10 Wat het kost
+
+Niets van het bovenstaande kost geld: geen grotere database, geen betaalde bron. Het extra verbruik is
+één run per werkdag (het tweede meldmoment) en zes kleine kolommen per voorspelling.
