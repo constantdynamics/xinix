@@ -393,7 +393,8 @@ export function medianVector(m: Model, xs: Float64Array[]): Float64Array {
 }
 
 // ── Uitkomst na 10 handelsdagen (Yahoo) ─────────────────────────────────────
-export interface YBars { day: number[]; close: number[]; currency: string | null }
+// close en open zijn gecorrigeerd voor splits en dividend (dezelfde factor per dag); open is NaN als Yahoo hem niet geeft.
+export interface YBars { day: number[]; close: number[]; open: number[]; currency: string | null }
 export async function yahooBars(ticker: string, range: string, timeoutMs = 12000): Promise<YBars> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=1d&events=split`;
   const ctl = new AbortController();
@@ -410,8 +411,9 @@ export async function yahooBars(ticker: string, range: string, timeoutMs = 12000
   if (meta.symbol && String(meta.symbol).toUpperCase() !== ticker.toUpperCase()) throw new Error(`Yahoo ${ticker}: gaf ${meta.symbol} terug`);
   const ts: number[] = r.timestamp ?? [];
   const cl: (number | null)[] = r.indicators?.quote?.[0]?.close ?? [];
+  const op: (number | null)[] = r.indicators?.quote?.[0]?.open ?? [];
   const adj: (number | null)[] = r.indicators?.adjclose?.[0]?.adjclose ?? [];
-  const day: number[] = [], close: number[] = [];
+  const day: number[] = [], close: number[] = [], open: number[] = [];
   // Datum in de tijdzone van de beurs: Yahoo geeft het begin van de sessie in UTC, en dat is voor
   // Sydney in de zomertijd 23:00 uur van de dag ervóór. De lopende koers komt er als extra bar achteraan.
   const off = Number(meta.gmtoffset ?? 0) || 0;
@@ -420,17 +422,23 @@ export async function yahooBars(ticker: string, range: string, timeoutMs = 12000
     if (c == null || !(c > 0)) continue;
     const a = adj[i] != null && (adj[i] as number) > 0 ? (adj[i] as number) : c;
     const d = Math.floor((ts[i] + off) / 86400);
-    if (day.length && day[day.length - 1] === d) { close[close.length - 1] = a; continue; }   // dubbele dag: laatste telt
-    day.push(d); close.push(a);
+    if (day.length && day[day.length - 1] === d) { close[close.length - 1] = a; continue; }   // dubbele dag: laatste slot telt, eerste opening blijft
+    const o = op[i];
+    day.push(d); close.push(a); open.push(o != null && o > 0 ? o * (a / c) : NaN);
   }
-  return { day, close, currency: typeof meta.currency === "string" ? meta.currency : null };
+  return { day, close, open, currency: typeof meta.currency === "string" ? meta.currency : null };
 }
 export const dayNumber = (iso: string) => Math.floor(Date.parse(iso + "T00:00:00Z") / DAY);
 
-export type Outcome = { hit: boolean; touched: boolean } | { error: string } | null;
+/** Wat er gebeurde vanaf de opening van de eerste handelsdag na de voorspelling (procenten; null = geen bruikbare opening). */
+export interface OpenOutcome { gap_open: number | null; hit_open: boolean | null; ret10_open: number | null; min10_open: number | null; max10_open: number | null }
+export type Outcome = ({ hit: boolean; touched: boolean } & OpenOutcome) | { error: string } | null;
+const NO_OPEN: OpenOutcome = { gap_open: null, hit_open: null, ret10_open: null, min10_open: null, max10_open: null };
+const pct2 = (v: number) => Math.round(v * 10000) / 100;
 /**
  * Kwam de voorspelling van dag `madeOn` uit? Instap = het laatste slot op of vóór die dag.
  * null = de 10 handelsdagen plus de controle-dag zijn nog niet voorbij.
+ * Daarnaast, voor wie pas de dag erna kan kopen: dezelfde vraag gerekend vanaf de opening van die dag.
  */
 export function outcome10(b: YBars, madeOn: string): Outcome {
   const made = dayNumber(madeOn);
@@ -444,13 +452,41 @@ export function outcome10(b: YBars, madeOn: string): Outcome {
     if (q >= 40 || q <= 1 / 40) return { error: "koerssprong van 40× of meer: eenheidsfout" };
   }
   const v = b.close[t];
-  let touched = false;
-  for (let j = t + 1; j <= t + 10; j++) {
+  let touched = false, hit = false;
+  for (let j = t + 1; j <= t + 10 && !hit; j++) {
     if (b.close[j] < v * 1.5) continue;
     touched = true;
-    if (b.close[j + 1] >= v * 1.2) return { hit: true, touched };
+    if (b.close[j + 1] >= v * 1.2) hit = true;
   }
-  return { hit: false, touched };
+  return { hit, touched, ...openOutcome(b, t) };
+}
+
+/** Uitkomsten vanaf de opening van dag t+1 (zelfde definitie als de treffer, met die opening als instap). */
+export function openOutcome(b: YBars, t: number): OpenOutcome {
+  const o = b.open?.[t + 1], v = b.close[t];
+  // Een opening die niet bij de koersen van die dag past (ontbreekt, of 40× ernaast) telt niet.
+  if (!(o > 0) || !(v > 0) || o / v >= 40 || o / v <= 1 / 40 || o / b.close[t + 1] >= 40 || o / b.close[t + 1] <= 1 / 40) return NO_OPEN;
+  let hit = false, lo = Infinity, hi = -Infinity;
+  for (let j = t + 1; j <= t + 10; j++) {
+    const c = b.close[j];
+    if (c < lo) lo = c;
+    if (c > hi) hi = c;
+    if (!hit && c >= o * 1.5 && b.close[j + 1] >= o * 1.2) hit = true;
+  }
+  return { gap_open: pct2(o / v - 1), hit_open: hit, ret10_open: pct2(b.close[t + 10] / o - 1), min10_open: pct2(lo / o - 1), max10_open: pct2(hi / o - 1) };
+}
+
+// ── Verliesrisico: hoe wild het aandeel deze week bewoog ─────────────────────
+// Grenzen uit het onderzoek (kwartielen van de kandidaten in 2020–2024, afgerond): tot 12% per dag laag,
+// tot 21% gemiddeld, tot 30% hoog, daarboven zeer hoog. De trefkans verschilt weinig tussen de klassen,
+// het aandeel dat na tien handelsdagen 30% of meer lager staat loopt op van ±6–9% naar ±17–42%.
+export const RISK_BOUNDS = [12, 21, 30];
+export const RISK_NL = ["laag", "gemiddeld", "hoog", "zeer hoog"];
+export function riskClass(volW: number | null | undefined): number | null {
+  if (volW == null || !Number.isFinite(volW) || volW < 0) return null;
+  let k = 0;
+  while (k < RISK_BOUNDS.length && volW > RISK_BOUNDS[k]) k++;
+  return k;
 }
 
 // ── Nieuws ──────────────────────────────────────────────────────────────────

@@ -1,9 +1,10 @@
 // Droogloop van een hele ronde tegen het echte TradingView en Yahoo, met een nagebootste database:
 //   NODE_USE_ENV_PROXY=1 node --experimental-strip-types scripts/supersprinters/smoke.ts <ronde> <datum> <fx.json> [alerts]
 // Er wordt niets weggeschreven en niets gemeld; het script laat zien wát er geschreven zou worden.
-// Met "alerts" volgt de ochtendmelding tegen een nagebootste ntfy-server. QUIET=0 zet de stille uren
+// Met "alerts" volgt het meldmoment tegen een nagebootste ntfy-server. QUIET=0 zet de stille uren
 // uit, NTFY=down maakt de server onbereikbaar, PRE='[…]' zet eerdere meldingen klaar (weekplafond, herhaling).
-// MIN_PROB en MIN_DVOL zetten de meldgrens (standaard 15) en de omzeteis voor meldingen (standaard 100000).
+// MIN_PROB, MIN_DVOL en MAX_VOLW zetten de meldgrens (standaard 15), de omzeteis voor meldingen (standaard
+// 100000) en de grens op de beweeglijkheid van de week (standaard 30, 0 = uit).
 import * as fs from "node:fs";
 import * as C from "../../supabase/functions/xinix-supersprint/core.ts";
 import * as R from "../../supabase/functions/xinix-supersprint/run.ts";
@@ -15,7 +16,8 @@ const seed = JSON.parse(fs.readFileSync(new URL("../../public/ss-breadth-seed.js
 type Row = Record<string, unknown>;
 const tables: Record<string, Row[]> = {
   signal_settings: [{ id: 1, ntfy_topic: "test", ntfy_server: "http://127.0.0.1:9/nergens", quiet_hours_start: process.env.QUIET === "0" ? null : 21, quiet_hours_end: process.env.QUIET === "0" ? null : 4,
-    ss_enabled: true, ss_alerts: alertsFlag === "alerts", ss_alert_min_prob: Number(process.env.MIN_PROB ?? 15), ss_alert_max_per_week: 3, ss_override_min_prob: 15, ss_alert_min_dvol: Number(process.env.MIN_DVOL ?? 100000) }],
+    ss_enabled: true, ss_alerts: alertsFlag === "alerts", ss_alert_min_prob: Number(process.env.MIN_PROB ?? 15), ss_alert_max_per_week: 3, ss_override_min_prob: 15, ss_alert_min_dvol: Number(process.env.MIN_DVOL ?? 100000),
+    ss_alert_max_volw: Number(process.env.MAX_VOLW ?? 30) }],
   xinix_fx_rates: JSON.parse(fs.readFileSync(fxPath, "utf8")),
   xinix_ss_state: [], xinix_ss_budget: [], xinix_ss_scores: [], xinix_ss_predictions: [], xinix_notify_mute: [], xinix_seen: [],
   xinix_ss_breadth: seed.map((s: Row) => ({ ...s, n: 0 })),
@@ -78,9 +80,11 @@ function sb() {
 
 const t0 = performance.now();
 // Afrekenen van het track record tegen echte Yahoo-koersen:
-//   … smoke.ts resolve <open.json> <fx.json>      open.json = [{ticker, made_on, y?}], y = de bekende uitkomst
+//   … smoke.ts resolve <open.json> <fx.json>      open.json = [{ticker, made_on, y?, yo?, r10o?, gap1?}]
+// y = de bekende uitkomst vanaf het slot; yo, r10o en gap1 = de bekende uitkomsten vanaf de opening
+// (treffer, rendement na 10 handelsdagen en de opening t.o.v. het slot, als breuk).
 if (region === "resolve") {
-  const open = JSON.parse(fs.readFileSync(date, "utf8")) as Array<{ ticker: string; made_on: string; y?: number }>;
+  const open = JSON.parse(fs.readFileSync(date, "utf8")) as Array<{ ticker: string; made_on: string; y?: number; yo?: number; r10o?: number; gap1?: number }>;
   tables.xinix_ss_predictions = open.map((o) => ({ ticker: o.ticker, made_on: o.made_on, resolved_at: null }));
   const r = await R.guarded(sb(), (ctx) => R.resolve(ctx));
   console.log(r.message, JSON.stringify(r.metrics), `| looptijd ${Math.round(performance.now() - t0)} ms`);
@@ -93,10 +97,24 @@ if (region === "resolve") {
     if (w === u.hit) same++; else { diff++; console.log(`  anders ${u.ticker} ${u.made_on}: afgerekend ${u.hit}, verwacht ${w}`); }
   }
   console.log(`vergeleken met de bekende uitkomst: ${same} gelijk, ${diff} anders, ${err} met een fout, ${open.length - resolved.length} niet afgerekend`);
+  // Vanaf de opening: de treffer moet gelijk zijn, rendement en opening binnen 1 procentpunt.
+  const byKey = new Map(open.map((o) => [`${o.ticker}|${o.made_on}`, o]));
+  let oSame = 0, oDiff = 0, oNone = 0, rOk = 0, rOff = 0;
+  for (const u of resolved) {
+    const w = byKey.get(`${u.ticker}|${u.made_on}`);
+    if (!w || w.yo == null || u.error) continue;
+    if (u.hit_open == null) { oNone++; console.log(`  geen opening ${u.ticker} ${u.made_on}`); continue; }
+    if ((w.yo === 1) === u.hit_open) oSame++; else { oDiff++; console.log(`  anders vanaf de opening ${u.ticker} ${u.made_on}: afgerekend ${u.hit_open}, verwacht ${w.yo === 1}`); }
+    if (w.r10o != null && w.gap1 != null) {
+      const d1 = Math.abs(Number(u.ret10_open) - 100 * w.r10o), d2 = Math.abs(Number(u.gap_open) - 100 * w.gap1);
+      if (d1 <= 1 && d2 <= 1) rOk++; else { rOff++; console.log(`  rendement wijkt af ${u.ticker} ${u.made_on}: na 10 dagen ${u.ret10_open}% tegen ${(100 * w.r10o).toFixed(2)}%, opening ${u.gap_open}% tegen ${(100 * w.gap1).toFixed(2)}%`); }
+    }
+  }
+  if (oSame + oDiff + oNone) console.log(`vanaf de opening: treffer ${oSame} gelijk, ${oDiff} anders, ${oNone} zonder opening; rendement en opening ${rOk} binnen 1 punt, ${rOff} daarbuiten`);
   process.exit(0);
 }
 const res = await R.guarded(sb(), (ctx) => R.round(ctx, region, date));
-// Daarna de ochtendmelding, tegen een nagebootste ntfy-server (of een onbereikbare, met NTFY=down).
+// Daarna het meldmoment, tegen een nagebootste ntfy-server (of een onbereikbare, met NTFY=down).
 // PRE zet eerdere meldingen klaar; een lijst van lijsten draait meerdere gevallen na elkaar op dezelfde ronde:
 //   PRE='[[],[{"ticker":"X","made_on":"2026-11-07","alerted_prob":20}]]'
 if (alertsFlag === "alerts") {
@@ -113,7 +131,7 @@ if (alertsFlag === "alerts") {
     tables.signal_settings[0].ntfy_server = process.env.NTFY === "down" ? "http://127.0.0.1:9/nergens" : `http://127.0.0.1:${port}/`;
     for (const p of pre) tables.xinix_ss_predictions.push({ ...p, alerted_at: `${p.made_on}T04:12:05Z` });
     const fl = await R.guarded(sb(), (ctx) => R.flush(ctx));
-    console.log(`\nOCHTENDMELDING (eerdere meldingen: ${pre.length ? pre.map((p) => `${p.ticker} ${p.made_on} ${p.alerted_prob}%`).join(", ") : "geen"}):`, fl.message, JSON.stringify(fl.metrics));
+    console.log(`\nMELDMOMENT (eerdere meldingen: ${pre.length ? pre.map((p) => `${p.ticker} ${p.made_on} ${p.alerted_prob}%`).join(", ") : "geen"}):`, fl.message, JSON.stringify(fl.metrics));
     for (const g of got) {
       const j = JSON.parse(g);
       if (scenarios.length > 1) console.log("  gemeld: " + j.title);
