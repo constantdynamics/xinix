@@ -950,8 +950,9 @@ Een bedrijf met weinig geld in kas moet aandelen uitgeven, en doet dat het liefs
 gesprongen. Daarom is uit de jaar- en kwartaalverslagen (XBRL bij de SEC) per kandidaat-dag gehaald wat
 toen al gepubliceerd was: de kas, de kasstroom uit de bedrijfsvoering en het aantal uitstaande aandelen
 (`kas_haal.py`, `kas_test.py`). Voor 85% van de 13.696 kandidaat-dagen zijn kas en kasstroom bekend, voor
-72% de groei van het aantal aandelen. Van de bedrijven die geld verbruiken heeft de helft kas voor minder
-dan 8 maanden en een kwart voor minder dan 3 maanden; 27% heeft een positieve kasstroom.
+72% de groei van het aantal aandelen. Op de kandidaat-dagen waar het bedrijf geld verbruikt, is er bij de
+helft kas voor minder dan 8 maanden en bij een kwart voor minder dan 3 maanden; op 27% van de dagen is de
+kasstroom positief.
 
 Kandidaat-dagen met een dagbeweging tot 30%, met het feit tegenover zonder:
 
