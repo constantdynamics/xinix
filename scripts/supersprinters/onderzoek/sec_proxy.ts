@@ -215,7 +215,13 @@ Deno.serve(async (req) => {
         return new Response(await res.text(), { headers: { "content-type": "application/json" } });
       }
       const op = q.get("op");
-      if (op === "status") return json({ anthropic: !!Deno.env.get("ANTHROPIC_API_KEY"), sec_agent: !!Deno.env.get("SEC_USER_AGENT") });
+      if (op === "status") {
+        // Alleen namen, nooit waarden: laat zien of de sleutel onder een andere naam is opgeslagen.
+        // Een naam die er niet uitziet als een gewone naam (hoofdletters, cijfers, onderstrepingstekens) wordt afgekapt:
+        // dan is er misschien een waarde in het naamveld geplakt.
+        const namen = Object.keys(Deno.env.toObject()).map((k) => /^[A-Z][A-Z0-9_]{1,39}$/.test(k) && !/^SK_?ANT/.test(k) ? k : `${k.slice(0, 6)}… (${k.length} tekens)`).sort();
+        return json({ anthropic: !!Deno.env.get("ANTHROPIC_API_KEY"), sec_agent: !!Deno.env.get("SEC_USER_AGENT"), namen });
+      }
       try {
         const c = client();
         const id = q.get("id") ?? "";
