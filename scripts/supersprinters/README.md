@@ -87,6 +87,8 @@ Het ophalen loopt daarom via een tijdelijke hulpfunctie in Supabase, met dezelfd
 | i | `sec_proxy.ts` | de hulpfunctie: per bedrijf de lijst van ingediende stukken (datum, soort, onderdelen van een 8-K, moment van ontvangst). Uitrollen als `xinix-ss-sec-onderzoek` met een eigen sleutel in de bron; na gebruik vervangen door een lege functie |
 | j | `SEC_KEY=… python3 sec_fetch.py ssdata <url>` | haalt de lijsten op voor alle Amerikaanse aandelen die ooit kandidaat waren (hervatbaar, ±7 verzoeken per seconde) |
 | k | `sec_test.py ssdata ssdata/runs/open_red` | per kandidaat-dag alleen wat op het slot al bekend was; kenmerk voor kenmerk, als model, en als regel op de meldingen |
+| l | `thema_test.py ssdata ssdata/runs/open_red` | themakoorts: het klimaat in de eigen bedrijfstak en sector als los kenmerk, als tweede model en op de meldingen (geen signaal) |
+| m | `stop_test.py ssdata ssdata/runs/open_red` | de meldingen nagespeeld met een vaste stop-order van 10 tot 40% (ruilt grote verliezen voor veel middelgrote) |
 
 Na opnieuw trainen: `public/ss-model.json` vervangen, het controlegetal (`MODEL_SHA256`) in
 `supabase/functions/xinix-supersprint/core.ts` bijwerken, `test_core.ts` draaien en de functie opnieuw
