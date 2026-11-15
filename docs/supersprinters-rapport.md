@@ -865,3 +865,80 @@ soort stuk en de datum, niet naar wat erin staat. Persberichten van Amerikaanse 
 bij een 8-K sinds jaren bij de SEC; die door Claude laten lezen (wat is er gemeld, op welke voorwaarden
 wordt er geld opgehaald) is op dezelfde geschiedenis te testen. Dat is het voorstel voor het API-tegoed;
 het wacht op de keuzes van de gebruiker en op de sleutel.
+
+### 14.13 Proef op de geschiedenis met het API-tegoed: opzet (vastgelegd vóór de uitkomst)
+
+De gebruiker heeft $100 API-tegoed per maand en koos op 15 november de adviezen bij de zeven vragen: eerst
+een proef op de geschiedenis en daarna alleen bouwen wat bewezen is; later de onderdelen oorzaak van de
+beweging, verwatering, bewaking na een melding en toelichting; de uitkomst van Claude wordt alleen getoond
+en vastgelegd tot de proef hem in beide perioden bevestigt; dagelijks voor de kandidaten vanaf 15%;
+dagelijks Opus 5.5, voor de proef eerst 300 stukken door Opus en Sonnet en bij overeenstemming de rest met
+Sonnet; proef hoogstens $80, daarna $1,50 per dag; zelf zoeken op internet alleen voor aandelen die een
+melding krijgen en voor de bewaking daarna.
+
+**Wat Claude doet en niet doet.** Claude leest stukken en legt feiten vast: wat is er gemeld, is het
+bindend of een voornemen, en op welke voorwaarden haalt het bedrijf geld op. Claude voorspelt niets. Het
+kent de afloop van oude koersen uit zijn training, dus een voorspelling op oude gevallen zou niets
+bewijzen; feiten uit een stuk halen heeft daar geen last van. Wat de feiten waard zijn, bepaalt de telling
+achteraf.
+
+**Wat er gelezen wordt.** De SEC-test van 14.11 keek naar het soort stuk en de datum. Nu gaat het om de
+inhoud, voor dezelfde 13.696 Amerikaanse kandidaat-dagen (kans vanaf 15%, omzet vanaf $100.000):
+
+- nieuws: de laatste drie 8-K's of 6-K's van de afgelopen 7 dagen, met het persbericht dat erbij zit;
+- geld: het laatste prospectus (424B) en de laatste registratie (S-1, S-3, F-1, F-3) van de afgelopen 90
+  dagen: het begin van het stuk, waar de voorwaarden staan.
+
+Dat zijn 4.940 verschillende stukken (2.999 nieuws, 1.079 prospectussen, 862 registraties); 8.583 van de
+13.696 kandidaat-dagen (63%) hebben er minstens één. Per stuk staan twee momenten vast: bekend op het slot
+van de dag (ontvangen vóór 16:00 uur New York) en bekend vóór de melding van de volgende ochtend (ontvangen
+op die kalenderdag; een uitgifte wordt vaak na het slot geprijsd). Lange stukken worden ingekort (een 8-K
+tot 8.000 tekens, een persbericht tot 14.000, een prospectus tot 28.000); Claude krijgt te zien waar de
+tekst ophoudt en mag wat er niet staat niet invullen.
+
+**Feiten die getest worden** (deze lijst lag vast voordat er één uitkomst was):
+
+| | Feit op de kandidaat-dag |
+|---|---|
+| N1 | bedrijfsnieuws (8-K of 6-K) in de laatste 2 dagen |
+| N2 | hard positief bedrijfsnieuws in 2 dagen (studie-uitslag of besluit van een toezichthouder, contract, product, cijfers, overname door het bedrijf; bindend, positief) |
+| N3 | zacht positief nieuws in 2 dagen (dezelfde soorten, maar een voornemen) |
+| N4 | uitgifte van aandelen gemeld in 7 dagen |
+| N5 | uitgifte geprijsd of gesloten in 2 dagen |
+| N6 | uitgifte met warrants in 7 dagen |
+| N7 | prijs die meebeweegt met de koers (converteerbare lening, kredietlijn in aandelen) in 90 dagen |
+| N8 | nieuwe koers van het bedrijf of aankoop van cryptomunten als strategie in 7 dagen |
+| N9 | bod op het bedrijf zelf in 7 dagen |
+| N10 | noteringsprobleem of omgekeerde split in 7 dagen |
+| N11 | negatief nieuws in 7 dagen (ook: twijfel over voortbestaan, wanbetaling) |
+| N12 | geen enkel stuk: geen nieuws in 7 dagen en geen prospectus of registratie in 90 dagen |
+| P1 | geprijsde uitgifte in de laatste 30 dagen |
+| P2 | doorlopend verkoopprogramma (at-the-market) of kredietlijn in aandelen in 90 dagen |
+| P3 | registratie waarmee bestaande houders mogen verkopen in 90 dagen |
+| P4 | uitgifte groot ten opzichte van het bedrijf (aandelen in de uitgifte ≥ 20% van wat er uitstond) |
+| P5 | koers nu ruim boven de uitgifteprijs of de warrantprijs (≥ 20% erboven) |
+| P6 | het bedrijf mag per jaar maar een derde van zijn vrij verhandelbare waarde uitgeven (de regel voor kleine bedrijven) |
+| P7 | twijfel over het voortbestaan genoemd in het prospectus |
+| K1–K3 | kas voor minder dan 6 maanden, voor minder dan 12 maanden, of een positieve kasstroom (uit de kwartaalcijfers, zonder Claude) |
+| K4–K5 | aantal aandelen in twaalf maanden met meer dan 50% of meer dan 200% gegroeid (zonder Claude) |
+
+**Wanneer telt iets als bewezen.** Een feit moet in 2020–2024 én in 2025–2026 dezelfde kant op wijzen, met
+minstens 5 punten verschil in trefkans of in het aandeel grote verliezers, bij minstens 100 kandidaat-dagen
+met dat feit in elke periode. Daarna moet het ook als regel op de meldingen en naast de bestaande kans
+standhouden. Met ruim twintig feiten en drie uitkomsten zullen er een paar door toeval goed lijken; daarom
+tellen losse uitschieters niet.
+
+**Kosten.** De opgehaalde teksten zijn samen 82 miljoen tekens, geschat ±28 miljoen tokens. In bulk (de helft
+van de prijs) is dat ongeveer $2 met Haiku 5.5, $45 met Sonnet 5.5 en $115 met Opus 5.5. Het script telt de
+tokens eerst gratis na en weigert te versturen als de uitgaven boven $80 zouden komen (`tekst_batch.py`,
+het kasboek).
+
+**Hoe het loopt.** De sleutel voor de Claude API staat alleen in Supabase (`ANTHROPIC_API_KEY`); vanuit een
+Claude-sessie is hij niet te lezen. Alle verzoeken, ook die aan de SEC, lopen via de tijdelijke
+hulpfunctie `xinix-ss-sec-onderzoek` (bron: `onderzoek/sec_proxy.ts`). Die schrijft niets in de database,
+laat alleen drie modellen toe, geen hulpmiddelen (dus geen zoekkosten), en heeft een noodrem op het aantal
+opdrachten. Na de proef wordt hij weer vervangen door een lege functie.
+
+**Stand op 15 november:** de teksten zijn opgehaald (4.892 van de 4.940; de rest wordt opnieuw geprobeerd),
+de vraagstelling en de scripts staan klaar en zijn met verzonnen antwoorden doorgetest. De proef zelf wacht
+op de sleutel.
