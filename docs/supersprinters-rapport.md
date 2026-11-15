@@ -795,3 +795,73 @@ Twee dingen die hierbij boven water kwamen:
   tijdelijke hulpfunctie in Supabase (`xinix-ss-sec-onderzoek`, bron in `onderzoek/sec_proxy.ts`), met
   dezelfde afzender als `poll-edgar-background` en ruim binnen het tempo dat de SEC toestaat. Die functie
   is na gebruik vervangen door een lege functie en kan in het dashboard worden verwijderd.
+
+### 14.12 Drie ideeën die gratis na te rekenen waren (15 november)
+
+De gebruiker vroeg of het maandelijkse API-tegoed de betrouwbaarheid op een andere manier kan verhogen
+(meer of ander nieuws, een dagelijkse scan). Drie ideeën konden zonder tegoed op de bestaande gegevens
+worden nagerekend. Geen van de drie levert iets op.
+
+**1. Themakoorts: springt een aandeel vaker als zijn bedrijfstak al in beweging is?** (`thema_test.py`)
+
+Het model kent het klimaat van de hele markt per regio, niet dat van de eigen bedrijfstak. Per kandidaat
+is geteld welk deel van de andere aandelen in dezelfde bedrijfstak (130 soorten volgens TradingView) of
+sector (21) vandaag ≥ +10% of ≥ +20% deed, in vijf dagen ≥ +30%, of in een maand ≥ +50% of ≥ +100%: binnen
+de eigen regio en wereldwijd (van een andere regio alleen de sessie die al gesloten was), ook als verschil
+met de hele markt. In totaal 60 kenmerken op 18.584 kandidaat-dagen (kans vanaf 15%, omzet vanaf
+$100.000); een kandidaat heeft doorgaans 41 andere aandelen in zijn bedrijfstak en regio, 138 wereldwijd.
+
+- Geen enkel kenmerk onderscheidt treffers in beide perioden: het beste komt niet verder dan 0,51 en 0,51
+  (0,5 is niets; de beweeglijkheid van de week haalt 0,56 en 0,55, de kans van het model 0,56 en 0,53).
+- In drie gelijke groepen (weinig, gemiddeld, veel sectorgenoten die vandaag ≥ +20% deden): 15,8 / 16,1 /
+  16,8% raak in 2020–2024 en 14,2 / 14,3 / 15,4% in 2025–2026; grote verliezers 8,4 / 8,2 / 9,3% en
+  24,8 / 26,9 / 25,8%.
+- Een tweede model (de kans plus de themakenmerken, steeds geleerd op de jaren vóór het testjaar) was in
+  2021–2024 slechter dan de kans alleen (0,539 tegen 0,555) en in 2025–2026 beter (0,554 tegen 0,534);
+  per jaar wisselt het van kant.
+- Bij de meldingen van lat 26% leek een rustige bedrijfstak beter (30% tegen 22% raak in 2020–2024), maar
+  bij lat 20% is dat verschil weg (18,9% tegen 19,1%, en 25,0% tegen 24,3%). Toeval.
+
+**Besluit:** niet gebouwd. Een fijnere indeling in thema's (door Claude) heeft weinig kans als de grove
+indeling niets laat zien.
+
+**2. Vastgepind na een overnamebod.** Een aandeel waarop een bod in contanten ligt, kan geen +50% meer
+doen. Komt bijna niet voor: bij 11 van de 15.119 kandidaat-dagen in 2020–2024 en 7 van de 3.465 in
+2025–2026 bleven de tien volgende sloten binnen een band van 4%; onder de kandidaat-dagen vanaf 26% bleven
+er 2 van de 397 en 0 van de 27 binnen 6%. Een regel die overnamedoelwitten uitsluit levert niets op.
+
+**3. Een vaste stop-order.** (`stop_test.py`) Nagespeeld op dagkoersen: kopen bij de opening, verkooplimiet
+op +50%, stop op −X% onder de aankoopprijs, anders verkopen na tien handelsdagen. Voorzichtig gerekend:
+raakt de koers op één dag de stop én de verkooplimiet, dan telt de stop.
+
+Meldingen bij lat 26% in 2020–2024 (148):
+
+| | Verkocht op +50% | Gestopt | Gemiddeld resultaat | Eindigt op −30% of lager | Eindigt op −20% of lager |
+|---|---|---|---|---|---|
+| Zonder stop | 36% | n.v.t. | +14,9% | 8,8% | 17% |
+| Stop −15% | 27% | 52% | +7,8% | 0,7% | 3% |
+| Stop −20% | 30% | 41% | +9,3% | 0,7% | 7% (41% als de verkoop 3% doorglijdt) |
+| Stop −25% | 31% | 30% | +10,5% | 0,7% | 31% |
+| Stop −30% | 33% | 22% | +12,0% | 22% | 25% |
+| Stop −40% | 35% | 7% | +13,8% | 10% | 18% |
+
+- Deze aandelen bewegen zo wild dat een stop vaak geraakt wordt; van de gestopte meldingen had 15 tot 18%
+  later alsnog +50% gehaald.
+- In 2025–2026 (13 meldingen) werd 8 van de 13 gestopt bij −20% en was het gemiddelde +3,9% tegen +5,1%
+  zonder stop. Bij lat 20% (90 meldingen): −1,9% zonder stop, +0,7% met een stop op −15%, +0,6% op −25%;
+  in 2020–2024 (1.014 meldingen) +10,1% zonder stop tegen +7,3% met een stop op −20%.
+- Kopen met een limietorder op het slot geeft hetzelfde beeld.
+
+**Besluit:** een stop ruilt een paar grote verliezen voor veel middelgrote. In goede jaren kost dat 3 tot 6
+punten gemiddeld resultaat, in slechte jaren maakt het weinig uit. Het is een keuze over hoe je verlies
+neemt, geen verbetering van de meldingen; er komt geen stop-advies in de melding.
+
+Wat hierbij opviel: een groot verlies bouwt zich meestal in dagen op. Van de kandidaten die na tien
+handelsdagen 30% of meer lager stonden, stond 77% (2020–2024) en 79% (2025–2026) na vijf dagen al 15% of
+meer lager; maar 7% en 15% opende de eerste dag al 10% of meer lager.
+
+**Wat nog niet getest is:** de tekst van het bedrijfsnieuws zelf. De SEC-test (14.11) keek alleen naar het
+soort stuk en de datum, niet naar wat erin staat. Persberichten van Amerikaanse bedrijven staan als bijlage
+bij een 8-K sinds jaren bij de SEC; die door Claude laten lezen (wat is er gemeld, op welke voorwaarden
+wordt er geld opgehaald) is op dezelfde geschiedenis te testen. Dat is het voorstel voor het API-tegoed;
+het wacht op de keuzes van de gebruiker en op de sleutel.
