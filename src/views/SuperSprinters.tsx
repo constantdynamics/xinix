@@ -462,7 +462,7 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
           (tenzij de kans 5 punten hoger is){alertMaxVolW > 0 ? `, niet voor aandelen die deze week gemiddeld meer dan ${nl(alertMaxVolW, 0)}% per dag bewogen` : ""}
           {offRegions.length ? ` en niet voor ${offRegions.join(" en ")} (daar kwamen de kansen in de test niet uit)` : ""}.
           Er zijn twee meldmomenten, steeds vóór de volgende opening van de eigen beurs: Azië en Australië aan het eind van
-          de ochtend, kort na hun slot; Europa, de VS en Canada samen 's ochtends vroeg na de stille uren. Reken op weinig
+          de ochtend, kort na hun slot; de VS en Canada{offRegions.includes("Europa") ? "" : " en Europa"} 's ochtends vroeg na de stille uren. Reken op weinig
           meldingen: met een lat van 26% waren het er in 2026 ongeveer één per maand, in de rustige jaren 2022 tot en met 2025
           geen enkele, en in een hete markt als begin 2021 soms meerdere per dag. Een tik op de melding opent dit tabblad op
           dat aandeel. <b>Hartje</b>: favoriet en op de watchlist, maar het aandeel doet niet mee in het Potje en de papieren
