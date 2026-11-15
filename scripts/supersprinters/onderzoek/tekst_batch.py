@@ -369,5 +369,17 @@ elif CMD == "vergelijk":
                 same = sum(eq(x, y) for x, y in zip(a, b))
                 gevuld = sum(1 for x in a if x not in (None, False))
                 print(f"   {naam:34s} gelijk {100 * same / max(1, len(ds)):5.1f}%   (bij {ref} ingevuld: {gevuld})")
+        # De feiten waar de meting op draait (tekst_feiten.py): hoe vaak zeggen de twee modellen hetzelfde, en kappa
+        # (overeenstemming boven toeval: 1 = volledig, 0 = niet beter dan toeval).
+        from tekst_feiten import feit, BOOL_NIEUWS, BOOL_GELD
+        print(f"-- afgeleide feiten per stuk ({other} tegenover {ref}) --")
+        for srt, velden in (("nieuws", BOOL_NIEUWS), ("geld", BOOL_GELD)):
+            ds = [d for d in sp if soort.get(d) == srt and d in res.get(ref, {}) and d in res[other]]
+            fa = [feit(res[ref][d], srt) for d in ds]; fb = [feit(res[other][d], srt) for d in ds]
+            for k in velden:
+                a = [bool(x[k]) for x in fa]; b = [bool(x[k]) for x in fb]; n = max(1, len(ds))
+                po = sum(x == y for x, y in zip(a, b)) / n; pa, pb = sum(a) / n, sum(b) / n
+                pe = pa * pb + (1 - pa) * (1 - pb); kappa = (po - pe) / (1 - pe) if pe < 1 else float("nan")
+                print(f"   {srt:6s} {k:12s} gelijk {100 * po:5.1f}%  kappa {kappa:5.2f}  (ja bij {ref}: {sum(a)}, bij {other}: {sum(b)})")
 else:
     sys.exit("onbekende opdracht")

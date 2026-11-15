@@ -20,13 +20,11 @@ from sklearn.metrics import roc_auc_score
 from sklearn.linear_model import LogisticRegression
 sys.path.insert(0, os.path.dirname(__file__))
 import vlaggen
+from tekst_feiten import feit
 
 ROOT = sys.argv[1]
 PREF = (sys.argv[2] if len(sys.argv) > 2 else "sonnet,opus,haiku").split(",")
 D = os.path.join(ROOT, "sec"); CL = os.path.join(D, "claude")
-POS = {"clinical_or_regulatory", "contract_or_partnership", "product_or_technology", "earnings_or_guidance", "company_acquires_business"}
-EQUITY = {"underwritten_public_offering", "registered_direct", "private_placement", "at_the_market_program", "equity_line", "warrant_exercise_or_inducement", "rights_offering", "preferred_stock"}
-
 # ── uitkomsten van Claude per stuk ───────────────────────────────────────────
 res = {}
 for p in sorted(glob.glob(os.path.join(CL, "uit_*.jsonl"))):
@@ -45,40 +43,7 @@ print(f"stukken {len(docs)}, gelezen {int(docs.gelezen.sum())} ({100 * docs.gele
       ", ".join(f"{m} {sum(1 for v in res.values() if m in v)}" for m in PREF))
 
 
-def num(x):
-    return float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else np.nan
-
-
-def feit(row):
-    """Feiten per stuk, uit het antwoord van Claude."""
-    v = pick.get(row.id)
-    if v is None: return None
-    f = v.get("financing") or {}
-    o = {"soort": row.soort, "fin": bool(f), "structure": f.get("structure"), "stage": f.get("stage"),
-         "priced": f.get("stage") in ("priced_or_signed", "closed"), "equity": f.get("structure") in EQUITY,
-         "warrants": num(f.get("warrant_shares")) > 0, "floating": bool(f.get("floating_price")),
-         "price": num(f.get("price_per_share_usd")), "wprice": num(f.get("warrant_exercise_price_usd")), "shares": num(f.get("shares")),
-         "gross": num(f.get("gross_proceeds_usd")), "crypto": bool(f.get("proceeds_for_digital_assets"))}
-    if row.soort == "nieuws":
-        ev = v.get("events") or []
-        kinds = {e["kind"] for e in ev}
-        o.update(first=ev[0]["kind"] if ev else None, kinds=kinds,
-                 hard_pos=any(e["kind"] in POS and e["hardness"] == "completed_or_binding" and e["tone"] == "positive" for e in ev),
-                 soft_pos=any(e["kind"] in POS and e["hardness"] == "planned_or_nonbinding" and e["tone"] == "positive" for e in ev),
-                 equity_news=("equity_financing" in kinds) or o["equity"],
-                 pivot=bool(kinds & {"strategy_pivot", "digital_asset_treasury"}),
-                 target=("company_is_being_acquired" in kinds) or np.isfinite(num(v.get("takeover_cash_price_usd"))),
-                 listing=bool(kinds & {"listing_deficiency", "reverse_split"}) or np.isfinite(num(v.get("reverse_split_ratio"))),
-                 negative=any(e["tone"] == "negative" for e in ev) or bool(v.get("going_concern_or_default")) or bool(kinds & {"distress_or_default"}))
-    else:
-        role = v.get("role")
-        o.update(role=role, priced=o["priced"] or role == "priced_offering", atm=role in ("at_the_market_program", "equity_line") or f.get("structure") in ("at_the_market_program", "equity_line"),
-                 resale=role == "resale_by_holders", baby=bool(v.get("baby_shelf_limited")), going=bool(v.get("going_concern")),
-                 before=num(v.get("shares_outstanding_before")), resale_shares=num(v.get("resale_shares")))
-    return o
-
-
-F = {r.id: feit(r) for r in docs.itertuples()}
+F = {r.id: feit(pick.get(r.id), r.soort) for r in docs.itertuples()}
 nw = [f for f in F.values() if f and f["soort"] == "nieuws"]; gd = [f for f in F.values() if f and f["soort"] != "nieuws"]
 print("\n== 1. Wat Claude vond ==")
 print("nieuws, belangrijkste gebeurtenis:", pd.Series([f["first"] for f in nw]).value_counts().to_dict())
