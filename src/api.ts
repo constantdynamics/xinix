@@ -1544,7 +1544,7 @@ export interface SuperSprintResponse {
   track_record: SuperSprintTrack | null;
   sprint_track_record: SprintTrackRecord | null;
   settings: {
-    ss_enabled: boolean; ss_alerts: boolean; ss_alert_min_prob: number; ss_alert_max_per_week: number; ss_override_min_prob: number; ss_alert_min_dvol?: number | null; ss_alert_max_volw?: number | null;
+    ss_enabled: boolean; ss_alerts: boolean; ss_alert_min_prob: number; ss_alert_max_per_week: number; ss_override_min_prob: number; ss_alert_min_dvol?: number | null; ss_alert_max_volw?: number | null; ss_alert_regions?: number[] | null;
     sprint_alert_min_prob: number; quiet_hours_start: number | null; quiet_hours_end: number | null;
   } | null;
   state: Record<string, Record<string, unknown>>;
@@ -1571,7 +1571,7 @@ export async function superSprintAdopt(ticker: string): Promise<{ ok: boolean; a
   if (!res.ok) throw new Error(`op de watchlist zetten mislukt (${res.status}): ${await res.text()}`);
   return (await res.json()) as { ok: boolean; added: boolean };
 }
-export async function superSprintSettings(patch: { ss_enabled?: boolean; ss_alerts?: boolean; ss_alert_max_volw?: number }): Promise<void> {
+export async function superSprintSettings(patch: { ss_enabled?: boolean; ss_alerts?: boolean; ss_alert_max_volw?: number; ss_alert_regions?: number[] }): Promise<void> {
   const res = await fetch(apiUrl("/api/xinix-supersprint"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },

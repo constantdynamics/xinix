@@ -27,7 +27,7 @@ const DAY = C.DAY;
 export interface Settings {
   ntfy_topic: string | null; ntfy_server: string | null; quiet_hours_start: number | null; quiet_hours_end: number | null;
   ss_enabled: boolean | null; ss_alerts: boolean | null; ss_alert_min_prob: number | null; ss_alert_max_per_week: number | null; ss_override_min_prob: number | null;
-  ss_alert_min_dvol?: number | null; ss_alert_max_volw?: number | null;
+  ss_alert_min_dvol?: number | null; ss_alert_max_volw?: number | null; ss_alert_regions?: number[] | null;
 }
 export interface Meter { tv: number; yahoo: number; rows: number; alerts: number; errors: number }
 export interface Ctx { sb: SB; settings: Settings; meter: Meter; spent: { yahoo: number }; today: string; nowMs: number }
@@ -54,7 +54,7 @@ export async function guarded(sb: SB, fn: (ctx: Ctx) => Promise<RunResult>): Pro
   const nowMs = Date.now();
   const today = new Date(nowMs).toISOString().slice(0, 10);
   const [st, br, bu] = await Promise.all([
-    sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol, ss_alert_max_volw").eq("id", 1).maybeSingle(),
+    sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol, ss_alert_max_volw, ss_alert_regions").eq("id", 1).maybeSingle(),
     sb.from("xinix_ss_state").select("value").eq("key", "brake").maybeSingle(),
     sb.from("xinix_ss_budget").select("runs, tv, yahoo, rows_written").eq("day", today).maybeSingle(),
   ]);
@@ -305,6 +305,9 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
   const minDvol = Math.max(0, Number(s.ss_alert_min_dvol ?? 100_000));
   // Heel beweeglijke aandelen: even vaak raak, maar veel vaker een groot verlies (zie core.ts, RISK_BOUNDS).
   const maxVolW = Math.max(0, Number(s.ss_alert_max_volw ?? 30));
+  // Regio's die meldingen mogen sturen (leeg of niet ingesteld = alle). In Europa kwamen de kansen in de test
+  // in geen van beide perioden uit; die regio staat daarom standaard niet in de lijst.
+  const regions = Array.isArray(s.ss_alert_regions) && s.ss_alert_regions.length ? s.ss_alert_regions.map(Number) : null;
   if (!(minProb > 0)) return done("meldgrens 0: uit");
   const ct = cands.map((c) => c.ticker);
   const nowMs = Date.now();
@@ -335,6 +338,7 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
     const up = c.ticker.toUpperCase();
     // Gedempt of gezien wijkt alleen voor een kans vanaf de override-grens (zoals bij Sprinters).
     if ((muted.has(up) || seen.has(up)) && c.prob < override) { out.blocked++; skip(c.ticker, "niet gemeld: gedempt of gezien"); continue; }
+    if (regions && !regions.includes(c.region)) { out.blocked++; skip(c.ticker, `niet gemeld: ${C.REGION_NL[c.region]} doet niet mee met de meldingen`); continue; }
     if (minDvol > 0 && !((c.dvol_usd ?? 0) >= minDvol)) { out.blocked++; skip(c.ticker, `niet gemeld: omzet onder ${C.fmtUsd(minDvol)} per dag`); continue; }
     if (maxVolW > 0 && c.vol_w != null && c.vol_w > maxVolW) {
       out.blocked++; skip(c.ticker, `niet gemeld: beweegt deze week gemiddeld meer dan ${maxVolW}% per dag (verliesrisico zeer hoog)`); continue;
@@ -514,7 +518,7 @@ export async function read(sb: SB): Promise<Json> {
       .gte("session_date", isoMinus(today, 6)).order("prob", { ascending: false }).limit(600),
     sb.rpc("xinix_ss_track_record"),
     sb.rpc("xinix_sprint_track_record"),
-    sb.from("signal_settings").select("ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol, ss_alert_max_volw, sprint_alert_min_prob, quiet_hours_start, quiet_hours_end").eq("id", 1).maybeSingle(),
+    sb.from("signal_settings").select("ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol, ss_alert_max_volw, ss_alert_regions, sprint_alert_min_prob, quiet_hours_start, quiet_hours_end").eq("id", 1).maybeSingle(),
     sb.from("xinix_ss_state").select("key, value, updated_at"),
     sb.from("xinix_ss_budget").select("*").gte("day", isoMinus(today, 7)).order("day", { ascending: false }),
     sb.from("xinix_ss_breadth").select("region, day, n, b1_20, b1_10, bm_50").gte("day", isoMinus(today, 7)).gt("n", 0).order("day", { ascending: false }),
@@ -577,6 +581,10 @@ export async function saveSettings(sb: SB, body: Json): Promise<{ status: number
   };
   numIn("ss_alert_min_prob", 0, 90); numIn("ss_alert_max_per_week", 0, 50); numIn("ss_override_min_prob", 0, 90);
   numIn("ss_alert_min_dvol", 0, 1_000_000_000); numIn("ss_alert_max_volw", 0, 1000);
+  if (Array.isArray(body.ss_alert_regions)) {
+    const rs = [...new Set((body.ss_alert_regions as unknown[]).map(Number).filter((r) => Number.isInteger(r) && r >= 0 && r <= 3))].sort();
+    if (rs.length) patch.ss_alert_regions = rs;
+  }
   if (!Object.keys(patch).length) return { status: 400, body: { error: "niets te wijzigen" } };
   const { error } = await sb.from("signal_settings").update(patch).eq("id", 1);
   if (error) return { status: 500, body: { error: error.message } };

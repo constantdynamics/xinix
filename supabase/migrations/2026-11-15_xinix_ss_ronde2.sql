@@ -104,3 +104,17 @@ revoke execute on function public.xinix_ss_track_record() from public, anon, aut
 -- wachten alleen de kandidaten van die ronde; die van Europa en de VS gaan de volgende ochtend om 04:12.
 -- Uitzetten: select cron.alter_job((select jobid from cron.job where jobname = 'xinix-ss-flush-apac'), active := false);
 select cron.schedule('xinix-ss-flush-apac', '33 9 * * 1-5', $$select public.invoke_edge('xinix-supersprint?mode=flush')$$);
+
+-- 4. Keuzes van de gebruiker (15 november): betrouwbaar = vaak +50% én weinig grote verliezers; liever één
+--    heel goede melding per maand; geen weekplafond maar een hoge lat; alleen regio's waar de kansen
+--    aantoonbaar kloppen. Nagerekend met scripts/supersprinters/onderzoek/ronde2_keuzes.py:
+--    - lat 26% zonder weekplafond: 2020–2024 148 meldingen (allemaal in 2020 en 2021), 26% raak vanaf het
+--      slot en vanaf de opening, 10% op −30% of lager; 2025–2026 13 meldingen, 6 raak, 2 op −30% of lager.
+--      In 2026 was dat ongeveer één melding per maand; in 2022 tot en met 2025 geen enkele.
+--    - Europa: in geen van beide perioden kwam uit wat voorspeld was (kandidaten vanaf 15%: 11% waar 18%
+--      voorspeld was, en 9% waar 17% voorspeld was). Europa stuurt daarom voorlopig geen meldingen; het
+--      staat wel in de lijst. De andere regio's lieten in minstens één periode zien dat de kansen kloppen.
+alter table public.signal_settings add column if not exists ss_alert_regions smallint[] not null default '{0,1,3}';
+comment on column public.signal_settings.ss_alert_regions is 'SUPERsprinters: regio''s die meldingen mogen sturen (0 VS, 1 Canada, 2 Europa, 3 Azië-Pacific).';
+update public.signal_settings set ss_alert_min_prob = 26, ss_alert_max_per_week = 0 where id = 1;
+comment on column public.signal_settings.ss_alert_max_per_week is 'SUPERsprinters: hoogstens zoveel meldingen per week (0 = geen plafond).';

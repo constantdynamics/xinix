@@ -4,7 +4,8 @@
 // Met "alerts" volgt het meldmoment tegen een nagebootste ntfy-server. QUIET=0 zet de stille uren
 // uit, NTFY=down maakt de server onbereikbaar, PRE='[…]' zet eerdere meldingen klaar (weekplafond, herhaling).
 // MIN_PROB, MIN_DVOL en MAX_VOLW zetten de meldgrens (standaard 15), de omzeteis voor meldingen (standaard
-// 100000) en de grens op de beweeglijkheid van de week (standaard 30, 0 = uit).
+// 100000) en de grens op de beweeglijkheid van de week (standaard 30, 0 = uit); MAX_WEEK het weekplafond
+// (standaard 3, 0 = geen) en REGIONS de regio's die mogen melden (bv. "0,1,3"; standaard alle).
 import * as fs from "node:fs";
 import * as C from "../../supabase/functions/xinix-supersprint/core.ts";
 import * as R from "../../supabase/functions/xinix-supersprint/run.ts";
@@ -16,8 +17,9 @@ const seed = JSON.parse(fs.readFileSync(new URL("../../public/ss-breadth-seed.js
 type Row = Record<string, unknown>;
 const tables: Record<string, Row[]> = {
   signal_settings: [{ id: 1, ntfy_topic: "test", ntfy_server: "http://127.0.0.1:9/nergens", quiet_hours_start: process.env.QUIET === "0" ? null : 21, quiet_hours_end: process.env.QUIET === "0" ? null : 4,
-    ss_enabled: true, ss_alerts: alertsFlag === "alerts", ss_alert_min_prob: Number(process.env.MIN_PROB ?? 15), ss_alert_max_per_week: 3, ss_override_min_prob: 15, ss_alert_min_dvol: Number(process.env.MIN_DVOL ?? 100000),
-    ss_alert_max_volw: Number(process.env.MAX_VOLW ?? 30) }],
+    ss_enabled: true, ss_alerts: alertsFlag === "alerts", ss_alert_min_prob: Number(process.env.MIN_PROB ?? 15), ss_override_min_prob: 15, ss_alert_min_dvol: Number(process.env.MIN_DVOL ?? 100000),
+    ss_alert_max_volw: Number(process.env.MAX_VOLW ?? 30), ss_alert_max_per_week: Number(process.env.MAX_WEEK ?? 3),
+    ss_alert_regions: process.env.REGIONS ? process.env.REGIONS.split(",").map(Number) : null }],
   xinix_fx_rates: JSON.parse(fs.readFileSync(fxPath, "utf8")),
   xinix_ss_state: [], xinix_ss_budget: [], xinix_ss_scores: [], xinix_ss_predictions: [], xinix_notify_mute: [], xinix_seen: [],
   xinix_ss_breadth: seed.map((s: Row) => ({ ...s, n: 0 })),
