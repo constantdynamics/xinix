@@ -977,3 +977,46 @@ Kandidaat-dagen met een dagbeweging tot 30%, met het feit tegenover zonder:
 verliezen bestaat, maar is te zwak en te wisselend om meldingen op tegen te houden. Het hoort wel in de
 toelichting bij een melding ("kas voor ongeveer vier maanden"). Voor het lezen door Claude betekent dit
 dat de verwachting bescheiden moet zijn: de feiten over geld ophalen gaan over hetzelfde mechanisme.
+
+### 14.15 Het lezen door Claude: verloop
+
+**15 november, 16:00 UTC: de sleutel staat in Supabase.** Hij stond eerst in een ander project van
+dezelfde eigenaar (eten-avontuur); de functies van Xinix draaien in het project maikel en kunnen daar niet
+bij. De hulpfunctie laat sindsdien op verzoek de namen zien van de secrets die hij kan lezen, nooit de
+waarden.
+
+**Tokens geteld (gratis, bij de API zelf).** Twee dingen vielen anders uit dan geschat:
+
+- Elke opdracht draagt een vast deel van ±3.000 tokens mee: de vraagstelling (±1.250) en het
+  antwoordschema (±1.700, ook als alle uitleg eruit is). Bij 4.938 stukken is dat een derde van alles.
+- Deze teksten (juridisch, veel getallen) tellen 3,1 tekens per token in plaats van 4.
+
+Samen ±42 miljoen tokens in plaats van 28. Daarom wordt het vaste deel nu door de API onthouden
+(`cache_control`): de eerste opdracht betaalt er 1,25 keer de prijs voor, volgende opdrachten binnen vijf
+minuten 0,05 keer. Het voorblad van een 8-K (adres, aankruisvakjes) gaat niet meer mee.
+
+**Steekproef, Opus 5.5.** Alle 300 stukken gelezen in vier minuten, geen enkele mislukt. Het vaste deel
+werd bij 99% van de opdrachten onthouden. Kosten $4,56: $0,022 per prospectus of registratie en $0,011
+per nieuwsstuk; een antwoord is gemiddeld 340 tokens. Doorgerekend naar alle 4.938 stukken: ±$74 met Opus,
+±$37 met Sonnet.
+
+Wat Opus in de steekproef vond:
+
+- 180 nieuwsstukken: cijfers 34, uitgifte van aandelen 31, bestuur 22, lening of converteerbaar 14,
+  aandeelhoudersstemming 12, studie of toezichthouder 9, contract 9, noteringsprobleem 9, omgekeerde split
+  7, overname door het bedrijf 6, cryptostrategie 4. Hard positief nieuws in 43 stukken, een voornemen in
+  10, negatief in 40. Geen enkel bod op het bedrijf zelf.
+- 120 prospectussen en registraties: doorverkoop door houders 46, geprijsde uitgifte 28, plankregistratie
+  12, doorlopend verkoopprogramma 9, voorlopige uitgifte 9, kredietlijn in aandelen 8. Bij 21 geldt de
+  regel voor kleine bedrijven, bij 15 beweegt een prijs mee met de koers.
+
+Twaalf antwoorden zijn met de hand naast de tekst gelegd (zes van Sonnet, zes van Opus): soort, bedragen,
+aantallen aandelen en warrants klopten met wat er stond.
+
+**Sonnet en Haiku: 2 stukken elk, daarna weigerde de API.** De melding: "You have reached your specified
+API usage limits. You will regain access on 2026-12-01". Op het account van de gebruiker staat een
+bestedingslimiet van ongeveer $5 per maand; die was na de steekproef van Opus bereikt (uitgegeven volgens
+het kasboek: $4,73). De vergelijking tussen de modellen en de rest van de stukken wachten tot de limiet is
+verhoogd. Het script stuurt mislukte opdrachten dan vanzelf opnieuw mee.
+
+De antwoorden van Opus en het kasboek staan in `scripts/supersprinters/onderzoek/proefdata/`.
