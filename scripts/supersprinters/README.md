@@ -84,11 +84,15 @@ Het ophalen loopt daarom via een tijdelijke hulpfunctie in Supabase, met dezelfd
 
 | Stap | Script | Wat het doet |
 |---|---|---|
-| i | `sec_proxy.ts` | de hulpfunctie: per bedrijf de lijst van ingediende stukken (datum, soort, onderdelen van een 8-K, moment van ontvangst). Uitrollen als `xinix-ss-sec-onderzoek` met een eigen sleutel in de bron; na gebruik vervangen door een lege functie |
+| i | `sec_proxy.ts` | de hulpfunctie: per bedrijf de lijst van ingediende stukken (datum, soort, onderdelen van een 8-K, moment van ontvangst); sinds de proef met het API-tegoed ook de tekst van een stuk, cijfers uit de verslagen en het doorgeven van leesopdrachten aan de Claude API. Uitrollen als `xinix-ss-sec-onderzoek` met een eigen sleutel in de bron; na gebruik vervangen door een lege functie |
 | j | `SEC_KEY=… python3 sec_fetch.py ssdata <url>` | haalt de lijsten op voor alle Amerikaanse aandelen die ooit kandidaat waren (hervatbaar, ±7 verzoeken per seconde) |
 | k | `sec_test.py ssdata ssdata/runs/open_red` | per kandidaat-dag alleen wat op het slot al bekend was; kenmerk voor kenmerk, als model, en als regel op de meldingen |
 | l | `thema_test.py ssdata ssdata/runs/open_red` | themakoorts: het klimaat in de eigen bedrijfstak en sector als los kenmerk, als tweede model en op de meldingen (geen signaal) |
 | m | `stop_test.py ssdata ssdata/runs/open_red` | de meldingen nagespeeld met een vaste stop-order van 10 tot 40% (ruilt grote verliezen voor veel middelgrote) |
+| n | `SEC_KEY=… python3 tekst_lijst.py ssdata <url>` | proef met het API-tegoed: per kandidaat-dag de stukken met tekst kiezen (nieuws van 7 dagen, prospectus en registratie van 90 dagen), met de twee momenten waarop een stuk bekend was |
+| o | `SEC_KEY=… python3 tekst_haal.py ssdata <url>` | de tekst van die stukken ophalen (hervatbaar; `OPNIEUW=6-K` haalt 6-K's zonder bijlage opnieuw op) |
+| p | `SEC_KEY=… python3 kas_haal.py ssdata <url>` | kas, kasstroom en aantal aandelen uit de jaar- en kwartaalverslagen (XBRL) |
+| q | `SEC_KEY=… python3 tekst_batch.py ssdata <url> <opdracht>` | Claude de stukken laten lezen: steekproef, tokens tellen, in bulk versturen, uitkomsten ophalen, kasboek met plafond; de sleutel voor de Claude API staat alleen in Supabase |
 
 Na opnieuw trainen: `public/ss-model.json` vervangen, het controlegetal (`MODEL_SHA256`) in
 `supabase/functions/xinix-supersprint/core.ts` bijwerken, `test_core.ts` draaien en de functie opnieuw
