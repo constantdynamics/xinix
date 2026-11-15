@@ -715,10 +715,10 @@ Het model ziet geen nieuws (hoofdstuk 5, punt 2). Wat er is en wat er kan:
 | Bron | Op geschiedenis te testen? | Kosten | Stand |
 |---|---|---|---|
 | Koppen van Yahoo met trefwoorden | nee (geen archief) | geen | draait sinds 13 november; per voorspelling vastgelegd, meting loopt |
-| Berichten bij de SEC (uitgiftes, prospectussen, 8-K) | ja, tien jaar, alleen Amerikaanse aandelen | geen | onderzoek gestart op 15 november, zie de aanvulling onderaan dit hoofdstuk |
+| Berichten bij de SEC (uitgiftes, prospectussen, 8-K) | ja, alleen Amerikaanse aandelen | geen | getest op 15 november (14.11): te zwak om op te selecteren, wel bruikbaar als toelichting |
 | Claude leest koppen en SEC-berichten per kandidaat | nee, wel te meten vanaf de start | enkele dollars per maand uit het tegoed van $100 | wacht op de sleutel in Supabase (`ANTHROPIC_API_KEY`) |
 | Finnhub (gratis sleutel): één jaar bedrijfsnieuws, alleen de VS | beperkt (één jaar) | geen | nog niet aangesloten |
-| Betaald nieuwsarchief met jaren geschiedenis | ja | vanaf enkele tientallen dollars per maand | niet aangeschaft; pas zinvol als de SEC-test iets laat zien |
+| Betaald nieuwsarchief met jaren geschiedenis | ja | vanaf ongeveer $20 per maand (EODHD noemt $19,99 voor nieuws en agenda; hoe ver het archief teruggaat staat er niet bij). Finnhub: gratis één jaar, betaald twintig jaar, prijs niet bevestigd | niet aangeschaft: de SEC-test geeft geen reden om er nu geld aan uit te geven |
 
 ### 14.9 Wat er is gewijzigd
 
@@ -742,3 +742,56 @@ telefoonbreedte tegen de uitgerolde functie.
 
 Niets van het bovenstaande kost geld: geen grotere database, geen betaalde bron. Het extra verbruik is
 één run per werkdag (het tweede meldmoment) en zes kleine kolommen per voorspelling.
+
+### 14.11 De test met berichten bij de SEC
+
+Uitgiftes van nieuwe aandelen zijn de bekendste reden dat een sprong van een klein aandeel weer inzakt.
+Daarom is getest of de stukken die een bedrijf bij de SEC indient iets zeggen over treffers en grote
+verliezers (`sec_fetch.py`, `sec_test.py`).
+
+- Voor de 1.939 Amerikaanse aandelen die ooit kandidaat waren: alle stukken sinds midden 2018 (646.668
+  stuks): prospectussen (424B), registraties (S-1, S-3 en het bericht dat een registratie van kracht is),
+  8-K's met hun onderdelen, te late cijfers, meldingen van bestuurders en grootaandeelhouders.
+- Per kandidaat-dag telt alleen wat op het slot van die dag al bekend was (ontvangen vóór 16:00 uur New
+  York).
+- 13.696 kandidaat-dagen (kans vanaf 15%, omzet vanaf $100.000) bij 1.327 aandelen.
+
+Kandidaat-dagen met een dagbeweging tot 30%: aandeel dat tien handelsdagen later 30% of meer lager stond,
+met en zonder het kenmerk.
+
+| Kenmerk | 2020–2024 met / zonder | 2025–2026 met / zonder | Raak vanaf de opening, met / zonder |
+|---|---|---|---|
+| Registratie van kracht geworden in de laatste 30 dagen | 12,7% / 8,0% | 29,3% / 18,4% | 15,7 / 15,5% en 11,3 / 12,2% |
+| S-1 of F-1 ingediend in de laatste 60 dagen | 12,0% / 8,1% | 26,2% / 18,2% | 13,8 / 15,7% en 11,8 / 12,2% |
+| Prospectus (424B) in de laatste 30 dagen | 10,8% / 7,9% | 22,7% / 18,6% | 14,0 / 15,9% en 13,7 / 11,6% |
+| Drie of meer prospectussen in een jaar | 9,5% / 7,9% | 25,3% / 15,5% | 13,7 / 16,3% en 11,6 / 12,5% |
+| Oproep voor een aandeelhoudersvergadering in de laatste 30 dagen | 5,7% / 8,7% | 17,3% / 19,9% | 19,9 / 15,1% en 19,4 / 11,0% |
+
+Wat dit zegt:
+
+- **Het verband bestaat, maar is zwak.** Rond een uitgifte of registratie eindigen kandidaten in beide
+  perioden vaker fors lager: 3 tot 11 punten meer. De trefkans verandert nauwelijks.
+- **Als extra model voegt het niets toe.** Een model met al deze kenmerken naast de kans en de
+  beweeglijkheid, geleerd op 2020–2024, onderscheidde in 2025–2026 de grote verliezers niet beter (0,657
+  tegen 0,666; 0,5 is niets) en de treffers slechter (0,49 tegen 0,58).
+- **Als regel op de meldingen helpt het niet.** Amerikaanse meldingen bij de lat van 20% zonder de
+  aandelen met een prospectus in de laatste 30 dagen: 18,2% raak vanaf de opening tegen 18,3% (2020–2024)
+  en 11,8% tegen 15,4% (2025–2026); grote verliezers 10,0% tegen 10,3% en 26,5% tegen 28,8%.
+- Opvallend maar niet verklaard: een oproep voor een aandeelhoudersvergadering in de laatste 30 dagen
+  ging in beide perioden samen met meer treffers (+5 en +8 punten). Dat is één van dertig bekeken
+  kenmerken; het kan toeval zijn.
+
+**Besluit:** geen regel op basis van SEC-berichten. Het is wel bruikbare toelichting bij een melding
+("twaalf dagen geleden een prospectus ingediend"); dat hoort bij de beoordeling door Claude (14.8).
+
+Twee dingen die hierbij boven water kwamen:
+
+- **De afzender voor de SEC is niet ingesteld.** De SEC vraagt bij elk verzoek een naam en een
+  contactadres. In Supabase staat `SEC_USER_AGENT` niet, waardoor de bestaande functie
+  `poll-edgar-background` een standaardwaarde met een niet-bestaand adres meestuurt. Dat werkt, maar is
+  niet wat de SEC vraagt. Instellen kan alleen de eigenaar: Supabase → Edge Functions → Secrets →
+  `SEC_USER_AGENT`, bijvoorbeeld een naam gevolgd door een e-mailadres.
+- **Vanuit een Claude-sessie is sec.gov niet bereikbaar.** De gegevens zijn daarom opgehaald via een
+  tijdelijke hulpfunctie in Supabase (`xinix-ss-sec-onderzoek`, bron in `onderzoek/sec_proxy.ts`), met
+  dezelfde afzender als `poll-edgar-background` en ruim binnen het tempo dat de SEC toestaat. Die functie
+  is na gebruik vervangen door een lege functie en kan in het dashboard worden verwijderd.
