@@ -1524,21 +1524,27 @@ export interface SuperSprintReason { g: string; label: string; f: number; t: str
 export interface SuperSprintNews { t: string; u: string | null; p: string | null; d: string; g: string }
 export interface SuperSprintItem {
   ticker: string; market: string; region: number; exchange: string | null; name: string | null; currency: string | null; sector: string | null;
-  close: number | null; close_usd: number | null; change_1d: number | null; perf_1m: number | null; vol_m: number | null; rel_vol: number | null;
+  close: number | null; close_usd: number | null; change_1d: number | null; perf_1m: number | null; vol_m: number | null; vol_w?: number | null; rel_vol: number | null;
   dvol_usd: number | null; mcap_usd: number | null; float_shares: number | null;
   prob: number; prob_base: number | null; rank: number | null;
   reasons: SuperSprintReason[] | null; news: SuperSprintNews[] | null; news_at: string | null;
   session_date: string; scored_at: string; first_seen: string | null;
   alerted_at: string | null; alerted_prob: number | null; alert_pending: boolean; alert_note: string | null;
 }
-export interface SuperSprintTrack extends SprintTrackRecord { alerts: { n: number; hits: number; open: number; avg_prob?: number | null } }
+// Uitkomsten vanaf de opening van de dag na de voorspelling (het eerste moment waarop je kunt kopen).
+export interface SuperSprintOpenStats { n_open?: number; hits_open?: number; avg_ret10?: number | null; big_loss?: number }
+export interface SuperSprintTrack extends SprintTrackRecord {
+  alerts: { n: number; hits: number; open: number; avg_prob?: number | null; med_ret10?: number | null; avg_gap?: number | null } & SuperSprintOpenStats;
+  // Per risicoklasse (0 laag … 3 zeer hoog, 4 onbekend), alle voorspellingen vanaf 15%.
+  risk?: Array<{ rk: number; n: number; hits: number; open: number } & SuperSprintOpenStats>;
+}
 export interface SuperSprintBudgetDay { day: string; runs: number; tv: number; yahoo: number; rows_written: number; ms: number; errors: number; alerts: number }
 export interface SuperSprintResponse {
   items: SuperSprintItem[];
   track_record: SuperSprintTrack | null;
   sprint_track_record: SprintTrackRecord | null;
   settings: {
-    ss_enabled: boolean; ss_alerts: boolean; ss_alert_min_prob: number; ss_alert_max_per_week: number; ss_override_min_prob: number; ss_alert_min_dvol?: number | null;
+    ss_enabled: boolean; ss_alerts: boolean; ss_alert_min_prob: number; ss_alert_max_per_week: number; ss_override_min_prob: number; ss_alert_min_dvol?: number | null; ss_alert_max_volw?: number | null; ss_alert_regions?: number[] | null;
     sprint_alert_min_prob: number; quiet_hours_start: number | null; quiet_hours_end: number | null;
   } | null;
   state: Record<string, Record<string, unknown>>;
@@ -1546,6 +1552,7 @@ export interface SuperSprintResponse {
   breadth: Array<{ region: number; day: string; n: number; b1_20: number; b1_10: number; bm_50: number }>;
   news_lift: Array<{ grp: string; n: number; hits: number; expected: number; lift: number | null }>;
   top_n: number;
+  risk_bounds?: number[];
   computed_at: string | null;
   error: string | null;
 }
@@ -1564,7 +1571,7 @@ export async function superSprintAdopt(ticker: string): Promise<{ ok: boolean; a
   if (!res.ok) throw new Error(`op de watchlist zetten mislukt (${res.status}): ${await res.text()}`);
   return (await res.json()) as { ok: boolean; added: boolean };
 }
-export async function superSprintSettings(patch: { ss_enabled?: boolean; ss_alerts?: boolean }): Promise<void> {
+export async function superSprintSettings(patch: { ss_enabled?: boolean; ss_alerts?: boolean; ss_alert_max_volw?: number; ss_alert_regions?: number[] }): Promise<void> {
   const res = await fetch(apiUrl("/api/xinix-supersprint"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },

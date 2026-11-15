@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   fetchSuperSprint,
   fetchSuperSprintTest,
@@ -10,6 +10,7 @@ import {
   type SuperSprintResponse,
   type SuperSprintTest,
   type SuperSprintTestModel,
+  type SuperSprintTrack,
 } from "../api";
 import { googleFinanceUrl } from "../tickerLinks";
 import { Card, Button, Stat, CollapsibleIntro, toast } from "../components/ui";
@@ -21,6 +22,8 @@ import { HeartIcon, SeenInline, ShowSeenToggle } from "../components/MarkCells";
 // handelsdag, elk kort na het slot van de eigen beurzen. Keuzes van de gebruiker (13 november 2026):
 // koers vanaf $0,50, omzet vanaf $10.000 per dag, meldingen vanaf 15% en hoogstens 3 per week,
 // hartje = favoriet en op de watchlist maar niet in het Potje en de papieren portefeuille.
+// Sinds 14–15 november: meldgrens 20%, omzet voor meldingen vanaf $100.000 per dag, en geen melding
+// voor aandelen die deze week gemiddeld meer dan 30% per dag bewogen (verliesrisico zeer hoog).
 
 const REGIONS = ["VS", "Canada", "Europa", "Azië-Pacific"];
 const ROUND_OF = ["amerika", "amerika", "europa", "apac"];
@@ -29,6 +32,20 @@ const NEWS_LABEL: Record<string, string> = {
   emissie: "uitgifte van aandelen", medisch: "medisch nieuws", overname: "overname of fusie", contract: "contract of samenwerking",
   cijfers: "cijfers", crypto: "crypto", ai: "AI", split: "omgekeerde split of noteringsbrief", overig: "overig",
 };
+
+// Verliesrisico naar de beweeglijkheid van de week (gemiddelde dagbeweging, hoogste tegen laagste koers).
+// De percentages komen uit de test: het deel van de kandidaten (kans vanaf 15%, omzet vanaf $100.000 per
+// dag) dat tien handelsdagen na de opening 30% of meer lager stond, in 2020–2024 en in 2025–2026.
+const RISK_BOUNDS = [12, 21, 30];
+const RISK_LABEL = ["laag", "gemiddeld", "hoog", "zeer hoog"];
+const RISK_TEST: Array<[string, string]> = [["6%", "9%"], ["8%", "21%"], ["12%", "26%"], ["17%", "42%"]];
+const RISK_TONE = ["text-neutral-500", "text-neutral-500", "text-amber-300", "text-fog-loss"];
+function riskOf(volW: number | null | undefined, bounds: number[]): number | null {
+  if (volW == null || !Number.isFinite(volW)) return null;
+  let k = 0;
+  while (k < bounds.length && volW > bounds[k]) k++;
+  return k;
+}
 
 const nl = (v: number, d = 1) => v.toFixed(d).replace(".", ",");
 function fmtPrice(v: number | null): string {
@@ -69,9 +86,10 @@ function probTone(p: number, threshold: number): string {
 }
 const pctTone = (v: number | null) => (v == null ? "text-neutral-500" : v >= 0 ? "text-fog-gain" : "text-fog-loss");
 
-function Detail({ r, threshold, minDvol }: { r: SuperSprintItem; threshold: number; minDvol: number }) {
+function Detail({ r, threshold, minDvol, maxVolW, bounds }: { r: SuperSprintItem; threshold: number; minDvol: number; maxVolW: number; bounds: number[] }) {
   const reasons = r.reasons ?? [];
   const news = r.news ?? [];
+  const risk = riskOf(r.vol_w, bounds);
   return (
     <div className="grid gap-4 md:grid-cols-2 text-xs p-3 bg-ink-2/40">
       <div className="space-y-1.5">
@@ -96,7 +114,14 @@ function Detail({ r, threshold, minDvol }: { r: SuperSprintItem; threshold: numb
         {(r.alerted_at || r.alert_note || r.alert_pending) && (
           <div className="text-neutral-400">
             {r.alerted_at ? `🚀 Gemeld op ${fmtTime(r.alerted_at)} bij ${nl(Number(r.alerted_prob ?? 0), 0)}%. ` : ""}
-            {r.alert_pending ? "Kandidaat voor de eerstvolgende ochtendmelding (de hoogste kansen gaan voor). " : r.alert_note ? `${r.alert_note}.` : ""}
+            {r.alert_pending ? "Kandidaat voor de eerstvolgende melding. " : r.alert_note ? `${r.alert_note}.` : ""}
+          </div>
+        )}
+        {risk != null && r.vol_w != null && (
+          <div className={risk >= 2 ? RISK_TONE[risk] : "text-neutral-400"}>
+            Verliesrisico {RISK_LABEL[risk]}: beweegt deze week gemiddeld {nl(r.vol_w, 0)}% per dag. In de test stond van zulke
+            aandelen {RISK_TEST[risk][0]} (2020–2024) tot {RISK_TEST[risk][1]} (2025–2026) na tien handelsdagen 30% of meer onder
+            de opening.{maxVolW > 0 && r.vol_w > maxVolW ? ` Boven ${nl(maxVolW, 0)}% per dag gaat er geen melding uit.` : ""}
           </div>
         )}
         {r.prob >= threshold && (r.dvol_usd ?? 0) < Math.max(minDvol, 100_000) && (
@@ -132,7 +157,60 @@ function Detail({ r, threshold, minDvol }: { r: SuperSprintItem; threshold: numb
   );
 }
 
-function TrackCard({ title, track: raw, note }: { title: string; track: SprintTrackRecord | null; note: string }) {
+/** Wat kopen bij de opening opleverde, en de uitkomsten per risicoklasse (alleen SUPERsprinters legt dat vast). */
+function OpenStats({ track }: { track: SuperSprintTrack | null }) {
+  const a = track?.alerts;
+  const risk = (track?.risk ?? []).filter((x) => x.rk <= 3 && (x.n_open ?? 0) > 0);
+  if (!a || !(a.n_open ?? 0)) {
+    return (
+      <div className="text-[11px] text-neutral-500 leading-relaxed">
+        Vanaf de opening: bij het afrekenen wordt ook vastgelegd wat er gebeurde als je bij de opening van de dag na de
+        voorspelling kocht. De eerste cijfers volgen samen met de eerste afgerekende meldingen.
+      </div>
+    );
+  }
+  const n = a.n_open ?? 0;
+  return (
+    <div className="space-y-2">
+      <div className="text-[11px] text-neutral-300 leading-relaxed">
+        <b>Meldingen, gerekend vanaf de opening van de dag erna</b> ({n} afgerekend): {a.hits_open ?? 0} raak
+        {a.avg_gap != null ? ` · opende gemiddeld ${fmtPct(Number(a.avg_gap))} t.o.v. het slot` : ""}
+        {a.avg_ret10 != null ? ` · na 10 handelsdagen gemiddeld ${fmtPct(Number(a.avg_ret10))}` : ""}
+        {a.med_ret10 != null ? ` (de middelste ${fmtPct(Number(a.med_ret10))})` : ""} · {a.big_loss ?? 0} op −30% of lager.
+      </div>
+      {risk.length > 0 && (
+        <table className="w-full text-[11px]">
+          <thead className="text-neutral-500 border-b border-ink-5/60">
+            <tr>
+              <th className="py-1 text-left font-bold">Verliesrisico (kans ≥ 15%)</th>
+              <th className="py-1 text-right font-bold">Afgerekend</th>
+              <th className="py-1 text-right font-bold">Raak v.a. opening</th>
+              <th className="py-1 text-right font-bold">Na 10 dagen</th>
+              <th className="py-1 text-right font-bold">−30% of lager</th>
+            </tr>
+          </thead>
+          <tbody>
+            {risk.map((x) => (
+              <tr key={x.rk} className="border-t border-ink-5/40">
+                <td className={`py-0.5 ${RISK_TONE[x.rk]}`}>{RISK_LABEL[x.rk]}</td>
+                <td className="py-0.5 text-right font-mono tabular-nums text-neutral-500">{x.n_open}</td>
+                <td className="py-0.5 text-right font-mono tabular-nums text-fog-lime">
+                  {x.n_open ? `${nl((100 * (x.hits_open ?? 0)) / x.n_open, 0)}%` : "—"}
+                </td>
+                <td className="py-0.5 text-right font-mono tabular-nums text-neutral-400">{x.avg_ret10 != null ? fmtPct(Number(x.avg_ret10)) : "—"}</td>
+                <td className="py-0.5 text-right font-mono tabular-nums text-neutral-400">
+                  {x.n_open ? `${nl((100 * (x.big_loss ?? 0)) / x.n_open, 0)}%` : "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function TrackCard({ title, track: raw, note, children }: { title: string; track: SprintTrackRecord | null; note: string; children?: ReactNode }) {
   // Een antwoord zonder de verwachte velden telt als "nog geen track record".
   const track = raw && typeof raw.total === "number" && typeof raw.resolved === "number" && raw.alerts ? raw : null;
   const rows = (track?.buckets ?? []).filter((b) => b.n + b.open > 0);
@@ -182,6 +260,7 @@ function TrackCard({ title, track: raw, note }: { title: string; track: SprintTr
           )}
         </>
       )}
+      {children}
       <div className="text-[11px] text-neutral-500 leading-relaxed">{note}</div>
     </Card>
   );
@@ -280,6 +359,11 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
 
   const threshold = Number(data?.settings?.ss_alert_min_prob ?? 15) || 15;
   const alertMinDvol = Math.max(0, Number(data?.settings?.ss_alert_min_dvol ?? 100_000));
+  const alertMaxVolW = Math.max(0, Number(data?.settings?.ss_alert_max_volw ?? 30));
+  const maxPerWeek = Math.max(0, Number(data?.settings?.ss_alert_max_per_week ?? 3));
+  const alertRegions = data?.settings?.ss_alert_regions?.length ? data.settings.ss_alert_regions : null;
+  const offRegions = alertRegions ? REGIONS.filter((_, g) => !alertRegions.includes(g)) : [];
+  const riskBounds = data?.risk_bounds?.length === 3 ? data.risk_bounds : RISK_BOUNDS;
   const alertsOn = data?.settings?.ss_alerts === true;
   const enabled = data?.settings?.ss_enabled !== false;
   const isFocus = (r: SuperSprintItem) => focusRow != null && r.ticker === focusRow.ticker;
@@ -319,7 +403,7 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
       setBusy(null);
     }
   }
-  async function setSetting(patch: { ss_enabled?: boolean; ss_alerts?: boolean }) {
+  async function setSetting(patch: { ss_enabled?: boolean; ss_alerts?: boolean; ss_alert_max_volw?: number; ss_alert_regions?: number[] }) {
     setSaving(true);
     try {
       await superSprintSettings(patch);
@@ -352,21 +436,36 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
         </p>
         <p className="leading-relaxed mt-2">
           <b>Eerlijk over wat haalbaar is.</b> Gemiddeld haalt een aandeel dit op ongeveer {nl(BASE_RATE)}% van de dagen. De
-          hoogste kansen liggen rond de 20 à 25%: van vier à vijf meldingen komt er dan gemiddeld één uit. Bovenaan staan vaak
-          kleine, hard gevallen aandelen met weinig omzet.
+          hoogste kansen liggen rond de 25 à 30%: ook van de beste meldingen komt er gemiddeld maar één op de vier uit. Meer
+          zit er met koersgegevens niet in: een hogere lat, een ander model of andere regels gaven in de test geen hogere
+          trefkans. Bovenaan staan vaak kleine, hard gevallen aandelen.
         </p>
         <p className="leading-relaxed mt-2">
-          <b>Een melding is geen koopsignaal.</b> De kans telt vanaf het slot van de dag van de voorspelling, terwijl je pas bij
-          de volgende opening kunt kopen. Wie in de testjaren elke melding bij die opening kocht en tien handelsdagen vasthield,
-          kwam gemiddeld rond nul uit: een paar grote uitschieters, terwijl de middelste melding 5 tot 13% verloor. Gebruik de
-          lijst om zelf te beoordelen (nieuws, grafiek, omzet).
+          <b>Een melding is geen koopsignaal.</b> De kans telt vanaf het slot van de dag van de voorspelling, terwijl je pas
+          daarna kunt kopen. Met de regels van 15 november (lat 26%) was in de test ruim één op de vier meldingen raak, ook
+          gerekend vanaf de opening van de volgende dag, en stond één op de tien na tien handelsdagen 30% of meer lager (in
+          2026: 2 van de 13). Nagespeeld met een limietorder op het slot van de voorspeldag en een verkooplimiet op +50%: de
+          kooporder werd bij ongeveer vier van de vijf meldingen binnen drie dagen gevuld, en van de gevulde haalde ruim één op
+          de drie de +50%. Een marktorder bij de opening gaf hetzelfde beeld. Opende een aandeel meer dan 30% hoger dan het
+          slot, dan was instappen gemiddeld verliesgevend. Bij een lagere lat is het beeld slechter: bij 20% kwam kopen en tien
+          dagen vasthouden in 2025–2026 gemiddeld op −4% uit. Blijf dus zelf beoordelen (nieuws, grafiek, omzet).
         </p>
         <p className="leading-relaxed mt-2">
-          <b>Meldingen</b>: vanaf {threshold}%{alertMinDvol > 0 ? ` en een omzet vanaf ${fmtUsd(alertMinDvol)} per dag` : ""}, hoogstens{" "}
-          {data?.settings?.ss_alert_max_per_week ?? 3} per week, en per aandeel hoogstens één keer per 10 dagen (tenzij de kans
-          5 punten hoger is). Ze gaan één keer per dag uit, 's ochtends na de
-          stille uren, over de slotstanden van de dag ervoor: alle regio's samen, de hoogste kans eerst. Een tik op de melding
-          opent dit tabblad op dat aandeel. <b>Hartje</b>: favoriet en op de watchlist, maar het aandeel doet niet mee in het Potje en de papieren
+          <b>Verliesrisico.</b> Bij elk aandeel staat hoe wild het deze week bewoog (gemiddeld verschil tussen de hoogste en de
+          laagste koers van de dag). Dat zegt weinig over de kans op +50%, maar veel over de kans op een groot verlies: van de
+          kandidaten die meer dan {riskBounds[2]}% per dag bewogen stond 17% (2020–2024) tot 42% (2025–2026) tien handelsdagen
+          later 30% of meer lager, tegen 6 tot 9% bij de rustigste groep. {alertMaxVolW > 0 ? `Boven ${nl(alertMaxVolW, 0)}% per dag gaat er daarom geen melding uit.` : "De grens hierop staat nu uit."}
+        </p>
+        <p className="leading-relaxed mt-2">
+          <b>Meldingen</b>: vanaf {threshold}%{alertMinDvol > 0 ? ` en een omzet vanaf ${fmtUsd(alertMinDvol)} per dag` : ""},{" "}
+          {maxPerWeek > 0 ? `hoogstens ${maxPerWeek} per week` : "zonder weekplafond"}, per aandeel hoogstens één keer per 10 dagen
+          (tenzij de kans 5 punten hoger is){alertMaxVolW > 0 ? `, niet voor aandelen die deze week gemiddeld meer dan ${nl(alertMaxVolW, 0)}% per dag bewogen` : ""}
+          {offRegions.length ? ` en niet voor ${offRegions.join(" en ")} (daar kwamen de kansen in de test niet uit)` : ""}.
+          Er zijn twee meldmomenten, steeds vóór de volgende opening van de eigen beurs: Azië en Australië aan het eind van
+          de ochtend, kort na hun slot; Europa, de VS en Canada samen 's ochtends vroeg na de stille uren. Reken op weinig
+          meldingen: met een lat van 26% waren het er in 2026 ongeveer één per maand, in de rustige jaren 2022 tot en met 2025
+          geen enkele, en in een hete markt als begin 2021 soms meerdere per dag. Een tik op de melding opent dit tabblad op
+          dat aandeel. <b>Hartje</b>: favoriet en op de watchlist, maar het aandeel doet niet mee in het Potje en de papieren
           portefeuille. <b>Gezien</b> (verrekijker): weg uit deze lijst. Niet meegenomen: de Canadian Securities Exchange en
           Cboe Canada, want die biedt Saxo niet aan; van de Londense AIM is dat niet zeker.
         </p>
@@ -470,6 +569,7 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
                 const open = expanded === r.ticker;
                 const fav = marks.isFavorite(r.ticker);
                 const top = (r.reasons ?? []).find((x) => x.f > 1);
+                const risk = riskOf(r.vol_w, riskBounds);
                 return (
                   <Fragment key={r.ticker}>
                     <tr
@@ -522,6 +622,11 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
                       <td className="px-1.5 sm:px-2 py-1.5 text-right whitespace-nowrap">
                         <div className={`font-mono tabular-nums text-base ${probTone(r.prob, threshold)}`}>{nl(r.prob)}%</div>
                         <div className="text-[10px] text-neutral-500 tabular-nums">{Math.round(r.prob / BASE_RATE)}× basis</div>
+                        {risk != null && risk >= 2 && (
+                          <div className={`text-[10px] ${RISK_TONE[risk]}`} title={`Beweegt deze week gemiddeld ${nl(r.vol_w ?? 0, 0)}% per dag`}>
+                            risico {RISK_LABEL[risk]}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-neutral-300 whitespace-nowrap hidden sm:table-cell">
                         {fmtPrice(r.close)}
@@ -552,7 +657,7 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
                     {open && (
                       <tr>
                         <td colSpan={11} className="p-0">
-                          <Detail r={r} threshold={threshold} minDvol={alertMinDvol} />
+                          <Detail r={r} threshold={threshold} minDvol={alertMinDvol} maxVolW={alertMaxVolW} bounds={riskBounds} />
                         </td>
                       </tr>
                     )}
@@ -570,7 +675,9 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
             title="Track record SUPERsprinters"
             track={data.track_record}
             note="Elke ronde legt per aandeel in de kopgroep de kans en de slotkoers vast, en bij een melding ook de kans en koers van dat moment. Na 10 handelsdagen valt het oordeel: haalde het slot +50% en stond het de dag erna nog minstens +20%? De eerste uitkomsten volgen ruim twee weken na de eerste ronde."
-          />
+          >
+            <OpenStats track={data.track_record} />
+          </TrackCard>
           <TrackCard
             title="Track record Sprinters"
             track={data.sprint_track_record}
@@ -608,6 +715,17 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Button size="sm" variant="ghost" disabled={saving} onClick={() => void setSetting({ ss_alerts: !alertsOn })}>
                 {alertsOn ? "Meldingen uitzetten (Sprinters meldt dan weer)" : "Meldingen aanzetten (Sprinters meldt dan niet meer)"}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={saving} onClick={() => void setSetting({ ss_alert_max_volw: alertMaxVolW > 0 ? 0 : 30 })}>
+                {alertMaxVolW > 0 ? `Ook heel beweeglijke aandelen melden (grens van ${nl(alertMaxVolW, 0)}% per dag uitzetten)` : "Heel beweeglijke aandelen niet melden (grens van 30% per dag aanzetten)"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={saving}
+                onClick={() => void setSetting({ ss_alert_regions: offRegions.includes("Europa") ? [0, 1, 2, 3] : [0, 1, 3] })}
+              >
+                {offRegions.includes("Europa") ? "Ook Europa melden" : "Europa niet melden"}
               </Button>
               <Button size="sm" variant="ghost" disabled={saving} onClick={() => void setSetting({ ss_enabled: !enabled })}>
                 {enabled ? "SUPERsprinters uitzetten" : "SUPERsprinters aanzetten"}

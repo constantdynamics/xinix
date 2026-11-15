@@ -3,7 +3,7 @@
 //
 //   GET  /xinix-supersprint                               ranglijst, track record, verbruik (publiek)
 //   POST /xinix-supersprint?mode=round&region=apac        ronde na het slot (apac | europa | amerika)
-//   POST /xinix-supersprint?mode=flush                    de ochtendmelding: alle regio's samen, hoogste kans eerst
+//   POST /xinix-supersprint?mode=flush                    het meldmoment: alles wat wacht, hoogste kans eerst
 //   POST /xinix-supersprint?mode=resolve                  track record afrekenen, bijsturing, nieuwsmeting
 //   POST /xinix-supersprint  { action: "adopt", ticker }  hartje: op de watchlist met no_sim
 //   POST /xinix-supersprint  { action: "settings", … }    schakelaars (beheertoken)

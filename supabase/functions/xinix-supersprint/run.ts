@@ -27,7 +27,7 @@ const DAY = C.DAY;
 export interface Settings {
   ntfy_topic: string | null; ntfy_server: string | null; quiet_hours_start: number | null; quiet_hours_end: number | null;
   ss_enabled: boolean | null; ss_alerts: boolean | null; ss_alert_min_prob: number | null; ss_alert_max_per_week: number | null; ss_override_min_prob: number | null;
-  ss_alert_min_dvol?: number | null;
+  ss_alert_min_dvol?: number | null; ss_alert_max_volw?: number | null; ss_alert_regions?: number[] | null;
 }
 export interface Meter { tv: number; yahoo: number; rows: number; alerts: number; errors: number }
 export interface Ctx { sb: SB; settings: Settings; meter: Meter; spent: { yahoo: number }; today: string; nowMs: number }
@@ -54,7 +54,7 @@ export async function guarded(sb: SB, fn: (ctx: Ctx) => Promise<RunResult>): Pro
   const nowMs = Date.now();
   const today = new Date(nowMs).toISOString().slice(0, 10);
   const [st, br, bu] = await Promise.all([
-    sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol").eq("id", 1).maybeSingle(),
+    sb.from("signal_settings").select("ntfy_topic, ntfy_server, quiet_hours_start, quiet_hours_end, ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol, ss_alert_max_volw, ss_alert_regions").eq("id", 1).maybeSingle(),
     sb.from("xinix_ss_state").select("value").eq("key", "brake").maybeSingle(),
     sb.from("xinix_ss_budget").select("runs, tv, yahoo, rows_written").eq("day", today).maybeSingle(),
   ]);
@@ -95,7 +95,7 @@ export async function guarded(sb: SB, fn: (ctx: Ctx) => Promise<RunResult>): Pro
 // ── Ronde: markt ophalen, scoren, kopgroep wegschrijven, melden ─────────────
 interface Cand {
   ticker: string; name: string | null; region: number; exchange: string | null; currency: string | null;
-  close: number; close_usd: number | null; change_1d: number | null; perf_1m: number | null; dvol_usd: number | null;
+  close: number; close_usd: number | null; change_1d: number | null; perf_1m: number | null; dvol_usd: number | null; vol_w: number | null;
   prob: number; reasons: C.Reason[]; news: C.NewsItem[] | null; session_date: string; base_rate: number;
 }
 
@@ -230,8 +230,8 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
     await sleep(100);
   }
 
-  // Vangnet: is de ochtendmelding niet gelukt (stille uren, storing), dan nu alsnog. Alleen de
-  // kandidaten van eerdere dagen: die van vandaag wachten op de andere regio's.
+  // Vangnet: is een melding niet gelukt (stille uren, storing), dan nu alsnog. Alleen de kandidaten
+  // van eerdere dagen: die van vandaag wachten op hun eigen meldmoment.
   const fl = await flush(ctx, day);
 
   // 6. Wegschrijven: de kopgroep in één opdracht, het track record erbij.
@@ -247,20 +247,22 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
     const prob = r2(s.prob * 100);
     scoreRows.push({
       ticker: r.ticker, tv_symbol: r.tv_symbol, market: r.market, region: r.region, exchange: r.exchange, name: r.name, currency: r.currency, sector: r.sector,
-      close: r.close, close_usd: Math.round(s.pxUsd * 10000) / 10000, change_1d: fin(r2(r.change)), perf_1m: fin(r2(r.perf1m)), vol_m: fin(r2(r.volM)), rel_vol: fin(r2(r.rv10)),
+      close: r.close, close_usd: Math.round(s.pxUsd * 10000) / 10000, change_1d: fin(r2(r.change)), perf_1m: fin(r2(r.perf1m)), vol_m: fin(r2(r.volM)), vol_w: fin(r2(r.volW)), rel_vol: fin(r2(r.rv10)),
       dvol_usd: Math.round(s.dvolUsd), mcap_usd: Number.isFinite(mcapUsd) ? Math.round(mcapUsd) : null, float_shares: Number.isFinite(r.float) ? Math.round(r.float) : null,
       prob, prob_base: r2(s.base * 100), raw: s.raw, rank: i + 1, reasons,
       news: nw ?? p?.news ?? null, news_at: nw ? nowIso : (p?.news_at ?? null),
       session_date: day, scored_at: nowIso, first_seen: p?.first_seen ?? day,
-      // Boven de meldgrens: kandidaat voor de ochtendmelding (zie flush).
+      // Boven de meldgrens: kandidaat voor de eerstvolgende melding (zie flush).
       alert_pending: prob >= minProb, alert_note: null,
     });
     const grp = nw ? [...new Set(nw.filter((n) => n.d >= fresh3).map((n) => n.g))] : [];
-    // Omzet, beurswaarde en vrij verhandelbare aandelen gaan mee het track record in: de stand per aandeel
-    // wordt elke dag overschreven, en het aantal vrij verhandelbare aandelen is later nergens terug te vinden.
+    // Omzet, beurswaarde, vrij verhandelbare aandelen en de beweeglijkheid van de week gaan mee het track
+    // record in: de stand per aandeel wordt elke dag overschreven, en het aantal vrij verhandelbare aandelen
+    // is later nergens terug te vinden.
     predRows.push({
       ticker: r.ticker, made_on: day, region: r.region, prob, prob_base: r2(s.base * 100), raw: s.raw, rank: i + 1, entry_close: r.close, news_grp: grp.length ? grp : null,
       dvol_usd: Math.round(s.dvolUsd), mcap_usd: Number.isFinite(mcapUsd) ? Math.round(mcapUsd) : null, float_shares: Number.isFinite(r.float) ? Math.round(r.float) : null,
+      vol_w: fin(r2(r.volW)),
     });
     if (prob >= minProb) cands.push(r.ticker);
   });
@@ -270,12 +272,12 @@ export async function round(ctx: Ctx, region: string, dateOverride: string | nul
   must(await sb.from("xinix_ss_state").upsert({ key: `round:${region}`, updated_at: nowIso, value: { markets: fp, day, at: nowIso, universe, eligible: elig.length, top: top.length, mult, model: model.version } }), "toestand");
   meter.rows += scoreRows.length + predRows.length + todayB.length + 1;
 
-  // 7. Melden doet deze ronde niet zelf: wie boven de meldgrens staat, wacht op de ochtendmelding.
+  // 7. Melden doet deze ronde niet zelf: wie boven de meldgrens staat, wacht op het meldmoment (flush).
   const head = top.slice(0, 5).map((s) => `${s.row.ticker} ${r2(s.prob * 100)}%`).join(", ");
   return {
     ok: errors.length === 0,
     message: `${region} ${day}: ${universe} aandelen opgehaald, ${elig.length} doen mee, ${top.length} bewaard; top ${head}; ` +
-      `boven ${minProb}%: ${cands.length} (kandidaat voor de ochtendmelding)` + (fl.metrics?.pending ? `; ${fl.message}` : "") +
+      `boven ${minProb}%: ${cands.length} (kandidaat voor een melding)` + (fl.metrics?.pending ? `; ${fl.message}` : "") +
       (closed.length ? `; dicht: ${closed.join(", ")}` : "") + (seeded ? `; ${seeded} startwaarden marktklimaat` : "") +
       (errors.length ? `; fouten: ${errors.slice(0, 4).join("; ")}` : ""),
     metrics: { universe, eligible: elig.length, top: top.length, candidates: cands.length, closed: closed.length, mult, tv: meter.tv, yahoo: meter.yahoo, rows: meter.rows },
@@ -301,6 +303,11 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
   const maxWeek = Math.max(0, Number(s.ss_alert_max_per_week ?? 3));
   // Omzeteis alleen voor meldingen: de lijst begint bij $10.000 per dag, maar daar beweegt een order de koers.
   const minDvol = Math.max(0, Number(s.ss_alert_min_dvol ?? 100_000));
+  // Heel beweeglijke aandelen: even vaak raak, maar veel vaker een groot verlies (zie core.ts, RISK_BOUNDS).
+  const maxVolW = Math.max(0, Number(s.ss_alert_max_volw ?? 30));
+  // Regio's die meldingen mogen sturen (leeg of niet ingesteld = alle). In Europa kwamen de kansen in de test
+  // in geen van beide perioden uit; die regio staat daarom standaard niet in de lijst.
+  const regions = Array.isArray(s.ss_alert_regions) && s.ss_alert_regions.length ? s.ss_alert_regions.map(Number) : null;
   if (!(minProb > 0)) return done("meldgrens 0: uit");
   const ct = cands.map((c) => c.ticker);
   const nowMs = Date.now();
@@ -331,7 +338,11 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
     const up = c.ticker.toUpperCase();
     // Gedempt of gezien wijkt alleen voor een kans vanaf de override-grens (zoals bij Sprinters).
     if ((muted.has(up) || seen.has(up)) && c.prob < override) { out.blocked++; skip(c.ticker, "niet gemeld: gedempt of gezien"); continue; }
+    if (regions && !regions.includes(c.region)) { out.blocked++; skip(c.ticker, `niet gemeld: ${C.REGION_NL[c.region]} doet niet mee met de meldingen`); continue; }
     if (minDvol > 0 && !((c.dvol_usd ?? 0) >= minDvol)) { out.blocked++; skip(c.ticker, `niet gemeld: omzet onder ${C.fmtUsd(minDvol)} per dag`); continue; }
+    if (maxVolW > 0 && c.vol_w != null && c.vol_w > maxVolW) {
+      out.blocked++; skip(c.ticker, `niet gemeld: beweegt deze week gemiddeld meer dan ${maxVolW}% per dag (verliesrisico zeer hoog)`); continue;
+    }
     const l = last.get(c.ticker);
     if (l && !(l.alerted_prob != null && c.prob >= Number(l.alerted_prob) + REALERT_GAIN)) {
       out.blocked++; skip(c.ticker, "niet opnieuw gemeld: minder dan 10 dagen geleden al gemeld"); continue;
@@ -375,6 +386,7 @@ async function sendAlerts(ctx: Ctx, cands: Cand[]): Promise<AlertOut> {
 
 async function sendNtfy(s: Settings, c: Cand): Promise<{ ok: boolean; error?: string }> {
   const p = Math.round(c.prob);
+  const risk = C.riskClass(c.vol_w);
   const pctS = (v: number | null) => (v == null ? "—" : `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1).replace(".", ",")}%`);
   const usd = c.currency && c.currency !== "USD" && c.close_usd != null ? ` (≈ $${c.close_usd < 10 ? c.close_usd.toFixed(2) : Math.round(c.close_usd)})` : "";
   const lines = [
@@ -383,11 +395,13 @@ async function sendNtfy(s: Settings, c: Cand): Promise<{ ok: boolean; error?: st
     `🚀 Kans op +50% binnen 10 handelsdagen: ${p}% (${Math.round(c.prob / c.base_rate)}× de basiskans van ${c.base_rate.toFixed(1).replace(".", ",")}%)`,
     `💲 Slot ${C.fmtPrice(c.close).replace(".", ",")} ${c.currency ?? ""}${usd.replace(".", ",")} op ${c.session_date} · die dag ${pctS(c.change_1d)} · maand ${pctS(c.perf_1m)}`,
     c.dvol_usd != null ? `📊 Omzet ${C.fmtUsd(c.dvol_usd)} per dag${c.dvol_usd < 100_000 ? " ⚠️ laag: een grotere order beweegt de koers" : ""}` : "",
+    risk != null && c.vol_w != null ? `${risk >= 2 ? "⚠️" : "⚖️"} Verliesrisico ${C.RISK_NL[risk]}: beweegt deze week gemiddeld ${c.vol_w.toFixed(0)}% per dag` : "",
     "",
     "Waarom:",
     ...c.reasons.filter((r) => r.f > 1).slice(0, 3).map((r) => `• ×${(r.f >= 10 ? r.f.toFixed(0) : r.f.toFixed(1)).replace(".", ",")} ${r.label}: ${r.t}`),
     c.news?.[0] ? `📰 ${c.news[0].t}` : "",
     "",
+    "Geen koopsignaal: de kans telt vanaf dit slot. Opent hij meer dan 30% hoger, dan was instappen in de test verliesgevend.",
     `📲 ${C.appUrl(c.ticker)}`,
   ].filter((l, i, a) => l !== "" || (i > 0 && a[i - 1] !== ""));
   const payload = {
@@ -403,17 +417,18 @@ async function sendNtfy(s: Settings, c: Cand): Promise<{ ok: boolean; error?: st
 }
 
 /**
- * De ochtendmelding: één keer per dag, na de stille uren, over de slotstanden van de dag ervoor.
- * Alle regio's samen, hoogste kans eerst, tot het weekplafond. Zo is het ook getest: per dag de
- * kandidaten van de hele markt op kans gerangschikt. Zou elke ronde zelf melden, dan neemt een
- * kandidaat van 15% uit Azië een weekplek in vóórdat een van 24% uit de VS aan de beurt is.
+ * Het meldmoment: alles wat op een melding wacht, hoogste kans eerst, tot het weekplafond.
+ * Twee keer per dag (pg_cron): om 09:33 UTC, een kwartier na de ronde van Azië en Australië, zodat die
+ * melding ruim vóór hun volgende opening komt; en om 04:12 UTC, na de stille uren, voor Europa, de VS en
+ * Canada samen (hun beurzen openen pas daarna). De ochtendmelding van 04:12 kwam voor Azië te laat: de
+ * volgende sessie liep dan al uren, en een dag later instappen kostte in de test ongeveer een punt trefkans.
  */
 export async function flush(ctx: Ctx, beforeDay: string | null = null): Promise<RunResult> {
   const { sb } = ctx;
   const rows = ((must(await sb.from("xinix_ss_scores")
-    .select("ticker, name, region, exchange, currency, close, close_usd, change_1d, perf_1m, dvol_usd, prob, reasons, news, session_date, scored_at")
+    .select("ticker, name, region, exchange, currency, close, close_usd, change_1d, perf_1m, dvol_usd, vol_w, prob, reasons, news, session_date, scored_at")
     .eq("alert_pending", true), "kandidaten") ?? []) as Array<Json>).filter((r) => beforeDay == null || String(r.session_date) < beforeDay);
-  if (!rows.length) return { ok: true, message: "geen kandidaten voor de ochtendmelding", metrics: { pending: 0 } };
+  if (!rows.length) return { ok: true, message: "geen kandidaten voor een melding", metrics: { pending: 0 } };
   if (inQuietHours(ctx.settings)) return { ok: true, message: `${rows.length} kandidaten wachten op het einde van de stille uren`, metrics: { pending: rows.length } };
   const freshRows = rows.filter((r) => ctx.nowMs - Date.parse(String(r.scored_at)) <= PENDING_MAX_H * 3600_000);
   const old = rows.filter((r) => !freshRows.includes(r)).map((r) => String(r.ticker));
@@ -422,7 +437,8 @@ export async function flush(ctx: Ctx, beforeDay: string | null = null): Promise<
   const al = await sendAlerts(ctx, freshRows.map((r) => ({
     ticker: String(r.ticker), name: (r.name as string) ?? null, region: Number(r.region), exchange: (r.exchange as string) ?? null, currency: (r.currency as string) ?? null,
     close: Number(r.close), close_usd: r.close_usd == null ? null : Number(r.close_usd), change_1d: r.change_1d == null ? null : Number(r.change_1d),
-    perf_1m: r.perf_1m == null ? null : Number(r.perf_1m), dvol_usd: r.dvol_usd == null ? null : Number(r.dvol_usd), prob: Number(r.prob),
+    perf_1m: r.perf_1m == null ? null : Number(r.perf_1m), dvol_usd: r.dvol_usd == null ? null : Number(r.dvol_usd),
+    vol_w: r.vol_w == null ? null : Number(r.vol_w), prob: Number(r.prob),
     reasons: (r.reasons as C.Reason[]) ?? [], news: (r.news as C.NewsItem[]) ?? null, session_date: String(r.session_date), base_rate: model.base_rate_pct,
   })));
   // Wie nu niet gemeld is, hoeft niet te blijven wachten: morgen is er een nieuwe stand. Alleen als het
@@ -430,7 +446,7 @@ export async function flush(ctx: Ctx, beforeDay: string | null = null): Promise<
   const left = freshRows.map((r) => String(r.ticker));
   if (left.length && !al.failed) await sb.from("xinix_ss_scores").update({ alert_pending: false }).in("ticker", left).eq("alert_pending", true);
   return {
-    ok: true, message: `ochtendmelding over ${freshRows.length} kandidaten: ${al.text}${old.length ? `; ${old.length} verlopen` : ""}`,
+    ok: true, message: `melding over ${freshRows.length} kandidaten: ${al.text}${old.length ? `; ${old.length} verlopen` : ""}`,
     metrics: { pending: rows.length, sent: al.sent, capped: al.capped, blocked: al.blocked, held: al.held, expired: old.length },
   };
 }
@@ -465,7 +481,7 @@ export async function resolve(ctx: Ctx): Promise<RunResult> {
       const gone = !bars && /HTTP 404|no data found|delisted/i.test(err);
       for (const d of dates) {
         const o = bars ? C.outcome10(bars, d) : null;
-        if (o && "hit" in o) updates.push({ ticker, made_on: d, hit: o.hit, touched: o.touched, error: null });
+        if (o && "hit" in o) updates.push({ ticker, made_on: d, error: null, ...o });
         else if (o && "error" in o) updates.push({ ticker, made_on: d, hit: null, touched: null, error: o.error });
         // Geen koersen (meer): na anderhalve maand geven we het op, anders blijft hij eeuwig open.
         else if (d <= giveUp || (gone && d <= unknownDay)) updates.push({ ticker, made_on: d, hit: null, touched: null, error: err || "te weinig koersen na de voorspeldag" });
@@ -498,11 +514,11 @@ export async function resolve(ctx: Ctx): Promise<RunResult> {
 export async function read(sb: SB): Promise<Json> {
   const today = new Date().toISOString().slice(0, 10);
   const [sc, tr, se, st, sta, bu, br, li] = await Promise.all([
-    sb.from("xinix_ss_scores").select("ticker, market, region, exchange, name, currency, sector, close, close_usd, change_1d, perf_1m, vol_m, rel_vol, dvol_usd, mcap_usd, float_shares, prob, prob_base, rank, reasons, news, news_at, session_date, scored_at, first_seen, alerted_at, alerted_prob, alert_pending, alert_note")
+    sb.from("xinix_ss_scores").select("ticker, market, region, exchange, name, currency, sector, close, close_usd, change_1d, perf_1m, vol_m, vol_w, rel_vol, dvol_usd, mcap_usd, float_shares, prob, prob_base, rank, reasons, news, news_at, session_date, scored_at, first_seen, alerted_at, alerted_prob, alert_pending, alert_note")
       .gte("session_date", isoMinus(today, 6)).order("prob", { ascending: false }).limit(600),
     sb.rpc("xinix_ss_track_record"),
     sb.rpc("xinix_sprint_track_record"),
-    sb.from("signal_settings").select("ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol, sprint_alert_min_prob, quiet_hours_start, quiet_hours_end").eq("id", 1).maybeSingle(),
+    sb.from("signal_settings").select("ss_enabled, ss_alerts, ss_alert_min_prob, ss_alert_max_per_week, ss_override_min_prob, ss_alert_min_dvol, ss_alert_max_volw, ss_alert_regions, sprint_alert_min_prob, quiet_hours_start, quiet_hours_end").eq("id", 1).maybeSingle(),
     sb.from("xinix_ss_state").select("key, value, updated_at"),
     sb.from("xinix_ss_budget").select("*").gte("day", isoMinus(today, 7)).order("day", { ascending: false }),
     sb.from("xinix_ss_breadth").select("region, day, n, b1_20, b1_10, bm_50").gte("day", isoMinus(today, 7)).gt("n", 0).order("day", { ascending: false }),
@@ -518,7 +534,7 @@ export async function read(sb: SB): Promise<Json> {
   return {
     items, track_record: tr.error ? null : tr.data, sprint_track_record: se.error ? null : se.data,
     settings: st.data ?? null, state, budget: { limits: BUDGET, days: bu.data ?? [] }, breadth: br.data ?? [], news_lift: li.data ?? [],
-    model: { url: C.MODEL_URL, sha256: C.MODEL_SHA256 }, top_n: TOP_N,
+    model: { url: C.MODEL_URL, sha256: C.MODEL_SHA256 }, top_n: TOP_N, risk_bounds: C.RISK_BOUNDS,
     computed_at: items.reduce((m: string | null, r) => (!m || String(r.scored_at) > m ? String(r.scored_at) : m), null),
     error: sc.error?.message ?? null,
   };
@@ -564,7 +580,11 @@ export async function saveSettings(sb: SB, body: Json): Promise<{ status: number
     if (body[k] != null && Number.isFinite(v) && v >= lo && v <= hi) patch[k] = v;
   };
   numIn("ss_alert_min_prob", 0, 90); numIn("ss_alert_max_per_week", 0, 50); numIn("ss_override_min_prob", 0, 90);
-  numIn("ss_alert_min_dvol", 0, 1_000_000_000);
+  numIn("ss_alert_min_dvol", 0, 1_000_000_000); numIn("ss_alert_max_volw", 0, 1000);
+  if (Array.isArray(body.ss_alert_regions)) {
+    const rs = [...new Set((body.ss_alert_regions as unknown[]).map(Number).filter((r) => Number.isInteger(r) && r >= 0 && r <= 3))].sort();
+    if (rs.length) patch.ss_alert_regions = rs;
+  }
   if (!Object.keys(patch).length) return { status: 400, body: { error: "niets te wijzigen" } };
   const { error } = await sb.from("signal_settings").update(patch).eq("id", 1);
   if (error) return { status: 500, body: { error: error.message } };
