@@ -1368,6 +1368,12 @@ Van de drie meldingen van 14 november waren er twee niet uitgegaan: NOMA (naar d
   tegen met de notitie "niet gemeld: korter dan 2 jaar genoteerd".
 - Het tabblad op desktop- en telefoonbreedte: de regel met wat niet in de lijst komt, de twee
   keuzelijsten, en per aandeel "aan de beurs sinds" en de stand ten opzichte van de top.
+- In productie (16 november, 11:45 UTC, versie 11 van de functie): de 373 aandelen die op dat moment in
+  de lijst stonden kregen de datum en de stand ten opzichte van de top achteraf ingevuld, uit dezelfde
+  gegevens van TradingView. Daarna stonden er nog 291 in de lijst: geen enkel aandeel korter dan twee
+  jaar genoteerd (het jongste sinds 23 oktober 2024) en geen boven 95% van zijn top (het hoogste op 94%).
+  NOMA, DUKR en COPR zijn weg, DRIO staat bovenaan. De kandidaten vanaf 15% gingen van 30 naar 21. De
+  lijsten vullen zich weer aan tot 100 per regio bij de eerstvolgende ronde van elke regio.
 
 ### 15.7 Kanttekeningen
 
