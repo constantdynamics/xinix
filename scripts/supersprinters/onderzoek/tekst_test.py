@@ -84,14 +84,16 @@ def bouw(P, kolom):
         g90 = [f for f, a, s in fs if s != "nieuws"]; g30 = [f for f, a, s in fs if s != "nieuws" and a <= 30]
         deals = [f for f in n7 + g90 if f["fin"]]
         before = next((f["before"] for f in g90 if np.isfinite(f.get("before", np.nan))), r.sh_now)
-        big = [f["shares"] / before for f in deals if np.isfinite(f["shares"]) and before and np.isfinite(before) and before > 0]
-        ref = [min(x for x in (f["price"], f["wprice"]) if np.isfinite(x)) for f in deals if f["priced"] and (np.isfinite(f["price"]) or np.isfinite(f["wprice"]))]
+        # P4: aandelen in de uitgifte (bij een registratie voor doorverkoop zonder beschreven transactie: de geregistreerde aandelen)
+        big = [f["shares"] / before for f in n7 + g90 if np.isfinite(f["shares"]) and before and np.isfinite(before) and before > 0]
+        # P5: uitgiften waarvan de voorwaarden vastliggen, ook de plaatsing achter een registratie voor doorverkoop
+        ref = [min(x for x in (f["price"], f["wprice"]) if np.isfinite(x)) for f in deals if f["vast"] and (np.isfinite(f["price"]) or np.isfinite(f["wprice"]))]
         hard = any(f["hard_pos"] for f in n2)
         o.update(N1=bool(n2), N2=hard, N3=(not hard) and any(f["soft_pos"] for f in n2), N4=any(f["equity_news"] for f in n7), N5=any(f["priced"] and f["equity_news"] for f in n2),
                  N6=any(f["warrants"] for f in n7), N7=any(f["floating"] for f in n7 + g90), N8=any(f["pivot"] for f in n7), N9=any(f["target"] for f in n7),
                  N10=any(f["listing"] for f in n7), N11=any(f["negative"] for f in n7), N12=False,
                  P1=any(f["priced"] for f in g30), P2=any(f["atm"] for f in g90), P3=any(f["resale"] for f in g90),
-                 P4=(max(big) >= 0.2) if big else (False if deals else False), P5=(r.px >= 1.2 * min(ref)) if ref else False,
+                 P4=bool(big) and max(big) >= 0.2, P5=bool(ref) and r.px >= 1.2 * min(ref),
                  P6=any(f["baby"] for f in g90), P7=any(f["going"] for f in g90))
         rows.append(o)
     return pd.DataFrame(rows).set_index("idx")

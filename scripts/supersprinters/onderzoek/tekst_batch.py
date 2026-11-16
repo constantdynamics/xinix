@@ -10,11 +10,11 @@ Opdrachten:
   steekproef            kiest 300 stukken (180 nieuws, 120 prospectus of registratie; vaste volgorde) → claude/steekproef.json
   schat                 schat de tokens en de kosten per model (4 tekens per token), zonder de API
   tel [n]               telt de tokens van n opdrachten per soort bij de API (gratis) en ijkt daarmee de schatting
-  probeer <model> [n]   stuurt n stukken direct (gewone prijs) en toont de antwoorden: om de vraagstelling te proberen
+  probeer <model> [n | stuk,stuk]   stuurt stukken direct (gewone prijs) en toont de antwoorden: om de vraagstelling te proberen
   stuur <model> <set>   verstuurt in bulk (halve prijs); set = steekproef of rest
   haal                  haalt de uitkomsten van afgeronde opdrachten op en werkt het kasboek bij
   stand                 toont het kasboek: verstuurd, uitgegeven, plafond
-  vergelijk             vergelijkt de modellen op de steekproef, veld voor veld
+  vergelijk [v1]        vergelijkt de modellen op de steekproef, veld voor veld (v1 = de eerste steekproef)
   bewaar <map>          zet de gelukte antwoorden per model en het kasboek in een map die bewaard wordt (proefdata)
 
 Het kasboek (claude/kasboek.json) telt wat de API in rekening brengt (tokens × prijs). `stuur` weigert als de uitgaven
@@ -37,41 +37,53 @@ S = requests.Session(); S.headers.update({"x-onderzoek": KEY, "content-type": "a
 
 # Het schema staat bij elke opdracht in de invoer en kost per teken ongeveer twee keer zoveel tokens als gewone tekst.
 # Daarom bevat het schema alleen namen, soorten en keuzelijsten; de uitleg per veld staat in de vraagstelling.
+#
+# Versie 2 (16 november 2026). De eerste steekproef (versie 1, 300 stukken door Opus, Sonnet en Haiku) liet zien waar de
+# vraagstelling twee lezingen toeliet; die punten zijn aangescherpt voordat de rest werd verstuurd, en voordat er één
+# uitkomst naast de antwoorden was gelegd: wat "prijs die meebeweegt" is (niet: een doorlopend verkoopprogramma), welke
+# uitgifte bij een stuk hoort (bij een registratie voor doorverkoop de transactie waarin de houders hun aandelen kregen;
+# niet een uitgifte die een kwartaalbericht alleen noemt), dat cijfers en vooruitzichten samen één gebeurtenis zijn, wanneer
+# de toon positief of negatief is, en dat twijfel over het voortbestaan in een prospectus ook telt als hij alleen in de
+# risico's staat. De antwoorden van versie 1 staan in claude/v1/ en tellen niet mee in de meting.
+VERSIE = 2
 REGELS = """You extract facts from documents that companies file with the US Securities and Exchange Commission. The facts feed a statistical study of small-cap stocks. Nobody reads your answer directly; a program parses it, so precision matters and style does not.
 
 Rules:
 - Use only what the document says. Do not use anything you may know about the company or about what happened to its stock afterwards, and do not judge whether the stock will rise or fall.
 - The text can be an excerpt. Where a part ends with "[... the document continues; the rest was not provided]", the rest is unknown to you. If a fact is not in the text, answer null; never estimate or guess a number.
 - Amounts are US dollars as plain numbers (12500000, not "12.5 million"); share and warrant counts are plain numbers. If an amount is only given in another currency, answer null.
-- Forward-looking-statement disclaimers and signature blocks are boilerplate: ignore them.
+- Forward-looking-statement disclaimers and signature blocks are boilerplate: ignore them, unless a field below says otherwise.
 
-The financing object describes the capital raise the document is about; null if the document is not about the company raising money.
-- structure: how the money is raised. equity_line = shares the company may sell to one investor over time.
-- stage: proposed = announced without final terms; priced_or_signed = price and size are fixed; closed = money received; program_established = an at-the-market program or equity line was set up; program_update = sales under an existing program.
+The financing object describes one capital raise; null if there is none (which raise belongs to the document is explained with the fields below).
+- structure: choose by the security when it is convertible notes or preferred stock; otherwise by how it is sold. underwritten_public_offering = underwriters buy the securities to resell them (firm commitment). registered_direct = registered securities sold straight to investors, usually through a placement agent on a best-efforts basis. private_placement = unregistered securities sold to selected investors. at_the_market_program = the company sells shares into the market over time through a sales agent. equity_line = one investor has committed to buy shares over time whenever the company asks (also called a committed equity facility or standby equity purchase agreement).
+- stage: proposed = announced without final terms; priced_or_signed = price and size are fixed; closed = money received; program_established = the document sets up, registers, replaces or increases an at-the-market program or equity line; program_update = it only reports sales under an existing program; terminated = the raise or program was ended.
 - gross_proceeds_usd: gross proceeds of this raise, before fees. max_program_usd: the maximum that may be sold under an at-the-market program, equity line or shelf.
 - shares: common shares sold or to be sold, including pre-funded warrants and shares in units. warrant_shares: shares underlying warrants issued in this raise, not counting pre-funded warrants.
-- floating_price: true if a conversion, exercise or purchase price depends on the future market price (discount to VWAP, reset provisions, variable-rate notes, equity line).
+- floating_price: true only if the price at which an investor or lender buys, converts or exercises depends on the future market price of the stock: a discount to a future volume-weighted or closing price, a conversion or exercise price that resets with the market, an equity line. False for an at-the-market program (shares sold to the market at the prevailing price), for a fixed price with customary anti-dilution adjustments, and for a loan whose interest rate floats.
 - strategic_or_insider_buyer: true if a named strategic partner or company insiders buy a meaningful part. proceeds_for_digital_assets: true if the stated main use of proceeds is buying cryptocurrency or other digital assets."""
 SYSTEM = {
     "nieuws": REGELS + """
 
 Fields for this current report (8-K or 6-K, with its press release if attached):
-- events: the one to three most important things the filing reports, most important first. kind: strategy_pivot = a new line of business or a change of what the company is; digital_asset_treasury = buying or holding cryptocurrency as a treasury strategy; shareholder_vote_or_charter includes an increase of authorized shares.
-- hardness: completed_or_binding = it happened or is contractually binding (reported results, a regulator's decision, a signed definitive agreement, a closed deal); planned_or_nonbinding = intentions, letters of intent, memoranda of understanding, proposals, plans.
-- tone, for the business as the document states it: positive (growth, approval, new contract, results above the company's earlier guidance), negative (failed study, lost contract, deficiency notice, default, lawsuit against the company), neutral (administrative, or a capital raise on ordinary terms).
+- events: the one to three most important distinct things this filing is about, most important first. List something only if an item of the report, a headline or a main section of the press release is devoted to it; leave out things mentioned in passing, and never list the same thing twice.
+- kind: an earnings release together with the outlook given in it is one earnings_or_guidance event. strategy_pivot = the company enters a new line of business or changes what it is. restructuring_or_strategic_review = layoffs, cost cuts, closing operations, or a review of strategic alternatives. digital_asset_treasury = the filing reports that the company adopts a strategy of holding cryptocurrency, or buys cryptocurrency under such a strategy. listing_deficiency = a notice from the stock exchange about non-compliance, or a delisting decision. reverse_split = a reverse split that is proposed, approved or carried out. shareholder_vote_or_charter = notice or results of a shareholder meeting and charter changes, including an increase of authorized shares. company_is_being_acquired = another party buys this company or its shareholders are cashed out. reverse_merger_or_spac = a private business becomes listed by combining with this company. debt_or_convertible_financing also covers amendments, extensions and exchanges of existing debt.
+- hardness: completed_or_binding = it happened or is contractually binding (reported results, published guidance, a regulator's decision, a signed definitive agreement, a closed deal, a vote that was held); planned_or_nonbinding = intentions, letters of intent, memoranda of understanding, proposals, plans, a vote that still has to be held.
+- tone, for the business as the document states it. positive = good news: an approval, positive study data, a new contract or partnership, revenue up by more than about 20% from a year earlier, guidance raised. negative = bad news: a failed study, a lost contract, a deficiency notice, a default, a lawsuit or investigation against the company, revenue down by more than about 20%, guidance lowered or withdrawn, an impairment, layoffs, a sudden departure of the chief executive or chief financial officer, a late annual or quarterly report. neutral = everything else, including administrative matters, routine management changes, a capital raise on ordinary terms and results without a clear direction; a net loss by itself is neutral.
 - amount_usd: the dollar size of the event if stated (contract value, purchase price, amount raised). named_counterparty: true if an identifiable other party is named (customer, partner, acquirer, regulator).
-- takeover_cash_price_usd: if the company itself is being acquired for cash, the price per share. reverse_split_ratio: old shares per new share (20 for a 1-for-20 reverse split).
-- authorized_shares_increase: true if the filing reports an approved or proposed increase of the authorized share count. going_concern_or_default: true if it reports substantial doubt about going concern, a default, a forbearance or a bankruptcy filing.
+- financing: the raise that this filing itself announces, prices, closes, sets up, updates or ends. Null for a raise that is only mentioned in passing (for example an earlier offering recalled in an earnings release), and null for an amendment, extension or repayment of existing debt that brings in no new money.
+- takeover_cash_price_usd: if the company itself is being acquired for cash, the price per share. reverse_split_ratio: old shares per new share (20 for a 1-for-20 reverse split); null if only a range is given.
+- authorized_shares_increase: true if the filing reports an approved or proposed increase of the authorized share count. going_concern_or_default: true if this filing itself reports substantial doubt about going concern, a default, a forbearance or a bankruptcy filing; a mention in boilerplate does not count.
 - summary_nl: one plain sentence in Dutch, at most 30 words, saying what the filing reports.""",
     "geld": REGELS + """
 
 Fields for this prospectus or registration statement:
-- role: priced_offering = final terms of a sale by the company; preliminary_offering = a sale by the company without final price; at_the_market_program = the company may sell shares into the market over time; equity_line = shares the company may sell to one investor over time; shelf_registration = registers securities for future sales without a specific deal; resale_by_holders = existing holders may sell and the company receives nothing (except on warrant exercise).
+- role: priced_offering = final terms of a sale by the company, including an initial public offering or an uplisting offering with final terms; preliminary_offering = a sale by the company without final price; at_the_market_program = the company may sell shares into the market over time through a sales agent; equity_line = shares the company may sell to one committed investor over time, including the prospectus under which that investor resells those shares; shelf_registration = registers securities for future sales without a specific deal; resale_by_holders = holders may sell securities they received in an earlier transaction and the company receives nothing (except on warrant exercise); merger_or_exchange = securities issued in a merger, business combination or exchange offer; employee_plan = securities for employee plans. If a registration statement contains both a base shelf prospectus and a prospectus for a specific program or offering, use the specific one.
+- financing: the raise the document offers or registers. For resale_by_holders: the transaction in which the selling holders received their securities (for example the private placement or the convertible notes), if the document describes its terms. Null for a shelf registration without a specific deal.
 - resale_shares: shares registered for resale by holders, including shares underlying their warrants or notes.
 - shares_outstanding_before and shares_outstanding_after: common shares outstanding before and after the offering, as stated (without exercise of warrants or options).
 - last_reported_price_usd: the last reported sale price of the common stock stated in the document.
 - non_affiliate_float_usd: aggregate market value of common stock held by non-affiliates, as stated under General Instruction I.B.6 of Form S-3 or I.B.5 of Form F-3. baby_shelf_limited: true if the document says the company is subject to that instruction (sales limited to one third of the public float in 12 months).
-- going_concern: true if the text mentions substantial doubt about the company's ability to continue as a going concern.
+- going_concern: true if the text mentions doubt about the company's ability to continue as a going concern anywhere, including in the risk factors or in a list of forward-looking factors.
 - summary_nl: one plain sentence in Dutch, at most 30 words, saying what this document registers or offers.""",
 }
 
@@ -90,7 +102,7 @@ FINANCING = obj({
     "floating_price": BOOL, "strategic_or_insider_buyer": BOOL, "proceeds_for_digital_assets": BOOL,
 })
 KINDS = ["earnings_or_guidance", "clinical_or_regulatory", "contract_or_partnership", "product_or_technology", "company_is_being_acquired", "company_acquires_business",
-         "reverse_merger_or_spac", "equity_financing", "debt_or_convertible_financing", "strategy_pivot", "digital_asset_treasury", "listing_deficiency",
+         "reverse_merger_or_spac", "equity_financing", "debt_or_convertible_financing", "strategy_pivot", "restructuring_or_strategic_review", "digital_asset_treasury", "listing_deficiency",
          "listing_compliance_regained", "reverse_split", "split_dividend_or_buyback", "management_or_board", "legal_or_investigation", "distress_or_default",
          "shareholder_vote_or_charter", "other"]
 SCHEMA = {
@@ -105,7 +117,7 @@ SCHEMA = {
         "summary_nl": {"type": "string"}}),
     "geld": obj({
         "role": {"type": "string", "enum": ["priced_offering", "preliminary_offering", "at_the_market_program", "equity_line", "shelf_registration", "resale_by_holders",
-                                             "ipo_or_uplisting", "merger_or_exchange", "employee_plan", "other"]},
+                                             "merger_or_exchange", "employee_plan", "other"]},
         "financing": {"anyOf": [FINANCING, {"type": "null"}]},
         "resale_shares": NUM, "shares_outstanding_before": NUM, "shares_outstanding_after": NUM, "last_reported_price_usd": NUM, "non_affiliate_float_usd": NUM,
         "baby_shelf_limited": BOOL, "going_concern": BOOL, "summary_nl": {"type": "string"}}),
@@ -261,9 +273,10 @@ elif CMD == "tel":
     print(f"ijking: {1 / per:.2f} tekens per token, {int(vast)} tokens vast per opdracht (vraagstelling en schema)")
 
 elif CMD == "probeer":
-    model = ARGS[0]; n = int(ARGS[1]) if len(ARGS) > 1 else 4
+    model = ARGS[0]; arg = ARGS[1] if len(ARGS) > 1 else "4"
     sp = [tuple(k) for k in json.load(open(os.path.join(CL, "steekproef.json")))]
-    ks = [k for k in sp if soort_van(meta.loc[k]) == "nieuws"][:n] + [k for k in sp if soort_van(meta.loc[k]) == "geld"][:n]
+    if arg.isdigit(): ks = [k for k in sp if soort_van(meta.loc[k]) == "nieuws"][:int(arg)] + [k for k in sp if soort_van(meta.loc[k]) == "geld"][:int(arg)]
+    else: ks = [k for k in keys if doc_id(k) in set(arg.split(","))]          # een lijst van stukken, gescheiden door komma's
     kb = kasboek()
     for k in ks:
         m = meta.loc[k]
@@ -282,7 +295,7 @@ elif CMD == "stuur":
     # bestedingslimiet bij de API) gaat dus opnieuw mee.
     gedaan = set()
     for b in kb["batches"]:
-        if b["model"] == model and not b.get("klaar"): gedaan |= set(b["docs"])
+        if b["model"] == model and not b.get("klaar") and b.get("versie", 1) == VERSIE: gedaan |= set(b["docs"])
     for f in glob.glob(os.path.join(CL, f"uit_{KORT[model]}_*.jsonl")):
         for line in open(f):
             if line.strip():
@@ -304,7 +317,7 @@ elif CMD == "stuur":
         if uitgegeven(kb) + onderweg(kb) + verwacht > PLAFOND:
             print(f"GESTOPT: uitgegeven ${uitgegeven(kb):.2f} + onderweg ${onderweg(kb):.2f} + deze ${verwacht:.2f} komt boven het plafond van ${PLAFOND:.0f}"); break
         r = post({"op": "batch_create", "requests": [{"custom_id": doc_id(k), "params": params(model, soort_van(meta.loc[k]), t)} for k, t in chunk]})
-        kb["batches"].append({"id": r["id"], "model": model, "set": welke, "n": len(chunk), "docs": [doc_id(k) for k, _ in chunk], "verwacht": round(verwacht, 3), "verstuurd": time.strftime("%Y-%m-%d %H:%M")}); bewaar(kb)
+        kb["batches"].append({"id": r["id"], "versie": VERSIE, "model": model, "set": welke, "n": len(chunk), "docs": [doc_id(k) for k, _ in chunk], "verwacht": round(verwacht, 3), "verstuurd": time.strftime("%Y-%m-%d %H:%M")}); bewaar(kb)
         print(f"verstuurd: {r['id']} met {len(chunk)} stukken, verwacht ${verwacht:.2f} | uitgegeven ${uitgegeven(kb):.2f}, onderweg ${onderweg(kb):.2f}", flush=True)
         time.sleep(2)
 
@@ -316,7 +329,8 @@ elif CMD == "haal":
         print(f"{b['id']} ({KORT[b['model']]}, {b['n']}): {st['processing_status']} {st['request_counts']}", flush=True)
         if st["processing_status"] != "ended": continue
         raw = get(f"op=batch_results&id={b['id']}", raw=True, timeout=300)
-        open(os.path.join(CL, f"uit_{KORT[b['model']]}_{b['id']}.jsonl"), "w").write(raw)
+        doel = CL if b.get("versie", 1) == VERSIE else os.path.join(CL, f"v{b.get('versie', 1)}"); os.makedirs(doel, exist_ok=True)
+        open(os.path.join(doel, f"uit_{KORT[b['model']]}_{b['id']}.jsonl"), "w").write(raw)
         lines = [json.loads(x) for x in raw.split("\n") if x.strip()]
         ok = [x for x in lines if x.get("ok")]
         b["kosten"] = round(sum(kosten(b["model"], x["usage"], bulk=True) for x in ok), 4)
@@ -339,13 +353,14 @@ elif CMD == "haal":
 elif CMD == "stand":
     kb = kasboek()
     for b in kb["batches"]:
-        print(f"{b['verstuurd']} {b['id']} {KORT[b['model']]:6s} {b['set']:10s} n={b['n']:4d} " + (f"klaar: {b['gelukt']} gelukt, ${b['kosten']:.2f}" if b.get("klaar") else f"onderweg, verwacht ${b['verwacht']:.2f}"))
+        print(f"{b['verstuurd']} v{b.get('versie', 1)} {b['id']} {KORT[b['model']]:6s} {b['set']:10s} n={b['n']:4d} " + (f"klaar: {b['gelukt']} gelukt, ${b['kosten']:.2f}" if b.get("klaar") else f"onderweg, verwacht ${b['verwacht']:.2f}"))
     print(f"los geprobeerd: {len(kb['los'])} stukken, ${sum(x['kosten'] for x in kb['los']):.2f}")
     print(f"uitgegeven ${uitgegeven(kb):.2f}, onderweg ${onderweg(kb):.2f}, plafond ${PLAFOND:.0f}")
 
 elif CMD == "vergelijk":
     res = {}
-    for p in sorted(glob.glob(os.path.join(CL, "uit_*.jsonl"))):
+    bron = os.path.join(CL, ARGS[0]) if ARGS else CL                   # "vergelijk v1" = de eerste steekproef
+    for p in sorted(glob.glob(os.path.join(bron, "uit_*.jsonl"))):
         m = os.path.basename(p).split("_")[1]
         for line in open(p):
             if not line.strip(): continue
@@ -412,17 +427,20 @@ elif CMD == "bewaar":
     # De antwoorden hebben geld gekost: per model alle gelukte antwoorden in één bestand, plus het kasboek, naar de
     # map die bewaard wordt (onderzoek/proefdata in de repository). Terugzetten: zie LEESMIJ.md daar.
     doel = ARGS[0]; os.makedirs(doel, exist_ok=True)
-    for kort in KORT.values():
-        best = {}
-        for f in sorted(glob.glob(os.path.join(CL, f"uit_{kort}_*.jsonl"))):
-            for line in open(f):
-                if line.strip():
-                    x = json.loads(line)
-                    if x.get("ok") and x.get("stop") == "end_turn": best[x["id"]] = line.strip()
-        if not best: continue
-        with gzip.open(os.path.join(doel, f"uit_{kort}_alles.jsonl.gz"), "wt", encoding="utf-8") as f:
-            for k in sorted(best): f.write(best[k] + "\n")
-        print(f"{kort}: {len(best)} antwoorden bewaard")
+    # De antwoorden op de huidige vraagstelling heten uit_<model>_alles.jsonl.gz; die van een eerdere versie (map claude/v1)
+    # krijgen de versie ervoor: v1_uit_<model>_alles.jsonl.gz.
+    for bron, voor in [(CL, "")] + [(d, os.path.basename(d) + "_") for d in sorted(glob.glob(os.path.join(CL, "v[0-9]*")))]:
+        for kort in KORT.values():
+            best = {}
+            for f in sorted(glob.glob(os.path.join(bron, f"uit_{kort}_*.jsonl"))):
+                for line in open(f):
+                    if line.strip():
+                        x = json.loads(line)
+                        if x.get("ok") and x.get("stop") == "end_turn": best[x["id"]] = line.strip()
+            if not best: continue
+            with gzip.open(os.path.join(doel, f"{voor}uit_{kort}_alles.jsonl.gz"), "wt", encoding="utf-8") as f:
+                for k in sorted(best): f.write(best[k] + "\n")
+            print(f"{voor}{kort}: {len(best)} antwoorden bewaard")
     kb = kasboek(); json.dump(kb, open(os.path.join(doel, "kasboek.json"), "w"), indent=1)
     print(f"kasboek bewaard: uitgegeven ${uitgegeven(kb):.2f}")
 
