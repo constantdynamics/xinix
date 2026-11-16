@@ -1243,3 +1243,140 @@ Bij de lat van 15% (2.904 meldingen in 2020–2024, 1.067 in 2025–2026):
 kosten te volgen is: de SEC meldt gratis welke stukken een bedrijf indient. Of er een vervolgbericht komt
 ("het bedrijf heeft een prospectus voor een uitgifte ingediend"), als informatie en zonder advies, is aan
 de gebruiker; het eigen track record kan daarna laten zien of het beeld van 2025–2026 standhoudt.
+
+## 15. Twee eisen aan de lijst (16 november 2026): niet te jong, niet vlak bij de top
+
+Verzoek van de gebruiker: "ik wil bij de supersprinters geen aandelen die jonger zijn dan 2 jaar en geen
+aandelen die op meer dan 95% van hun all time high staan". Keuzes daarbij:
+
+- de leeftijd telt vanaf de beursgang of de overstap naar de huidige beurs;
+- het geldt overal: niet in de lijst, geen melding, niet vastgelegd;
+- beide grenzen zijn in het tabblad te verstellen, met 0 voor uit.
+
+### 15.1 Uitkomst in het kort
+
+- **Het kost ongeveer een zesde van de meldingen en niets aan kwaliteit.** In de test werden het er 123 in
+  plaats van 148 (2020–2024) en 12 in plaats van 13 (2026), met vrijwel dezelfde trefkans en evenveel grote
+  verliezers.
+- **De eis op leeftijd raakt veel aandelen in de lijst, de eis op de top bijna geen.** Bij het vullen van
+  de kopgroep vielen op 13 november in de VS en Canada 49 aandelen af als te jong, en op 16 november in
+  Azië en Australië 52. Boven 95% van de top stonden er 0 en 2: het model kiest toch al vooral aandelen
+  die ver onder hun top staan.
+- **Het kost geen extra verbruik.** De drie gegevens die nodig zijn komen mee in de opvraag bij
+  TradingView die er al was.
+
+### 15.2 Hoe het werkt
+
+Per ronde vraagt de functie drie velden extra op bij de TradingView-scanner: de eerste koers, de datum
+van de beursgang of van de overstap naar deze beurs, en de hoogste koers ooit (gecorrigeerd voor splits).
+
+- **Leeftijd.** Telt vanaf de beursgang of de overstap naar de huidige beurs. Kent TradingView die datum
+  niet (bij 6% van de aandelen), dan vanaf de eerste koers. Een aandeel dat jarenlang buiten de beurs is
+  verhandeld en pas kort op de beurs staat, telt dus als jong.
+- **Top.** Het slot gedeeld door de hoogste koers ooit binnen een dag. Boven de grens (meer dan 95%) valt
+  het aandeel af; precies 95% mag nog.
+- **Waar het ingrijpt.** Ná het scoren en vóór het kiezen van de kopgroep: wie afvalt maakt plaats voor de
+  volgende. Het model en het marktklimaat rekenen nog steeds met de hele markt, zoals ze getraind zijn.
+- **Meldingen en tabblad.** Het meldmoment en het tabblad passen dezelfde eisen toe op wat is opgeslagen.
+  Een aangescherpte grens geldt daardoor meteen; een versoepelde pas na de volgende ronde, want wie afviel
+  is niet bewaard.
+- **Onbekend sluit niet uit.** Ontbreekt de datum of de top bij meer dan 5% van de aandelen, dan staat dat
+  als fout in het logboek van de ronde: anders zou de eis stilletjes ophouden te werken.
+
+Instellingen: `signal_settings.ss_min_age_years` (2) en `ss_max_top_pct` (95). Per aandeel in de lijst
+staat nu sinds wanneer het aan de beurs is en op welk deel van zijn top het staat.
+
+### 15.3 De gegevens van TradingView
+
+Gecontroleerd op 16 november voor alle 20.033 aandelen van de Saxo-markten (`onderzoek/tv_leeftijd.py`):
+
+| | |
+|---|---|
+| Eerste koers gevuld | 100% (de oudste is 3 januari 2000: daar begint de geschiedenis bij TradingView) |
+| Datum van de beursgang gevuld | 93,9% |
+| Hoogste koers ooit gevuld | 100%, en nergens lager dan het slot |
+| Korter dan twee jaar genoteerd | 1.472 aandelen (7,3%); in de VS 14%, elders 5% |
+| Slot boven 95% van de top | 867 aandelen (4,3%) |
+
+De twee datums zijn bij de helft van de aandelen binnen een maand gelijk. Waar ze verschillen:
+
+- Bij 159 aandelen is de koersreeks jonger dan twee jaar maar de beursgang ouder: een oud bedrijf met een
+  nieuwe koersreeks na een fusie, een naamswijziging of een herintroductie. Die tellen als oud.
+- Bij 56 aandelen is het andersom: jarenlang buiten de beurs verhandeld en pas kort op de beurs, meestal
+  met een uitgifte erbij. Die tellen als jong. Voorbeeld: DUKR, eerste koers in 2017, op Nasdaq sinds
+  15 mei 2026.
+- Bij 278 aandelen is de beursgang onbekend en de eerste koers jonger dan twee jaar: vooral afsplitsingen
+  (Sandisk, februari 2025) en nieuwe noteringen in Japan. Die tellen als jong.
+
+Na veel omgekeerde splits is de hoogste koers ooit astronomisch hoog (DRIO: 111.600 dollar in 2013 bij een
+slot van 1,26). Zulke aandelen staan op een fractie van een procent van hun top en vallen nooit af op de
+tweede eis.
+
+### 15.4 Wat het in de test had gedaan
+
+Nagerekend op de opgeslagen testvoorspellingen (`onderzoek/leeftijd_top_test.py`). De dataset kent geen
+datum van de beursgang: de leeftijd is hier de tijd sinds de eerste dagkoers, en de top is de hoogste
+koers sinds november 2016. Het is dus een benadering van de regel die nu draait.
+
+Kandidaten (kans vanaf 15%, omzet vanaf $100.000 per dag), alle regio's:
+
+| | 2020–2024 | 2025–2026 |
+|---|---|---|
+| Korter dan twee jaar genoteerd | 13% van de kandidaat-dagen | 23% |
+| Raak vanaf de opening: jong tegen ouder | 13,4% tegen 15,0% | 10,6% tegen 14,1% |
+| Grote verliezers: jong tegen ouder | 10,7% tegen 8,3% | 27,9% tegen 24,9% |
+| Op 95% of meer van de top | 3% | 2% |
+| Gemiddeld na tien dagen: bij de top tegen eronder | −3,4% tegen +7,4% | −5,7% tegen −2,5% |
+| Grote verliezers: bij de top tegen eronder | 15,6% tegen 8,4% | 30,7% tegen 25,5% |
+
+De meldingen volgens de regels van nu (lat 26%, dagbeweging tot 30%, zonder Europa):
+
+| | 2020–2024 | 2026 |
+|---|---|---|
+| Nu | 148 meldingen · 26,4% raak vanaf de opening · 10,1% grote verliezers · gemiddeld +14,2% | 13 · 5 raak · 2 grote verliezers |
+| Met de twee eisen | 123 · 25,2% · 9,8% · +15,0% | 12 · 4 raak · 2 grote verliezers |
+| Afgevallen als te jong | 17 (4 raak vanaf de opening, 1 grote verliezer) | 0 |
+| Afgevallen bij de top | 11 (5 raak, 2 grote verliezers) | 1 (raak) |
+
+- Onder alle kandidaten deden jonge aandelen het in beide perioden iets slechter, en eindigden aandelen
+  vlak bij hun top gemiddeld lager.
+- Onder de meldingen is daar niets van terug te zien: de afgevallen meldingen waren ongeveer even goed als
+  de rest. Bij een lat van 20% hetzelfde beeld (1.014 → 863 meldingen, 17,3% → 16,8% raak vanaf de opening;
+  90 → 76, 20,0% → 18,4%).
+- De eisen zijn een keuze van de gebruiker, niet een uitkomst van de test. De test laat zien dat ze geen
+  kwaliteit kosten en ongeveer een zesde van de meldingen.
+
+### 15.5 De lijst op 16 november
+
+Drooggelopen tegen de echte markt, zonder iets weg te schrijven (`smoke.ts`):
+
+| Ronde | Afgevallen uit de kopgroep | Wat er veranderde |
+|---|---|---|
+| VS en Canada, sessie van 13 november | 49 te jong, 0 bij de top | kandidaten vanaf 15%: van 31 naar 22; bovenaan DRIO, ITOC, CSTE in plaats van NOMA, DRIO, DUKR |
+| Azië en Australië, sessie van 16 november | 52 te jong, 2 bij de top | de lijst vult zich aan tot 100 |
+
+Van de drie meldingen van 14 november waren er twee niet uitgegaan: NOMA (naar de beurs op 31 oktober
+2025) en DUKR (op Nasdaq sinds 15 mei 2026). DRIO (2013) was gebleven.
+
+### 15.6 Getest
+
+- `test_core.ts`: 17 gevallen voor de twee eisen (jong, lang buiten de beurs verhandeld, oude beursgang met
+  nieuwe koersreeks, datum onbekend, precies op de grens, eis uit) en het inlezen van de drie nieuwe velden;
+  het model geeft nog exact dezelfde uitkomsten als bij de training.
+- `smoke.ts`: met beide eisen uit is de lijst gelijk aan die van productie (31 kandidaten, NOMA en DUKR
+  bovenaan). Een ronde zonder eisen gevolgd door een meldmoment mét eisen houdt de negen jonge kandidaten
+  tegen met de notitie "niet gemeld: korter dan 2 jaar genoteerd".
+- Het tabblad op desktop- en telefoonbreedte: de regel met wat niet in de lijst komt, de twee
+  keuzelijsten, en per aandeel "aan de beurs sinds" en de stand ten opzichte van de top.
+
+### 15.7 Kanttekeningen
+
+- **Afsplitsingen tellen als jong.** Bij een afsplitsing kent TradingView meestal geen datum van de
+  beursgang, en de koersreeks begint op de dag van de afsplitsing.
+- **De datum komt van TradingView.** Hij is op een handvol bekende aandelen nagekeken (onder meer Apple
+  1980, Reddit maart 2024, Circle juni 2025), niet op alle. Wie twijfelt ziet de datum bij het aandeel in
+  het tabblad.
+- **De top is de top sinds 2000**, of sinds de notering als die later is: verder gaat de geschiedenis bij
+  TradingView niet terug.
+- **Bestaande voorspellingen blijven staan** en worden gewoon afgerekend, ook die van aandelen die nu
+  afvallen. Er is niets gewist.
