@@ -1196,4 +1196,50 @@ Wat de proef wel heeft opgeleverd:
   met een vermoeden.
 
 Niet getest: nieuws buiten de SEC (persberichten die niet bij een 8-K zitten, berichten op sociale
-media), aandelen buiten de VS, en wat er ná een melding gebeurt (zie 14.17).
+media) en aandelen buiten de VS. Wat er ná een melding gebeurt staat in 14.17.
+
+### 14.17 Bewaking na een melding: een uitgifte in de tien dagen erna (gratis nagerekend)
+
+De proef hierboven keek naar stukken van vóór de melding. De gebruiker wilde ook bewaking ná een melding.
+Dat is zonder Claude na te rekenen, met de lijsten van stukken per bedrijf en de dagkoersen
+(`bewaking_test.py`; opzet vastgelegd vóór de uitkomst, zelfde lat als bij de proef).
+
+**Uitkomst: ook dit haalt de lat niet.** In 2020–2024 maakte het niets uit of je na zo'n stuk verkocht; in
+2025–2026 wel, maar dat zijn minder dan honderd gevallen per soort stuk.
+
+Hoe het gemeten is: nagespeelde meldingen in de VS (dagbeweging tot 30%), kopen op de opening van de dag
+na de voorspeldag, aanhouden tot het slot van de tiende handelsdag. Een stuk dat de SEC daarna ontving
+telt vanaf de eerste opening erna (binnen vóór 09:30 uur New York: die dag, anders de volgende
+handelsdag). Gemeten is het rendement van die opening tot het slot van dag 10, naast hetzelfde rendement
+vanaf dezelfde dag over alle meldingen (de vergelijking).
+
+Bij de lat van 15% (2.904 meldingen in 2020–2024, 1.067 in 2025–2026):
+
+| Stuk tijdens het aanhouden | Meldingen met zo'n stuk | Van de opening na het stuk tot dag 10, 2020–2024 (vergelijking) | 2025–2026 (vergelijking) |
+|---|---|---|---|
+| Prospectus voor een uitgifte (424B1, B2, B4, B5) | 216 (7,4%) en 73 (6,8%) | +2,3% (+3,1%) | −9,2% (−0,9%) |
+| Overig prospectus (424B3, B7, B8) | 64 en 56 | +0,1% (+2,3%) | −5,9% (−0,8%) |
+| Registratie (S-1, S-3, F-1, F-3) | 166 en 89 | +3,9% (+2,3%) | −5,3% (−0,9%) |
+| Onderhandse verkoop van aandelen (8-K, onderdeel 3.02) | 126 en 69 | +3,0% (+2,6%) | −6,7% (−0,7%) |
+
+- **2020–2024: geen verschil.** Na een prospectus voor een uitgifte deed het aandeel het in de rest van
+  de tien dagen ongeveer zoals alle andere meldingen (+2,3% tegen +3,1%). Per jaar: 2020 +3,7% tegen
+  +4,6%, 2021 +0,2% tegen +3,0%.
+- **2025–2026: 4 tot 8 punten slechter**, bij alle vier de soorten stukken (2025: −11,4% tegen +0,7%;
+  2026: −5,3% tegen −2,1%). Dat wijst op verkopen, maar het zijn 56 tot 89 gevallen per soort en het
+  staat alleen in de controleperiode.
+- **De klap valt niet op de opening na het stuk.** De koers opent daar gemiddeld even hoog als het slot
+  ervoor (−0,4% en +0,2%). Bedrijven dienen zo'n stuk vooral in als de koers al gestegen is: tot het slot
+  vóór het stuk stonden deze meldingen in 2020–2024 gemiddeld op +14,5%.
+- **Een stuk tussen de melding en de aankoop** (binnengekomen vóór de opening van de volgende dag) komt
+  bijna niet voor: 9 van de 3.971 meldingen.
+- **Wat de regel had opgeleverd** (niet kopen bij een prospectus vóór de aankoop, verkopen op de opening
+  na een prospectus tijdens het aanhouden): bij de lat van 15% gemiddeld +7,7% → +7,7% in 2020–2024 en
+  −0,8% → 0,0% in 2025–2026, grote verliezers 9,5% → 8,9% en 19,0% → 17,9%. Bij de lat van 20%: +9,5% →
+  +9,2% en −9,9% → −9,1%. Bij de lat van 26%, de regel van nu: 6 van de 94 meldingen in 2020–2024 kregen
+  zo'n stuk en verkopen kostte gemiddeld resultaat (+16,1% → +14,9%); in 2025–2026 geen enkele.
+
+**Besluit:** geen regel en geen vervolgmelding die tot verkopen aanzet. Wel is het een feit dat zonder
+kosten te volgen is: de SEC meldt gratis welke stukken een bedrijf indient. Of er een vervolgbericht komt
+("het bedrijf heeft een prospectus voor een uitgifte ingediend"), als informatie en zonder advies, is aan
+de gebruiker; het eigen track record kan daarna laten zien of het beeld van 2025–2026 standhoudt.
