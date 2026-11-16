@@ -96,6 +96,8 @@ Het ophalen loopt daarom via een tijdelijke hulpfunctie in Supabase, met dezelfd
 | r | `kas_test.py ssdata` | het deel zonder Claude: kas voor minder dan 6 of 12 maanden, positieve kasstroom, groei van het aantal aandelen (geen feit haalt de lat) |
 | s | `tekst_test.py ssdata` | de meting op de antwoorden van Claude: de vooraf vastgelegde feiten met en zonder, als klein model naast de kans en als regel op de meldingen (`vlaggen.py` = de tabel en de lat, `tekst_feiten.py` = de afleiding van feiten per stuk). Uitkomst: geen feit haalt de lat op de dagen die een melding kunnen krijgen (rapport 14.16) |
 | t | `bewaking_test.py ssdata` | bewaking na een melding, zonder Claude: wat gebeurt er als het bedrijf binnen tien handelsdagen na een melding een prospectus, registratie of onderhandse verkoop indient (geen verschil in 2020–2024, 4 tot 8 punten slechter in 2025–2026; haalt de lat niet) |
+| u | `tv_leeftijd.py [uit.pkl]` | de twee eisen aan de lijst van 16 november: hoe volledig zijn bij TradingView de eerste koers, de datum van de beursgang en de hoogste koers ooit, en hoeveel aandelen raken de eisen (22 verzoeken, schrijft niets weg) |
+| v | `leeftijd_top_test.py ssdata ssdata/runs/open_red` | dezelfde twee eisen op de testvoorspellingen: jonge aandelen en aandelen vlak bij hun top onder de kandidaten en onder de meldingen (kost ±1 op de 6 meldingen, kwaliteit gelijk; rapport hoofdstuk 15) |
 
 De kleine bestanden van deze proef (kandidaat-dagen met uitkomst, gekozen stukken, steekproef, het kasboek en alle antwoorden van Claude) staan in `onderzoek/proefdata/`, met uitleg hoe ze terug te zetten zijn: daarmee is de meting na te rekenen zonder opnieuw te betalen.
 

@@ -71,6 +71,9 @@ export const TV_COLS = [
   "Perf.1M", "Volatility.W", "Volatility.M", "price_52_week_high", "price_52_week_low",
   "High.6M", "High.3M", "Low.3M", "High.1M", "Low.1M",
   "market_cap_basic", "fundamental_currency_code", "float_shares_outstanding", "sector", "exchange",
+  // Voor de eisen aan de lijst (zie listBar): eerste koers bij TradingView, datum van de beursgang of de
+  // overstap naar deze beurs (beide in seconden sinds 1970), en de hoogste koers ooit (gecorrigeerd voor splits).
+  "first_bar_time", "ipo_offer_date", "High.All",
 ];
 export interface TvRow {
   ticker: string; tv_symbol: string; market: string; region: number; exchange: string; name: string | null;
@@ -79,6 +82,7 @@ export interface TvRow {
   av10: number; av30: number; av90: number; rv10: number; perf1m: number; volW: number; volM: number;
   hi52: number; lo52: number; hi6m: number; hi3m: number; lo3m: number; hi1m: number; lo1m: number;
   mcap: number; mcapCur: string | null; float: number;
+  firstBar: number; ipoDate: number; hiAll: number;
 }
 const N = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : NaN);
 
@@ -96,6 +100,7 @@ export function parseTvRow(market: string, row: { s: string; d: unknown[] }): Tv
     av10: N(d[9]), av30: N(d[10]), av90: N(d[11]), rv10: N(d[12]), perf1m: N(d[13]), volW: N(d[14]), volM: N(d[15]),
     hi52: N(d[16]), lo52: N(d[17]), hi6m: N(d[18]), hi3m: N(d[19]), lo3m: N(d[20]), hi1m: N(d[21]), lo1m: N(d[22]),
     mcap: N(d[23]), mcapCur: (d[24] as string) || null, float: N(d[25]),
+    firstBar: N(d[28]), ipoDate: N(d[29]), hiAll: N(d[30]),
   };
 }
 
@@ -166,6 +171,39 @@ export function eligible(r: TvRow, usd: number, minPx: number, minDvol: number):
   const dvolUsd = r.av30 * r.close * usd;
   const ok = pxUsd >= minPx && dvolUsd >= minDvol && Number.isFinite(r.change);
   return { ok, pxUsd, dvolUsd };
+}
+
+// ── Eisen van de gebruiker aan de lijst (16 november 2026) ───────────────────
+// Niet in de lijst: aandelen die korter dan `minAgeYears` jaar genoteerd zijn, en aandelen waarvan het slot
+// boven `maxTopPct` procent van hun hoogste koers ooit ligt (0 = die eis staat uit).
+// Leeftijd telt vanaf de beursgang of de overstap naar de huidige beurs; kent TradingView die datum niet
+// (bij ±6% van de aandelen), dan vanaf de eerste koers. Een aandeel dat jarenlang buiten de beurs is
+// verhandeld en pas kort op de beurs staat, telt dus als jong.
+// Deze eisen gelden ná het scoren: het model en het marktklimaat rekenen met de hele markt, zoals getraind.
+const YEAR_MS = 365.25 * DAY;
+/** Het moment (ms sinds 1970) vanaf wanneer de leeftijd telt; NaN = onbekend. */
+export function listedSinceMs(r: TvRow): number {
+  const s = Number.isFinite(r.ipoDate) ? r.ipoDate : r.firstBar;
+  return Number.isFinite(s) ? s * 1000 : NaN;
+}
+/** Het slot als percentage van de hoogste koers ooit; NaN = onbekend. */
+export function topPct(r: TvRow): number {
+  return r.hiAll > 0 ? (r.close / r.hiAll) * 100 : NaN;
+}
+export type ListBar = "jong" | "top" | null;
+/** Waarom een aandeel niet in de lijst mag ("jong" of "top"), of null als het mag. Onbekend sluit niet uit. */
+export function barOf(sinceMs: number, top: number, asOfMs: number, minAgeYears: number, maxTopPct: number): ListBar {
+  if (minAgeYears > 0 && Number.isFinite(sinceMs) && asOfMs - sinceMs < minAgeYears * YEAR_MS) return "jong";
+  if (maxTopPct > 0 && Number.isFinite(top) && top > maxTopPct) return "top";
+  return null;
+}
+export function listBar(r: TvRow, asOfMs: number, minAgeYears: number, maxTopPct: number): ListBar {
+  return barOf(listedSinceMs(r), topPct(r), asOfMs, minAgeYears, maxTopPct);
+}
+/** Tekst bij een uitsluiting, voor de notitie bij een kandidaat en het logboek. */
+export function barText(bar: Exclude<ListBar, null>, minAgeYears: number, maxTopPct: number): string {
+  const n = (v: number) => String(Math.round(v * 10) / 10).replace(".", ",");
+  return bar === "jong" ? `korter dan ${n(minAgeYears)} jaar genoteerd` : `boven ${n(maxTopPct)}% van de hoogste koers ooit`;
 }
 
 // ── Marktklimaat ────────────────────────────────────────────────────────────

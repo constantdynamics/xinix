@@ -8,6 +8,7 @@ import {
   type SprintTrackRecord,
   type SuperSprintItem,
   type SuperSprintResponse,
+  type SuperSprintSettingsPatch,
   type SuperSprintTest,
   type SuperSprintTestModel,
   type SuperSprintTrack,
@@ -24,6 +25,9 @@ import { HeartIcon, SeenInline, ShowSeenToggle } from "../components/MarkCells";
 // hartje = favoriet en op de watchlist maar niet in het Potje en de papieren portefeuille.
 // Sinds 14–15 november: meldgrens 20%, omzet voor meldingen vanaf $100.000 per dag, en geen melding
 // voor aandelen die deze week gemiddeld meer dan 30% per dag bewogen (verliesrisico zeer hoog).
+// Sinds 16 november (wens van de gebruiker): niet in de lijst wie korter dan twee jaar genoteerd is
+// (gerekend vanaf de beursgang of de overstap naar de huidige beurs) en wie boven 95% van zijn hoogste
+// koers ooit staat. Beide grenzen zijn onderaan te verstellen; 0 = uit.
 
 const REGIONS = ["VS", "Canada", "Europa", "Azië-Pacific"];
 const ROUND_OF = ["amerika", "amerika", "europa", "apac"];
@@ -74,6 +78,17 @@ function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
 }
+function fmtMonth(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("nl-NL", { month: "short", year: "numeric" });
+}
+/** Stand ten opzichte van de hoogste koers ooit; heel kleine waarden (na veel omgekeerde splits) als "minder dan". */
+function fmtTop(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return v < 0.1 ? "minder dan 0,1%" : `${nl(v, v < 10 ? 1 : 0)}%`;
+}
+const AGE_CHOICES = [0, 1, 2, 3, 5];
+const TOP_CHOICES = [0, 90, 95, 98];
 function fmtTime(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("nl-NL", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -108,6 +123,8 @@ function Detail({ r, threshold, minDvol, maxVolW, bounds }: { r: SuperSprintItem
           {r.currency !== "USD" && r.close_usd != null ? ` (≈ $${nl(r.close_usd, r.close_usd < 10 ? 2 : 0)})` : ""} · omzet {fmtUsd(r.dvol_usd)} per dag ·
           beurswaarde {fmtUsd(r.mcap_usd)} · vrij verhandelbaar {fmtCount(r.float_shares)} aandelen
           {r.rel_vol != null ? ` · volume ${nl(r.rel_vol)}× normaal` : ""}
+          {r.listed_since ? ` · aan de beurs sinds ${fmtMonth(r.listed_since)}` : ""}
+          {r.top_pct != null ? ` · staat op ${fmtTop(r.top_pct)} van zijn hoogste koers ooit` : ""}
           {r.first_seen ? ` · in de kopgroep sinds ${fmtDate(r.first_seen)}` : ""}
           {r.prob_base != null && Math.abs(r.prob_base - r.prob) >= 0.3 ? ` · vóór bijsturing en demping ${nl(r.prob_base)}%` : ""}
         </div>
@@ -366,6 +383,17 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
   const riskBounds = data?.risk_bounds?.length === 3 ? data.risk_bounds : RISK_BOUNDS;
   const alertsOn = data?.settings?.ss_alerts === true;
   const enabled = data?.settings?.ss_enabled !== false;
+  // Eisen aan de lijst (0 = uit) en hoeveel aandelen daardoor bij de laatste ronde van elke regio afvielen.
+  const minAge = Math.max(0, Number(data?.settings?.ss_min_age_years ?? 2));
+  const maxTop = Math.max(0, Number(data?.settings?.ss_max_top_pct ?? 95));
+  const barred = ["apac", "europa", "amerika"].reduce(
+    (a, k) => {
+      const b = (data?.state?.[`round:${k}`] as { barred?: { jong?: number; top?: number } } | undefined)?.barred;
+      return { jong: a.jong + Number(b?.jong ?? 0), top: a.top + Number(b?.top ?? 0), known: a.known || b != null };
+    },
+    { jong: 0, top: 0, known: false },
+  );
+  const yearsNl = (v: number) => `${nl(v, Number.isInteger(v) ? 0 : 1)} jaar`;
   const isFocus = (r: SuperSprintItem) => focusRow != null && r.ticker === focusRow.ticker;
   const visible = items.filter((r) => isFocus(r) || showSeen || !marks.isSeen(r.ticker));
   const hiddenSeen = items.length - items.filter((r) => !marks.isSeen(r.ticker)).length;
@@ -403,7 +431,7 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
       setBusy(null);
     }
   }
-  async function setSetting(patch: { ss_enabled?: boolean; ss_alerts?: boolean; ss_alert_max_volw?: number; ss_alert_regions?: number[] }) {
+  async function setSetting(patch: SuperSprintSettingsPatch) {
     setSaving(true);
     try {
       await superSprintSettings(patch);
@@ -457,6 +485,23 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
           later 30% of meer lager, tegen 6 tot 9% bij de rustigste groep. {alertMaxVolW > 0 ? `Boven ${nl(alertMaxVolW, 0)}% per dag gaat er daarom geen melding uit.` : "De grens hierop staat nu uit."}
         </p>
         <p className="leading-relaxed mt-2">
+          <b>Wat niet in de lijst komt.</b>{" "}
+          {minAge > 0 || maxTop > 0 ? (
+            <>
+              {minAge > 0 ? `Aandelen die korter dan ${yearsNl(minAge)} aan de beurs staan` : ""}
+              {minAge > 0 && maxTop > 0 ? " en aandelen " : maxTop > 0 ? "Aandelen " : ""}
+              {maxTop > 0 ? `die op meer dan ${nl(maxTop, 0)}% van hun hoogste koers ooit staan` : ""} komen niet in de lijst, krijgen geen
+              melding en worden niet vastgelegd.{" "}
+            </>
+          ) : (
+            "Beide eisen staan nu uit. "
+          )}
+          De leeftijd telt vanaf de beursgang of de overstap naar de huidige beurs: een aandeel dat jarenlang buiten de beurs
+          is verhandeld en pas kort op de beurs staat, telt als jong. In de test waren jonge aandelen iets minder vaak raak
+          (13% tegen 15% in 2020–2024, 11% tegen 14% in 2025–2026) en eindigden aandelen vlak bij hun top gemiddeld lager. Op
+          de meldingen zelf scheelt het ongeveer een zesde in aantal en vrijwel niets in trefkans.
+        </p>
+        <p className="leading-relaxed mt-2">
           <b>Meldingen</b>: vanaf {threshold}%{alertMinDvol > 0 ? ` en een omzet vanaf ${fmtUsd(alertMinDvol)} per dag` : ""},{" "}
           {maxPerWeek > 0 ? `hoogstens ${maxPerWeek} per week` : "zonder weekplafond"}, per aandeel hoogstens één keer per 10 dagen
           (tenzij de kans 5 punten hoger is){alertMaxVolW > 0 ? `, niet voor aandelen die deze week gemiddeld meer dan ${nl(alertMaxVolW, 0)}% per dag bewogen` : ""}
@@ -488,6 +533,16 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
       <div className="text-[11px] text-neutral-500">
         Laatste sessie: {REGIONS.map((n, g) => `${n} ${sessions[g] ? fmtDate(sessions[g]) : "nog niet"}`).join(" · ")}
         {data?.computed_at ? ` · bijgewerkt ${fmtTime(data.computed_at)}` : ""}
+        {minAge > 0 || maxTop > 0 ? (
+          <>
+            {" "}
+            · niet in de lijst:{" "}
+            {[minAge > 0 ? `korter dan ${yearsNl(minAge)} genoteerd` : "", maxTop > 0 ? `boven ${nl(maxTop, 0)}% van de hoogste koers ooit` : ""]
+              .filter(Boolean)
+              .join(" of ")}
+            {barred.known ? ` (bij de laatste rondes vielen daardoor ${barred.jong + barred.top} aandelen af)` : ""}
+          </>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -730,6 +785,44 @@ export function SuperSprintersView({ onAdopted }: { onAdopted?: () => void }) {
               <Button size="sm" variant="ghost" disabled={saving} onClick={() => void setSetting({ ss_enabled: !enabled })}>
                 {enabled ? "SUPERsprinters uitzetten" : "SUPERsprinters aanzetten"}
               </Button>
+            </div>
+          )}
+          {getToken() && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-1">
+              <label className="flex items-center gap-1.5">
+                Niet in de lijst als korter genoteerd dan
+                <select
+                  value={minAge}
+                  disabled={saving}
+                  onChange={(e) => void setSetting({ ss_min_age_years: Number(e.target.value) })}
+                  className="bg-ink-2 border border-ink-5 rounded px-2 py-1 text-xs text-neutral-300"
+                  aria-label="Minimale leeftijd van een aandeel in jaren"
+                >
+                  {[...new Set([...AGE_CHOICES, minAge])].sort((a, b) => a - b).map((v) => (
+                    <option key={v} value={v}>
+                      {v === 0 ? "uit" : yearsNl(v)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5">
+                of hoger dan
+                <select
+                  value={maxTop}
+                  disabled={saving}
+                  onChange={(e) => void setSetting({ ss_max_top_pct: Number(e.target.value) })}
+                  className="bg-ink-2 border border-ink-5 rounded px-2 py-1 text-xs text-neutral-300"
+                  aria-label="Hoogste stand ten opzichte van de hoogste koers ooit, in procent"
+                >
+                  {[...new Set([...TOP_CHOICES, maxTop])].sort((a, b) => a - b).map((v) => (
+                    <option key={v} value={v}>
+                      {v === 0 ? "uit" : `${nl(v, 0)}%`}
+                    </option>
+                  ))}
+                </select>
+                van de hoogste koers ooit
+              </label>
+              <span>Aanscherpen geldt meteen; versoepelen vanaf de eerstvolgende ronde.</span>
             </div>
           )}
         </Card>

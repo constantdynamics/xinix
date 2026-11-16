@@ -1530,6 +1530,8 @@ export interface SuperSprintItem {
   reasons: SuperSprintReason[] | null; news: SuperSprintNews[] | null; news_at: string | null;
   session_date: string; scored_at: string; first_seen: string | null;
   alerted_at: string | null; alerted_prob: number | null; alert_pending: boolean; alert_note: string | null;
+  // Vanaf wanneer de leeftijd telt (beursgang of overstap naar deze beurs) en het slot als % van de hoogste koers ooit.
+  listed_since?: string | null; top_pct?: number | null;
 }
 // Uitkomsten vanaf de opening van de dag na de voorspelling (het eerste moment waarop je kunt kopen).
 export interface SuperSprintOpenStats { n_open?: number; hits_open?: number; avg_ret10?: number | null; big_loss?: number }
@@ -1545,6 +1547,8 @@ export interface SuperSprintResponse {
   sprint_track_record: SprintTrackRecord | null;
   settings: {
     ss_enabled: boolean; ss_alerts: boolean; ss_alert_min_prob: number; ss_alert_max_per_week: number; ss_override_min_prob: number; ss_alert_min_dvol?: number | null; ss_alert_max_volw?: number | null; ss_alert_regions?: number[] | null;
+    // Eisen aan de lijst: niet korter dan zoveel jaar genoteerd, niet boven zoveel procent van de top (0 = uit).
+    ss_min_age_years?: number | null; ss_max_top_pct?: number | null;
     sprint_alert_min_prob: number; quiet_hours_start: number | null; quiet_hours_end: number | null;
   } | null;
   state: Record<string, Record<string, unknown>>;
@@ -1571,7 +1575,11 @@ export async function superSprintAdopt(ticker: string): Promise<{ ok: boolean; a
   if (!res.ok) throw new Error(`op de watchlist zetten mislukt (${res.status}): ${await res.text()}`);
   return (await res.json()) as { ok: boolean; added: boolean };
 }
-export async function superSprintSettings(patch: { ss_enabled?: boolean; ss_alerts?: boolean; ss_alert_max_volw?: number; ss_alert_regions?: number[] }): Promise<void> {
+export interface SuperSprintSettingsPatch {
+  ss_enabled?: boolean; ss_alerts?: boolean; ss_alert_max_volw?: number; ss_alert_regions?: number[];
+  ss_min_age_years?: number; ss_max_top_pct?: number;
+}
+export async function superSprintSettings(patch: SuperSprintSettingsPatch): Promise<void> {
   const res = await fetch(apiUrl("/api/xinix-supersprint"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },

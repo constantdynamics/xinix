@@ -6,6 +6,9 @@
 // MIN_PROB, MIN_DVOL en MAX_VOLW zetten de meldgrens (standaard 15), de omzeteis voor meldingen (standaard
 // 100000) en de grens op de beweeglijkheid van de week (standaard 30, 0 = uit); MAX_WEEK het weekplafond
 // (standaard 3, 0 = geen) en REGIONS de regio's die mogen melden (bv. "0,1,3"; standaard alle).
+// MIN_AGE en MAX_TOP zetten de eisen aan de lijst: niet korter dan zoveel jaar genoteerd (standaard 2) en niet
+// boven zoveel procent van de hoogste koers ooit (standaard 95); 0 = uit. MIN_AGE_FLUSH en MAX_TOP_FLUSH
+// scherpen ze aan tussen de ronde en het meldmoment (dan moet het meldmoment ze tegenhouden).
 import * as fs from "node:fs";
 import * as C from "../../supabase/functions/xinix-supersprint/core.ts";
 import * as R from "../../supabase/functions/xinix-supersprint/run.ts";
@@ -19,7 +22,8 @@ const tables: Record<string, Row[]> = {
   signal_settings: [{ id: 1, ntfy_topic: "test", ntfy_server: "http://127.0.0.1:9/nergens", quiet_hours_start: process.env.QUIET === "0" ? null : 21, quiet_hours_end: process.env.QUIET === "0" ? null : 4,
     ss_enabled: true, ss_alerts: alertsFlag === "alerts", ss_alert_min_prob: Number(process.env.MIN_PROB ?? 15), ss_override_min_prob: 15, ss_alert_min_dvol: Number(process.env.MIN_DVOL ?? 100000),
     ss_alert_max_volw: Number(process.env.MAX_VOLW ?? 30), ss_alert_max_per_week: Number(process.env.MAX_WEEK ?? 3),
-    ss_alert_regions: process.env.REGIONS ? process.env.REGIONS.split(",").map(Number) : null }],
+    ss_alert_regions: process.env.REGIONS ? process.env.REGIONS.split(",").map(Number) : null,
+    ss_min_age_years: Number(process.env.MIN_AGE ?? 2), ss_max_top_pct: Number(process.env.MAX_TOP ?? 95) }],
   xinix_fx_rates: JSON.parse(fs.readFileSync(fxPath, "utf8")),
   xinix_ss_state: [], xinix_ss_budget: [], xinix_ss_scores: [], xinix_ss_predictions: [], xinix_notify_mute: [], xinix_seen: [],
   xinix_ss_breadth: seed.map((s: Row) => ({ ...s, n: 0 })),
@@ -131,6 +135,9 @@ if (alertsFlag === "alerts") {
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
     const port = (server.address() as { port: number }).port;
     tables.signal_settings[0].ntfy_server = process.env.NTFY === "down" ? "http://127.0.0.1:9/nergens" : `http://127.0.0.1:${port}/`;
+    // MIN_AGE_FLUSH en MAX_TOP_FLUSH: de eisen aan de lijst aanscherpen tussen de ronde en het meldmoment.
+    if (process.env.MIN_AGE_FLUSH != null) tables.signal_settings[0].ss_min_age_years = Number(process.env.MIN_AGE_FLUSH);
+    if (process.env.MAX_TOP_FLUSH != null) tables.signal_settings[0].ss_max_top_pct = Number(process.env.MAX_TOP_FLUSH);
     for (const p of pre) tables.xinix_ss_predictions.push({ ...p, alerted_at: `${p.made_on}T04:12:05Z` });
     const fl = await R.guarded(sb(), (ctx) => R.flush(ctx));
     console.log(`\nMELDMOMENT (eerdere meldingen: ${pre.length ? pre.map((p) => `${p.ticker} ${p.made_on} ${p.alerted_prob}%`).join(", ") : "geen"}):`, fl.message, JSON.stringify(fl.metrics));
@@ -154,9 +161,12 @@ const scores = tables.xinix_ss_scores as Row[];
 console.log("\nkopgroep:");
 for (const r of scores.slice(0, 12)) {
   const reasons = (r.reasons as Array<{ label: string; f: number; t: string }>).slice(0, 2).map((x) => `×${x.f} ${x.label} (${x.t})`).join("; ");
-  console.log(`${String(r.rank).padStart(3)} ${String(r.ticker).padEnd(9)} ${String(r.prob).padStart(5)}% (basis ${r.prob_base}%) ${String(r.exchange).padEnd(8)} slot ${r.close} ${r.currency} = $${r.close_usd}  1d ${r.change_1d}%  1m ${r.perf_1m}%  omzet $${r.dvol_usd}  | ${reasons}${(r.news as unknown[] | null)?.length ? `  | nieuws: ${(r.news as Array<{ t: string; g: string }>)[0].g}: ${(r.news as Array<{ t: string }>)[0].t.slice(0, 60)}` : ""}`);
+  console.log(`${String(r.rank).padStart(3)} ${String(r.ticker).padEnd(9)} ${String(r.prob).padStart(5)}% (basis ${r.prob_base}%) ${String(r.exchange).padEnd(8)} slot ${r.close} ${r.currency} = $${r.close_usd}  1d ${r.change_1d}%  1m ${r.perf_1m}%  omzet $${r.dvol_usd}  genoteerd sinds ${r.listed_since}  ${r.top_pct}% van de top  | ${reasons}${(r.news as unknown[] | null)?.length ? `  | nieuws: ${(r.news as Array<{ t: string; g: string }>)[0].g}: ${(r.news as Array<{ t: string }>)[0].t.slice(0, 60)}` : ""}`);
 }
 const probs = scores.map((r) => Number(r.prob));
 console.log(`\n${scores.length} bewaard; kans: max ${Math.max(...probs)}%, mediaan ${probs.sort((a, b) => a - b)[probs.length >> 1]}%, ≥15%: ${probs.filter((p) => p >= 15).length}, ≥5%: ${probs.filter((p) => p >= 5).length}`);
+const jongste = scores.map((r) => String(r.listed_since ?? "")).filter(Boolean).sort().pop();
+const hoogste = Math.max(...scores.map((r) => Number(r.top_pct ?? NaN)).filter(Number.isFinite));
+console.log(`eisen aan de lijst: jongste notering in de lijst ${jongste}, hoogste stand ten opzichte van de top ${hoogste}%, zonder datum ${scores.filter((r) => !r.listed_since).length}, zonder top ${scores.filter((r) => r.top_pct == null).length}`);
 const sample = JSON.stringify(scores[0]);
 console.log(`grootte van één score-rij als JSON: ${sample.length} bytes`);
