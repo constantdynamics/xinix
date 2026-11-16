@@ -2517,7 +2517,18 @@
     "839470_0001104659-25-074960"
    ],
    "verwacht": 1.559,
-   "verstuurd": "2026-11-16 05:31"
+   "verstuurd": "2026-11-16 05:31",
+   "kosten": 1.2134,
+   "gelukt": 114,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1027970,
+   "tokens_uit": 33370,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 371526,
+   "einde": {
+    "end_turn": 114
+   }
   },
   {
    "id": "msgbatch_01CiXgbkScHPUrU65FcmeMja",
@@ -2637,7 +2648,18 @@
     "1074828_0001654954-25-010951"
    ],
    "verwacht": 1.536,
-   "verstuurd": "2026-11-16 05:31"
+   "verstuurd": "2026-11-16 05:31",
+   "kosten": 1.1992,
+   "gelukt": 109,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1021349,
+   "tokens_uit": 32021,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 355231,
+   "einde": {
+    "end_turn": 109
+   }
   },
   {
    "id": "msgbatch_01Wfy8uitPeH8L6kYWgtS6A9",
@@ -2763,7 +2785,18 @@
     "1326380_0001193125-20-312781"
    ],
    "verwacht": 1.568,
-   "verstuurd": "2026-11-16 05:31"
+   "verstuurd": "2026-11-16 05:31",
+   "kosten": 1.2246,
+   "gelukt": 115,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1037525,
+   "tokens_uit": 33661,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 374785,
+   "einde": {
+    "end_turn": 115
+   }
   },
   {
    "id": "msgbatch_01YHkWzY5NBdKDKbms4r2pRh",
@@ -2893,7 +2926,18 @@
     "1411690_0001140361-21-001664"
    ],
    "verwacht": 1.587,
-   "verstuurd": "2026-11-16 05:31"
+   "verstuurd": "2026-11-16 05:31",
+   "kosten": 1.2188,
+   "gelukt": 119,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1019894,
+   "tokens_uit": 35896,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 387821,
+   "einde": {
+    "end_turn": 119
+   }
   },
   {
    "id": "msgbatch_013nZGT5yRhFLrmRDq7UPG9x",
@@ -3019,7 +3063,18 @@
     "1448397_0001140361-21-007510"
    ],
    "verwacht": 1.562,
-   "verstuurd": "2026-11-16 05:31"
+   "verstuurd": "2026-11-16 05:31",
+   "kosten": 1.2239,
+   "gelukt": 115,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1028603,
+   "tokens_uit": 35302,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 374785,
+   "einde": {
+    "end_turn": 115
+   }
   },
   {
    "id": "msgbatch_0151REraK5GqyZsEi6W2EKx5",
@@ -3144,7 +3199,18 @@
     "1537435_0001537435-20-000020"
    ],
    "verwacht": 1.561,
-   "verstuurd": "2026-11-16 05:31"
+   "verstuurd": "2026-11-16 05:31",
+   "kosten": 1.2218,
+   "gelukt": 114,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1033081,
+   "tokens_uit": 34029,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 371526,
+   "einde": {
+    "end_turn": 114
+   }
   },
   {
    "id": "msgbatch_01SXLeWM3fXdHunSzVNueTAY",
@@ -3271,7 +3337,18 @@
     "1611746_0001213900-25-066634"
    ],
    "verwacht": 1.569,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2207,
+   "gelukt": 116,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1026752,
+   "tokens_uit": 35018,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 378044,
+   "einde": {
+    "end_turn": 116
+   }
   },
   {
    "id": "msgbatch_01SDv57L7wuWXdpmvmdCw1i2",
@@ -3399,7 +3476,18 @@
     "1671584_0000950170-25-105823"
    ],
    "verwacht": 1.575,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2075,
+   "gelukt": 117,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1014581,
+   "tokens_uit": 34777,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 381303,
+   "einde": {
+    "end_turn": 117
+   }
   },
   {
    "id": "msgbatch_0195XK6LDfkuDPjaGz4q7hUN",
@@ -3525,7 +3613,18 @@
     "1719406_0001437749-24-026837"
    ],
    "verwacht": 1.565,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2187,
+   "gelukt": 115,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1027726,
+   "tokens_uit": 34453,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 374785,
+   "einde": {
+    "end_turn": 115
+   }
   },
   {
    "id": "msgbatch_01SfEXjNfyP5YRiEzZ4BGJ5o",
@@ -3655,7 +3754,18 @@
     "1785056_0000950170-25-095313"
    ],
    "verwacht": 1.58,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2209,
+   "gelukt": 119,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1022763,
+   "tokens_uit": 35752,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 387821,
+   "einde": {
+    "end_turn": 119
+   }
   },
   {
    "id": "msgbatch_01TZNZefjyafMs8JaME8pKoK",
@@ -3781,7 +3891,18 @@
     "1820302_0001193125-21-365097"
    ],
    "verwacht": 1.561,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2137,
+   "gelukt": 115,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1024900,
+   "tokens_uit": 34003,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 374785,
+   "einde": {
+    "end_turn": 115
+   }
   },
   {
    "id": "msgbatch_017UXaPwWbXUAwE8HKoe957P",
@@ -3905,7 +4026,18 @@
     "1849056_0001628280-24-047877"
    ],
    "verwacht": 1.549,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2174,
+   "gelukt": 113,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1030470,
+   "tokens_uit": 33700,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 368267,
+   "einde": {
+    "end_turn": 113
+   }
   },
   {
    "id": "msgbatch_019LAPgtBTW7Cvhz4dRNmoSW",
@@ -4036,7 +4168,18 @@
     "1899123_0001140361-24-049031"
    ],
    "verwacht": 1.59,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2302,
+   "gelukt": 120,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1036269,
+   "tokens_uit": 34885,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 391080,
+   "einde": {
+    "end_turn": 120
+   }
   },
   {
    "id": "msgbatch_01XGxK8WkBEmzyKXiER7gpU3",
@@ -4164,7 +4307,18 @@
     "1945240_0001493152-26-006467"
    ],
    "verwacht": 1.578,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.228,
+   "gelukt": 117,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1037684,
+   "tokens_uit": 34256,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 381303,
+   "einde": {
+    "end_turn": 117
+   }
   },
   {
    "id": "msgbatch_0161AizpGD1Q1vBGLjx3dAEr",
@@ -4291,7 +4445,18 @@
     "2009312_0001493152-25-012797"
    ],
    "verwacht": 1.572,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2223,
+   "gelukt": 116,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1036855,
+   "tokens_uit": 33306,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 378044,
+   "einde": {
+    "end_turn": 116
+   }
   },
   {
    "id": "msgbatch_01A3t1iKb64ihmRFJWmuzpwH",
@@ -4482,7 +4647,18 @@
     "357294_0001437749-20-006110"
    ],
    "verwacht": 1.904,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.3435,
+   "gelukt": 180,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1068342,
+   "tokens_uit": 48488,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 653642,
+   "einde": {
+    "end_turn": 180
+   }
   },
   {
    "id": "msgbatch_01GwhimFktAMaBUpVmWxAh5w",
@@ -4743,7 +4919,18 @@
     "928054_0000928054-20-000028"
    ],
    "verwacht": 2.009,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2021,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 824575,
+   "tokens_uit": 65581,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_01Mro61hjHwdadsrD81pUdJF",
@@ -5004,7 +5191,18 @@
     "1232582_0001104659-21-004837"
    ],
    "verwacht": 2.004,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.1573,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 788576,
+   "tokens_uit": 63815,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_01ECBomd9Wbe4WyEegmwQAYv",
@@ -5265,7 +5463,18 @@
     "1411690_0001140361-21-001667"
    ],
    "verwacht": 2.084,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2562,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 888468,
+   "tokens_uit": 63618,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_01FknPHE1mfB1xhqYVcTkCQz",
@@ -5526,7 +5735,18 @@
     "1505413_0001104659-20-048209"
    ],
    "verwacht": 2.102,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.3068,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 926927,
+   "tokens_uit": 66042,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_01W6Uc8WCZiwe42QqPHk1GmL",
@@ -5787,7 +6007,18 @@
     "1597846_0001493152-21-003845"
    ],
    "verwacht": 2.031,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2084,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 838530,
+   "tokens_uit": 64047,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_01LbKPxxJaR352omG6qx63gn",
@@ -6048,7 +6279,18 @@
     "1665300_0001628280-20-005120"
    ],
    "verwacht": 2.024,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.1707,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 810200,
+   "tokens_uit": 62177,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_019xj94tEdEcVWzWEEPrEabc",
@@ -6309,7 +6551,18 @@
     "1717393_0001157523-20-000354"
    ],
    "verwacht": 2.059,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2399,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 877191,
+   "tokens_uit": 62603,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_01RZU5owsKH5Eyje3T2ozNMv",
@@ -6570,7 +6823,18 @@
     "1790169_0001062993-23-022021"
    ],
    "verwacht": 2.145,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.3432,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 982726,
+   "tokens_uit": 62173,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_01CmN8VtsYgbuDpJ2JEXmRCG",
@@ -6831,7 +7095,18 @@
     "1855467_0001493152-26-008592"
    ],
    "verwacht": 2.048,
-   "verstuurd": "2026-11-16 05:32"
+   "verstuurd": "2026-11-16 05:32",
+   "kosten": 1.2155,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 834812,
+   "tokens_uit": 66198,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_014n1tJFsqBqVunxusVPK6rq",
@@ -7092,7 +7367,18 @@
     "1946573_0001213900-25-096801"
    ],
    "verwacht": 2.177,
-   "verstuurd": "2026-11-16 05:33"
+   "verstuurd": "2026-11-16 05:33",
+   "kosten": 1.381,
+   "gelukt": 250,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 1008470,
+   "tokens_uit": 64579,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 993000,
+   "einde": {
+    "end_turn": 250
+   }
   },
   {
    "id": "msgbatch_01CRdqsZB36hsi4Yxx5AWrRH",
@@ -7327,7 +7613,18 @@
     "2109869_0001829126-26-010623"
    ],
    "verwacht": 1.941,
-   "verstuurd": "2026-11-16 05:33"
+   "verstuurd": "2026-11-16 05:33",
+   "kosten": 1.2316,
+   "gelukt": 224,
+   "mislukt": 0,
+   "klaar": true,
+   "tokens_in": 894829,
+   "tokens_uit": 58458,
+   "onthouden_geschreven": 0,
+   "onthouden_gelezen": 889728,
+   "einde": {
+    "end_turn": 224
+   }
   }
  ],
  "los": [
