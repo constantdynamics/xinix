@@ -353,7 +353,8 @@ afgerekend en is de wachtrij leeg.
   gemiddelde precisie 0,0697 tegen 0,0696). Het kleine model won, omdat het met één verzoek per markt
   bij TradingView kan draaien in plaats van met een verzoek per aandeel bij Yahoo.
 - **Short interest van FINRA** (212 bestanden sinds december 2017, met de vertraging waarmee het
-  gepubliceerd wordt): voegt niets toe.
+  gepubliceerd wordt): voegt als extra kenmerk van het model niets toe. Onder de kandidaten zit een zwak
+  verband dat de lat niet haalt; zie hoofdstuk 16, ook voor de dagelijkse short-verkopen.
 - **Het rendement over vijf dagen uit TradingView**: weggelaten; dat veld loopt vlak na het slot een
   sessie achter.
 - **Een lat die na elke melding omhoog gaat en daarna weer zakt**: niet beter dan de gewone regel.
@@ -1386,3 +1387,157 @@ Van de drie meldingen van 14 november waren er twee niet uitgegaan: NOMA (naar d
   TradingView niet terug.
 - **Bestaande voorspellingen blijven staan** en worden gewoon afgerekend, ook die van aandelen die nu
   afvallen. Er is niets gewist.
+
+## 16. Helpt een betaald abonnement? Short-gegevens nagerekend (16 november 2026)
+
+Vraag van de gebruiker: "Helpt het met het verhogen van de betrouwbaarheid als ik andere subscriptions
+regel. Bv tradingview, ik zeg maar iets".
+
+### 16.1 Uitkomst in het kort
+
+- **TradingView: nee.** Alles wat het model gebruikt komt al gratis van TradingView. Een betaald
+  abonnement geeft meer grafieken, indicatoren en alarmen op het eigen scherm; het model krijgt er geen
+  nieuwe gegevens door.
+- **Een abonnement kan alleen helpen met informatie die niet al in de koers zit en die jaren teruggaat**,
+  zodat het op geschiedenis te bewijzen is. Drie soorten komen in aanmerking: wie er short zit, aandacht
+  op sociale media, en een kalender met geplande beslissingen. Van de eerste soort is een deel gratis, en
+  dat deel is hier nagerekend.
+- **Geen van de dertien vooraf vastgelegde feiten over short-gegevens haalt de lat.**
+- **Er zit wel een zwak verband in, in beide perioden dezelfde kant op.** Waar veel mensen short zitten,
+  zijn kandidaten iets vaker raak; waar bijna niemand short zit, iets minder vaak. Het gaat om 2 tot 6
+  punten op een trefkans van 11 tot 16%. Het model kent dit verband niet. Als extra model levert het niets
+  op, en bij de weinige meldingen die uitgaan is het niet te bewijzen.
+- **Besluit: niets gebouwd en niets gekocht.** Of de betaalde, versere short-gegevens het verband sterk
+  genoeg maken, is alleen te bewijzen met een proefmaand bij een aanbieder die geschiedenis levert.
+
+### 16.2 Wat er te koop is
+
+Prijzen uit zoekresultaten van 16 november 2026. Ze zijn niet bij de aanbieder zelf nagelezen, tenzij dat
+erbij staat; de bronnen spreken elkaar soms tegen.
+
+| Soort gegevens | Aanbieder | Wat het levert | Kosten per maand |
+|---|---|---|---|
+| Grafieken en schermen | TradingView (Essential, Plus, Premium, Ultimate) | meer grafieken, indicatoren, alarmen; koersen zonder vertraging kosten extra | ±$15, $35, $70 en $240 |
+| Short-gegevens, gratis | FINRA | twee keer per maand de shortpositie per aandeel; elke dag het aandeel short-verkopen. Zelf opgehaald: gaat terug tot ten minste 2018 | niets |
+| Short-gegevens, betaald | ORTEX | dagelijkse schatting van de shortpositie, kosten van lenen, deel dat is uitgeleend; ook buiten de VS; geschiedenis op te vragen via een koppeling | website ±$49 en $149; koppeling volgens andere sites ±$49 tot $499 |
+| Short-gegevens, betaald | Fintel | shortpositie en leenkosten per aandeel | ±$15 tot $30; bulk en koppeling zonder prijs |
+| Aandacht op sociale media | Quiver Quantitative | vermeldingen op Reddit sinds augustus 2018; Stocktwits heeft geen open koppeling | koppeling vanaf ±$30 |
+| Kalender met beslissingen over medicijnen | BioPharmCatalyst | data van beslissingen van de FDA, ook van vroeger, via een koppeling in het duurste abonnement | prijs niet gevonden |
+
+De site van ORTEX was vanuit deze sessie niet bereikbaar. Daardoor is niet nagelezen of de geschiedenis
+in een abonnement voor particulieren zit en hoeveel opvragingen een proef op 1.300 aandelen kost.
+
+### 16.3 De gratis short-gegevens
+
+- **Shortpositie, twee keer per maand** (`onderzoek/finra.py`, 212 bestanden sinds december 2017): per
+  aandeel hoeveel aandelen er short staan, de gemiddelde handel en de verandering sinds de vorige melding.
+  FINRA publiceert 7 à 8 werkdagen na de peildatum. In de meting telt een melding vanaf 9 werkdagen na de
+  peildatum en hoogstens 45 dagen lang. Op een kandidaat-dag is het cijfer daardoor 2 tot 4 weken oud
+  (middelste 20 dagen).
+- **Short-verkopen, elke handelsdag** (`onderzoek/short_haal.py`, 1.811 handelsdagen van september 2019
+  tot en met 13 november 2026): per aandeel welk deel van de handel buiten de beurzen om een short-verkoop
+  was. Het bestand komt 's avonds na het slot: bekend vóór het meldmoment van de ochtend erna.
+- **Dekking: 72 tot 73% van de 13.696 Amerikaanse kandidaat-dagen** (70% in 2020–2024, 80 tot 85% in
+  2025–2026). De rest zijn aandelen die toen onder een andere ticker handelden; de bestanden kennen alleen
+  de ticker van dat moment. Het deel van de uitstaande aandelen is voor 61% bekend (het aantal aandelen
+  komt uit de verslagen bij de SEC, zie 14.14). Een controle op de omzet haalt aandelen eruit die toevallig
+  dezelfde ticker hadden.
+- **Eerder getest (13 november):** de shortpositie als vier extra kenmerken in het model gaf geen betere
+  rangschikking van de hele markt (hoofdstuk 6). Die test keek niet naar de kandidaten en niet naar de
+  dagelijkse short-verkopen.
+
+### 16.4 De meting
+
+`onderzoek/short_test.py`, zelfde opzet en lat als bij de proef met de SEC: keuzes op 2020–2024,
+2025–2026 als controle; een feit telt als het in beide perioden dezelfde kant op wijst, minstens 5 punten
+verschil geeft en in elke periode op minstens 100 kandidaat-dagen voorkomt. De grenzen zijn gekozen op de
+verdeling van de kenmerken (ronde getallen bij het bovenste en onderste vijfde deel), vóórdat er een
+uitkomst naast lag.
+
+Kandidaat-dagen die een melding kunnen krijgen (dagbeweging van de week tot 30%). "Raak" is vanaf de
+opening van de volgende dag; "−30%" is het deel dat tien handelsdagen later 30% of meer lager stond.
+Telkens met het feit / zonder het feit.
+
+| Feit | 2020–2024: aantal · raak · −30% | 2025–2026: aantal · raak · −30% |
+|---|---|---|
+| S1 dagen om te dekken 4 of meer (FINRA) | 1.312 · 13,9 / 15,7% · 9,3 / 7,8% | 150 · 12,7 / 11,4% · 14,0 / 19,7% |
+| S2 shortpositie 3 dagen eigen omzet of meer | 1.395 · 13,5 / 15,8% · 8,9 / 7,9% | 178 · 17,4 / 10,9% · 30,3 / 18,0% |
+| S3 shortpositie minder dan 0,1 dag eigen omzet | 893 · 13,9 / 15,5% · 10,1 / 7,8% | 347 · 13,5 / 11,1% · 24,2 / 18,1% |
+| S4 shortpositie 10% of meer van de uitstaande aandelen | 1.065 · 20,2 / 14,0% · 10,0 / 7,8% | 407 · 13,8 / 10,9% · 15,7 / 20,2% |
+| S5 shortpositie minder dan 1% van de uitstaande aandelen | 1.430 · 12,0 / 16,1% · 5,8 / 8,9% | 320 · 9,7 / 12,4% · 18,1 / 19,1% |
+| S6 shortpositie 40% of meer gestegen | 1.323 · 15,5 / 15,2% · 6,7 / 8,5% | 431 · 13,0 / 11,1% · 23,4 / 17,9% |
+| S7 shortpositie 20% of meer gedaald | 1.176 · 15,4 / 15,3% · 9,0 / 7,9% | 444 · 12,2 / 11,3% · 23,2 / 18,0% |
+| V1 short-verkopen op de dag zelf 55% of meer | 1.582 · 17,8 / 14,4% · 7,0 / 8,4% | 432 · 13,4 / 11,1% · 23,4 / 16,9% |
+| V2 short-verkopen op de dag zelf minder dan 35% | 1.709 · 12,4 / 16,2% · 8,3 / 8,0% | 444 · 8,6 / 12,6% · 15,5 / 19,3% |
+| V3 short-verkopen over 5 dagen 55% of meer | 1.061 · 17,2 / 14,9% · 7,7 / 8,1% | 342 · 15,8 / 10,7% · 26,0 / 16,7% |
+| V4 short-verkopen over 5 dagen minder dan 35% | 1.118 · 12,5 / 15,8% · 7,9 / 8,1% | 346 · 7,5 / 12,6% · 14,7 / 19,2% |
+| V5 laatste week 5 punten of meer boven drie maanden | 1.286 · 15,2 / 15,2% · 6,3 / 8,5% | 286 · 12,9 / 11,4% · 15,7 / 18,9% |
+| V6 laatste week 10 punten of meer onder drie maanden | 1.150 · 11,7 / 16,0% · 7,4 / 8,2% | 295 · 8,1 / 12,3% · 16,9 / 18,7% |
+
+**Geen feit haalt de lat**, ook niet op alle kandidaat-dagen samen. Het dichtst erbij komen:
+
+- shortpositie 10% of meer van de uitstaande aandelen: +6,2 punten raak in 2020–2024, +2,9 in 2025–2026;
+- short-verkopen over 5 dagen 55% of meer: +2,3 en +5,1 punten;
+- short-verkopen op de dag zelf minder dan 35%: −3,8 en −4,0 punten;
+- laatste week 10 punten of meer onder drie maanden: −4,3 en −4,2 punten;
+- shortpositie minder dan 1% van de uitstaande aandelen: −4,1 en −2,7 punten.
+
+**Het verband is zwak maar loopt in beide perioden mee.** In vijf gelijke groepen, van weinig naar veel:
+
+| Kenmerk | Raak in 2020–2024 | Raak in 2025–2026 |
+|---|---|---|
+| Shortpositie als deel van de uitstaande aandelen | 11,8 · 12,9 · 13,9 · 17,1 · 19,8% | 10,0 · 8,3 · 10,1 · 15,4 · 15,1% |
+| Short-verkopen over 5 dagen | 12,7 · 15,2 · 13,7 · 17,3 · 17,3% | 7,6 · 9,5 · 9,8 · 15,4 · 15,9% |
+
+**Het model kent dit verband niet.** De voorspelde kans is in de groepen met en zonder het feit vrijwel
+gelijk (bijvoorbeeld 18,5 tegen 18,1% en 16,7 tegen 16,5% bij een shortpositie van 10% of meer). Wat er
+uitkwam, gedeeld door wat voorspeld was: 1,20 tegen 0,85 en 0,91 tegen 0,73 bij een shortpositie van 10%
+of meer; 0,77 tegen 0,96 en 0,65 tegen 0,82 bij minder dan 1%; 0,76 tegen 0,96 en 0,56 tegen 0,81 bij
+weinig short-verkopen over 5 dagen.
+
+**Als extra model levert het niets op.** Een model op de acht kenmerken naast de kans, geleerd op
+2020–2024 en getoetst op 2025–2026: het onderscheid (AUC) voor grote verliezers blijft 0,67 (0,666 tegen
+0,668) en wordt voor treffers iets slechter (0,578 tegen 0,561 vanaf de opening). Per jaar hetzelfde
+beeld: treffers 0,591 → 0,557 in 2024, 0,613 → 0,585 in 2025, 0,548 → 0,542 in 2026.
+
+**Verkenning, geen eerlijke test** (bedacht nadat de tabellen er lagen): de kans bijsturen met alleen
+vier ja/nee-feiten (shortpositie 10% of meer, minder dan 1%, short-verkopen over 5 dagen 55% of meer,
+minder dan 35%). Geleerd op de jaren ervóór ging de trefkans van het bovenste vijfde deel van de
+kandidaat-dagen in 2024 van 13 naar 19% en in 2025 van 14 naar 20%, en bleef in 2026 gelijk (10 tegen
+9%). Over 2025–2026 samen: 12,8 → 14,7%.
+
+**Op de meldingen zelf is het niet te bewijzen.** Boven de lat van 26% waren er in de VS 94 meldingen in
+2020–2024 en 3 in 2025–2026. Bij een lat van 20% (712 en 52 meldingen) wijzen twee dingen in beide
+perioden dezelfde kant op, met 9 en 10 meldingen in de controleperiode:
+
+- shortpositie 10% of meer van de uitstaande aandelen: 28 tegen 18% raak vanaf het slot (89 tegen 364
+  meldingen) en 30 tegen 13% (10 tegen 24);
+- shortpositie 3 dagen eigen omzet of meer: 16 tegen 22% raak en 14 tegen 9% grote verliezers (128 tegen
+  374), en 0 tegen 17% raak en 56 tegen 17% grote verliezers (9 tegen 35).
+
+### 16.5 Wat dit betekent voor een abonnement
+
+- **Dit is de eerste informatie van buiten de koers die in beide perioden iets zegt over de trefkans.**
+  Nieuws bij de SEC en het klimaat in de bedrijfstak deden dat niet; een uitgifte en weinig kas zeiden
+  alleen iets over grote verliezers.
+- **De betaalde versie is verser en vollediger.** De gratis shortpositie is op een kandidaat-dag 2 tot 4
+  weken oud, terwijl een kandidaat juist een aandeel in beweging is. Een aanbieder als ORTEX schat de
+  positie per dag en levert de kosten van lenen erbij. Dat kan het verband sterker maken; bewezen is het
+  niet.
+- **Alleen een proef op de geschiedenis kan het uitwijzen**, met dezelfde lat. Dat vraagt één maand een
+  abonnement met een koppeling en geschiedenis, en vooraf de zekerheid dat die geschiedenis erin zit.
+- **Gratis kan ook:** de short-gegevens van FINRA vanaf nu per voorspelling vastleggen en tonen, zonder
+  dat ze meetellen in de kans. Dan laat het eigen track record na een paar maanden zien of het verband
+  standhoudt. Niet gebouwd; het is een keuze van de gebruiker.
+- **Niet onderzocht:** aandacht op sociale media en een kalender met beslissingen. Daar bestaat geen
+  gratis geschiedenis van die hier meteen bruikbaar was.
+
+### 16.6 Kanttekeningen
+
+- **Een kwart van de kandidaat-dagen ontbreekt**: aandelen die toen onder een andere ticker handelden. In
+  2025–2026 deden juist die het goed (17,4 tegen 11,4% raak op 259 kandidaat-dagen). Over die aandelen
+  zegt de meting niets. In productie speelt dit niet: de ticker van vandaag is bekend.
+- **Het deel van de uitstaande aandelen is een benadering.** Het aantal aandelen komt uit het laatste
+  verslag; een omgekeerde split of een uitgifte daarna vertekent de verhouding.
+- **2025–2026 was al vaker bekeken**, en de verkenning met vier feiten is achteraf bedacht.
+- **Alleen Amerikaanse aandelen.** FINRA meldt niets over Canada, Azië of Australië.
