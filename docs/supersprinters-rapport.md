@@ -573,6 +573,10 @@ Wat dit zegt:
   geen enkele. In 2020 en 2021 samen 164, met soms meerdere per dag (hoogstens 12).
 - De cijfers van 2025–2026 berusten op dertien meldingen. Dat is te weinig om er meer uit te lezen dan
   "het wijst dezelfde kant op".
+- **Bedrijfsnieuws laten lezen door Claude maakt het niet aantoonbaar betrouwbaarder** (proef van 16
+  november met het API-tegoed, 14.13–14.16). Claude las 4.938 stukken van de SEC bij 13.696 Amerikaanse
+  kandidaat-dagen. Van de negentien vooraf vastgelegde feiten onderscheidt er geen één treffers of grote
+  verliezers in beide perioden op de dagen die een melding kunnen krijgen. Kosten: $47,37.
 
 ### 14.2 Gerekend vanaf de opening
 
@@ -922,6 +926,9 @@ tekst ophoudt en mag wat er niet staat niet invullen.
 | K1–K3 | kas voor minder dan 6 maanden, voor minder dan 12 maanden, of een positieve kasstroom (uit de kwartaalcijfers, zonder Claude) |
 | K4–K5 | aantal aandelen in twaalf maanden met meer dan 50% of meer dan 200% gegroeid (zonder Claude) |
 
+Op 16 november, na de eerste steekproef en vóór de eerste uitkomst, is vastgelegd hoe elk feit uit de
+antwoorden van Claude wordt afgeleid (14.15, `tekst_feiten.py`); de lijst zelf is niet veranderd.
+
 **Wanneer telt iets als bewezen.** Een feit moet in 2020–2024 én in 2025–2026 dezelfde kant op wijzen, met
 minstens 5 punten verschil in trefkans of in het aandeel grote verliezers, bij minstens 100 kandidaat-dagen
 met dat feit in elke periode. Daarna moet het ook als regel op de meldingen en naast de bestaande kans
@@ -1016,7 +1023,223 @@ aantallen aandelen en warrants klopten met wat er stond.
 **Sonnet en Haiku: 2 stukken elk, daarna weigerde de API.** De melding: "You have reached your specified
 API usage limits. You will regain access on 2026-12-01". Op het account van de gebruiker staat een
 bestedingslimiet van ongeveer $5 per maand; die was na de steekproef van Opus bereikt (uitgegeven volgens
-het kasboek: $4,73). De vergelijking tussen de modellen en de rest van de stukken wachten tot de limiet is
-verhoogd. Het script stuurt mislukte opdrachten dan vanzelf opnieuw mee.
+het kasboek: $4,73). De vergelijking tussen de modellen en de rest van de stukken wachtten tot de
+limiet was verhoogd; het script stuurt mislukte opdrachten dan vanzelf opnieuw mee.
 
-De antwoorden van Opus en het kasboek staan in `scripts/supersprinters/onderzoek/proefdata/`.
+**16 november: limiet verhoogd, eerste vergelijking.** Sonnet en Haiku lazen dezelfde 300 stukken ($2,20
+en $0,12). Vergeleken met Opus, op de ja/nee-feiten per stuk waar de meting op draait (tien bij nieuws,
+zeven bij prospectussen en registraties): Sonnet gaf bij nieuws in 94 tot 99% van de stukken hetzelfde
+antwoord en bij prospectussen in 96 tot 100%; Haiku in 92 tot 99% en 93 tot 98%. Op de losse velden
+scheelde het meer: de rol van een prospectus was bij Sonnet in 90% van de stukken gelijk aan Opus, alle
+soorten gebeurtenissen in een nieuwsstuk samen in 73%. De verschillen zaten niet in het lezen, maar in
+vijf punten waar de vraagstelling twee lezingen toeliet:
+
+1. Een doorlopend verkoopprogramma verkoopt tegen de koers van de dag. Sonnet noemde dat "een prijs die
+   meebeweegt met de koers", Opus niet. Bedoeld was: een belegger of geldschieter die tegen een korting
+   op de toekomstige koers mag kopen of omzetten.
+2. Bij een registratie waarmee houders mogen doorverkopen beschreef Opus de plaatsing waar die aandelen
+   uit kwamen; Sonnet liet dat leeg, omdat het bedrijf er zelf niets aan verdient. De registratie waarmee
+   de belegger achter een kredietlijn doorverkoopt noemde Opus een kredietlijn, Sonnet een doorverkoop.
+3. Kwartaalcijfers met een vooruitblik telde Opus als twee gebeurtenissen (cijfers, en een voornemen),
+   Sonnet als één.
+4. De toon van cijfers: een nettoverlies of een vertrekkende topman noemde Opus vaker negatief.
+5. Twijfel over het voortbestaan die alleen in de opsomming van risico's staat: Sonnet telde hem, Opus
+   niet.
+
+**Aangescherpt (versie 2), vóórdat er één uitkomst naast de antwoorden lag.** Op twee manieren. De
+vraagstelling zegt op die vijf punten nu wat er bedoeld is; er kwam een soort gebeurtenis bij
+(reorganisatie of strategische heroriëntatie) en een beursgang met definitieve voorwaarden telt als
+geprijsde uitgifte. En de feiten worden zo uit de antwoorden afgeleid dat een andere lezing niet meer
+uitmaakt: een verkoopprogramma telt nooit als prijs die meebeweegt (dat is feit P2), een geprijsde
+uitgifte (P1) is een prospectus met de definitieve voorwaarden van een verkoop door het bedrijf zelf, en
+de doorverkoop achter een kredietlijn hoort bij de kredietlijn. Acht twijfelgevallen zijn eerst los
+geprobeerd, daarna is de steekproef opnieuw gelezen door Opus en Sonnet ($4,63 en $2,21). Sonnet gelijk
+aan Opus, beide keren met dezelfde afleiding van de feiten:
+
+| Feit per stuk | Eerste vraagstelling | Aangescherpt |
+|---|---|---|
+| Nieuws: hard positief | 97,8% | 95,0% |
+| Nieuws: uitgifte van aandelen | 95,0% | 97,2% |
+| Nieuws: uitgifte geprijsd of gesloten | 96,7% | 98,9% |
+| Nieuws: prijs die meebeweegt | 99,4% | 100% |
+| Nieuws: noteringsprobleem of omgekeerde split | 97,8% | 99,4% |
+| Nieuws: negatief | 93,9% | 96,1% |
+| Prospectus: geprijsde uitgifte | 100% | 100% |
+| Prospectus: verkoopprogramma of kredietlijn | 97,5% | 100% |
+| Prospectus: houders mogen verkopen | 97,5% | 99,2% |
+| Prospectus: prijs die meebeweegt | 96,7% | 98,3% |
+| Prospectus: twijfel over het voortbestaan | 96,7% | 100% |
+| Prospectus: regel voor kleine bedrijven | 100% | 99,2% |
+
+Op de losse velden: de rol van een prospectus van 90% naar 98% gelijk, alle soorten gebeurtenissen in een
+nieuwsstuk samen van 73% naar 84%. Dat is overeenstemming in de zin van de afspraak; de rest is dus door
+Sonnet gelezen. Zacht positief nieuws (een voornemen) komt met de aangescherpte vraag nog maar in 2 van
+de 180 nieuwsstukken voor.
+
+**De rest: 4.638 stukken door Sonnet, in 27 bulkopdrachten.** Na ongeveer acht minuten was alles klaar;
+geen enkel stuk mislukte en het vaste deel van de opdracht werd vrijwel altijd onthouden. Kosten $33,34,
+dat is $0,007 per stuk.
+
+Twee controles zonder uitkomsten:
+
+- Twijfel over het voortbestaan volgens Sonnet tegenover de woorden "going concern" of "substantial
+  doubt" in de tekst: gelijk bij 1.933 van de 1.940 prospectussen en registraties.
+- De koers die een prospectus zelf noemt tegenover de koers op de kandidaat-dag (stukken van hoogstens
+  drie dagen oud, 828 kandidaat-dagen): de middelste verhouding is 1,01 en bij 90% scheelt het minder dan
+  een factor twee. De stukken hangen dus aan het goede bedrijf en de goede dag.
+
+**Kosten volgens het kasboek: $47,37** van het plafond van $80.
+
+| Onderdeel | Stukken | Kosten |
+|---|---|---|
+| Eerste steekproef: Opus, Sonnet, Haiku | 300 elk | $4,57 + $2,20 + $0,12 |
+| Los geprobeerd (vraagstelling) | 15 | $0,30 |
+| Tweede steekproef: Opus, Sonnet | 300 elk | $4,63 + $2,21 |
+| De rest: Sonnet | 4.638 | $33,34 |
+
+Het kasboek rekent tokens maal prijs; wat Anthropic werkelijk afschrijft staat in de console. Alle
+antwoorden en het kasboek staan in `scripts/supersprinters/onderzoek/proefdata/`; die van de eerste
+steekproef (versie 1) zijn bewaard maar tellen niet mee in de meting.
+
+### 14.16 Uitkomst van de proef: geen feit dat meldingen betrouwbaarder maakt
+
+**Het lezen van de stukken maakt de meldingen niet aantoonbaar betrouwbaarder.** Geen van de negentien
+feiten haalt de vooraf vastgelegde lat op de kandidaat-dagen die een melding kunnen krijgen. Op alle
+kandidaat-dagen samen halen twee feiten hem, allebei over een verse uitgifte van aandelen en allebei
+alleen voor het aandeel grote verliezers. Voor de trefkans is er niets gevonden.
+
+**Wat Claude vond** (`tekst_test.py`). In de 2.998 nieuwsstukken was de belangrijkste gebeurtenis het
+vaakst: cijfers (476), een uitgifte van aandelen (455), bestuur (320), een lening of converteerbare
+lening (254), een aandeelhoudersvergadering (185), een contract (175), een overname door het bedrijf
+(128), een noteringsprobleem (106), een studie of besluit van een toezichthouder (97) en een omgekeerde
+split (92). Een bod op het bedrijf zelf kwam 8 keer voor. Van de 1.940 prospectussen en registraties gaan
+er 623 over doorverkoop door houders, 472 over een geprijsde uitgifte, 250 zijn een plankregistratie, 245
+een doorlopend verkoopprogramma en 120 een kredietlijn in aandelen.
+
+Op 37% van de kandidaat-dagen is er geen enkel stuk (geen nieuws in zeven dagen, geen prospectus of
+registratie in negentig); op 20% is er bedrijfsnieuws van de laatste twee dagen. Voor de meeste sprongen
+ligt er bij de SEC dus geen verklaring.
+
+**De feiten, met het feit tegenover zonder**, op de kandidaat-dagen met een dagbeweging tot 30% (alleen
+die kunnen een melding krijgen); stukken die bekend waren vóór de melding van de volgende ochtend:
+
+| Feit | Kandidaat-dagen met het feit (2020–2024 en 2025–2026) | Raak vanaf de opening 2020–2024 | Raak vanaf de opening 2025–2026 | Grote verliezers 2020–2024 | Grote verliezers 2025–2026 |
+|---|---|---|---|---|---|
+| N1 bedrijfsnieuws in 2 dagen | 1.720 en 503 | 15,5% / 15,5% | 15,9% / 11,0% | 9,2% / 8,3% | 20,7% / 19,2% |
+| N2 hard positief nieuws in 2 dagen | 373 en 114 | 15,3% / 15,5% | 13,2% / 12,1% | 11,3% / 8,3% | 11,4% / 20,0% |
+| N3 zacht positief nieuws in 2 dagen | 37 en 26 | te weinig | te weinig | te weinig | te weinig |
+| N4 uitgifte van aandelen in 7 dagen | 739 en 226 | 13,8% / 15,7% | 13,3% / 12,0% | 12,4% / 8,1% | 21,7% / 19,3% |
+| N5 uitgifte geprijsd of gesloten in 2 dagen | 237 en 62 | 13,9% / 15,5% | 11,3% / 12,1% | 14,3% / 8,3% | 25,8% / 19,4% |
+| N6 uitgifte met warrants in 7 dagen | 230 en 61 | 13,9% / 15,5% | 16,4% / 12,0% | 15,2% / 8,3% | 18,0% / 19,6% |
+| N7 prijs die meebeweegt met de koers | 279 en 236 | 13,6% / 15,6% | 14,0% / 11,9% | 7,5% / 8,5% | 26,7% / 18,7% |
+| N8 nieuwe koers of cryptostrategie in 7 dagen | 62 en 128 | 19,4% / 15,5% | 14,8% / 11,9% | 24,2% / 8,3% | 22,7% / 19,3% |
+| N9 bod op het bedrijf in 7 dagen | 22 en 0 | te weinig | te weinig | te weinig | te weinig |
+| N10 noteringsprobleem of omgekeerde split | 233 en 119 | 15,5% / 15,5% | 14,3% / 12,0% | 7,7% / 8,5% | 31,1% / 18,9% |
+| N11 negatief nieuws in 7 dagen | 778 en 131 | 16,1% / 15,5% | 14,5% / 12,0% | 6,7% / 8,6% | 22,1% / 19,4% |
+| N12 geen enkel stuk | 3.859 en 623 | 15,9% / 15,2% | 9,1% / 13,3% | 7,5% / 9,1% | 15,4% / 21,2% |
+| P1 geprijsde uitgifte in 30 dagen | 1.036 en 147 | 12,5% / 15,9% | 14,3% / 12,0% | 11,8% / 8,0% | 20,4% / 19,5% |
+| P2 verkoopprogramma of kredietlijn in 90 dagen | 817 en 396 | 18,6% / 15,2% | 12,4% / 12,1% | 9,5% / 8,3% | 25,8% / 18,1% |
+| P3 houders mogen verkopen (90 dagen) | 974 en 530 | 11,5% / 16,0% | 13,8% / 11,6% | 9,0% / 8,4% | 20,2% / 19,3% |
+| P4 uitgifte ≥ 20% van de uitstaande aandelen | 1.524 en 455 | 12,7% / 16,0% | 11,6% / 12,2% | 8,8% / 8,4% | 23,1% / 18,6% |
+| P5 koers ≥ 20% boven uitgifte- of warrantprijs | 1.170 en 285 | 13,5% / 15,8% | 17,9% / 11,2% | 11,4% / 8,0% | 20,4% / 19,4% |
+| P6 regel voor kleine bedrijven | 697 en 166 | 12,1% / 15,8% | 21,1% / 11,4% | 9,9% / 8,3% | 16,3% / 19,8% |
+| P7 twijfel over het voortbestaan in het prospectus | 692 en 154 | 14,2% / 15,6% | 18,2% / 11,6% | 11,4% / 8,2% | 26,0% / 19,1% |
+
+- **Geen feit haalt de lat** (beide perioden dezelfde kant op, minstens 5 punten, minstens 100
+  kandidaat-dagen met het feit in elke periode).
+- **Trefkans: niets.** Hard positief nieuws maakt een kandidaat niet vaker raak (15,3% tegen 15,5% en
+  13,2% tegen 12,1%). Feiten die in 2020–2024 minder treffers gaven, gaven er in 2025–2026 juist meer:
+  een registratie voor doorverkoop (11,5% tegen 16,0%, daarna 13,8% tegen 11,6%), de regel voor kleine
+  bedrijven (12,1% tegen 15,8%, daarna 21,1% tegen 11,4%), een koers boven de uitgifteprijs.
+- **Grote verliezers: de verse uitgifte komt het dichtst bij.** Een uitgifte die in de laatste twee
+  dagen is geprijsd (N5) gaat in beide perioden samen met 6 punten meer grote verliezers, maar in
+  2025–2026 zijn dat 62 kandidaat-dagen: te weinig. Een uitgifte met warrants (N6) wijst in 2025–2026 de
+  andere kant op.
+- **Op alle kandidaat-dagen** (ook de heel beweeglijke) halen N5 en N6 de lat wel, alleen op grote
+  verliezers: 15,8% tegen 9,1% en 31,1% tegen 25,7% (N5, 292 en 122 kandidaat-dagen); 16,0% tegen 9,1% en
+  31,0% tegen 25,7% (N6, 257 en 100). Per jaar: duidelijk in 2021 en 2025, zwak in 2026, niet in 2020.
+- **Alleen wat op het slot al bekend was** geeft hetzelfde beeld; ook dan haalt geen feit de lat.
+- **Alle feiten samen in een klein model** naast de kans en de beweeglijkheid, steeds geleerd op de
+  jaren ervoor: het onderscheid wordt slechter in plaats van beter (treffers 0,56 → 0,48 in 2021–2024
+  en 0,56 → 0,49 in 2025–2026; grote verliezers 0,64 → 0,56 en 0,69 → 0,65; 0,5 is raden). Wat het model in eerdere jaren leert, geldt in
+  latere jaren niet meer.
+
+**Als regel op de meldingen** (verkennend; nagespeelde meldingen in de VS, dagbeweging tot 30%), met
+"verse uitgifte" voor N5, N6 of P1:
+
+| Lat | Periode | Meldingen met een verse uitgifte (raak = vanaf het slot) | Zonder |
+|---|---|---|---|
+| 20% | 2020–2024 | 82: 13% raak, 17% grote verliezers, gemiddeld −1% | 630: 21% raak, 9%, gemiddeld +11% |
+| 20% | 2025–2026 | 5: 3 raak, 1 grote verliezer | 47: 11% raak, 30%, gemiddeld −12% |
+| 15% | 2020–2024 | 298: 16% raak, 13% grote verliezers, gemiddeld +6% | 2.606: 17% raak, 9%, gemiddeld +8% |
+| 15% | 2025–2026 | 98: 16% raak, 19% grote verliezers, gemiddeld −7% | 969: 13% raak, 19%, gemiddeld 0% |
+| 26% | 2020–2024 | 9: 4 raak, 2 grote verliezers | 85: 27% raak, 9%, gemiddeld +17% |
+
+Bij de lat van 26% (de regel van nu) had in 2020–2024 één op de tien meldingen een verse uitgifte; in
+2025–2026 waren er in de VS drie meldingen, geen ervan met een uitgifte. In 2020–2024 deden meldingen met
+een verse uitgifte het bij de lat van 20% duidelijk slechter, in 2025–2026 is dat niet terug te zien.
+
+**Besluit: er komt geen regel bij, en Claude telt niet mee in de kans of in de keuze welke meldingen
+uitgaan.** Dat is de afspraak (alleen bouwen wat in beide perioden is bevestigd). Het is de derde test
+die hetzelfde zegt: de registraties van 14.11, de kas van 14.14 en nu de inhoud van de stukken. Rond een
+uitgifte zijn er meer grote verliezers, maar het verschil is te klein en te wisselend om meldingen op
+tegen te houden, en bij de strenge lat van nu komt het te weinig voor om het te kunnen bewijzen.
+
+Wat de proef wel heeft opgeleverd:
+
+- Het lezen zelf werkt en is goedkoop: $0,007 per stuk met Sonnet en $0,015 met Opus (in bulk), en de
+  twee modellen zijn het op de feiten van de meting in 95 tot 100% van de stukken eens. Een toelichting bij een melding ("twee dagen geleden een
+  uitgifte van $6 miljoen tegen $1,05 met warrants", "kas voor vier maanden") is dus te maken voor een
+  paar cent per melding. Zo'n toelichting maakt de melding niet betrouwbaarder; hij helpt bij het
+  beoordelen.
+- De vraag of nieuws iets toevoegt is voor Amerikaanse aandelen nu beantwoord met de stukken zelf, niet
+  met een vermoeden.
+
+Niet getest: nieuws buiten de SEC (persberichten die niet bij een 8-K zitten, berichten op sociale
+media) en aandelen buiten de VS. Wat er ná een melding gebeurt staat in 14.17.
+
+### 14.17 Bewaking na een melding: een uitgifte in de tien dagen erna (gratis nagerekend)
+
+De proef hierboven keek naar stukken van vóór de melding. De gebruiker wilde ook bewaking ná een melding.
+Dat is zonder Claude na te rekenen, met de lijsten van stukken per bedrijf en de dagkoersen
+(`bewaking_test.py`; opzet vastgelegd vóór de uitkomst, zelfde lat als bij de proef).
+
+**Uitkomst: ook dit haalt de lat niet.** In 2020–2024 maakte het niets uit of je na zo'n stuk verkocht; in
+2025–2026 wel, maar dat zijn minder dan honderd gevallen per soort stuk.
+
+Hoe het gemeten is: nagespeelde meldingen in de VS (dagbeweging tot 30%), kopen op de opening van de dag
+na de voorspeldag, aanhouden tot het slot van de tiende handelsdag. Een stuk dat de SEC daarna ontving
+telt vanaf de eerste opening erna (binnen vóór 09:30 uur New York: die dag, anders de volgende
+handelsdag). Gemeten is het rendement van die opening tot het slot van dag 10, naast hetzelfde rendement
+vanaf dezelfde dag over alle meldingen (de vergelijking).
+
+Bij de lat van 15% (2.904 meldingen in 2020–2024, 1.067 in 2025–2026):
+
+| Stuk tijdens het aanhouden | Meldingen met zo'n stuk | Van de opening na het stuk tot dag 10, 2020–2024 (vergelijking) | 2025–2026 (vergelijking) |
+|---|---|---|---|
+| Prospectus voor een uitgifte (424B1, B2, B4, B5) | 216 (7,4%) en 73 (6,8%) | +2,3% (+3,1%) | −9,2% (−0,9%) |
+| Overig prospectus (424B3, B7, B8) | 64 en 56 | +0,1% (+2,3%) | −5,9% (−0,8%) |
+| Registratie (S-1, S-3, F-1, F-3) | 166 en 89 | +3,9% (+2,3%) | −5,3% (−0,9%) |
+| Onderhandse verkoop van aandelen (8-K, onderdeel 3.02) | 126 en 69 | +3,0% (+2,6%) | −6,7% (−0,7%) |
+
+- **2020–2024: geen verschil.** Na een prospectus voor een uitgifte deed het aandeel het in de rest van
+  de tien dagen ongeveer zoals alle andere meldingen (+2,3% tegen +3,1%). Per jaar: 2020 +3,7% tegen
+  +4,6%, 2021 +0,2% tegen +3,0%.
+- **2025–2026: 4 tot 8 punten slechter**, bij alle vier de soorten stukken (2025: −11,4% tegen +0,7%;
+  2026: −5,3% tegen −2,1%). Dat wijst op verkopen, maar het zijn 56 tot 89 gevallen per soort en het
+  staat alleen in de controleperiode.
+- **De klap valt niet op de opening na het stuk.** De koers opent daar gemiddeld even hoog als het slot
+  ervoor (−0,4% en +0,2%). Bedrijven dienen zo'n stuk vooral in als de koers al gestegen is: tot het slot
+  vóór het stuk stonden deze meldingen in 2020–2024 gemiddeld op +14,5%.
+- **Een stuk tussen de melding en de aankoop** (binnengekomen vóór de opening van de volgende dag) komt
+  bijna niet voor: 9 van de 3.971 meldingen.
+- **Wat de regel had opgeleverd** (niet kopen bij een prospectus vóór de aankoop, verkopen op de opening
+  na een prospectus tijdens het aanhouden): bij de lat van 15% gemiddeld +7,7% → +7,7% in 2020–2024 en
+  −0,8% → 0,0% in 2025–2026, grote verliezers 9,5% → 8,9% en 19,0% → 17,9%. Bij de lat van 20%: +9,5% →
+  +9,2% en −9,9% → −9,1%. Bij de lat van 26%, de regel van nu: 6 van de 94 meldingen in 2020–2024 kregen
+  zo'n stuk en verkopen kostte gemiddeld resultaat (+16,1% → +14,9%); in 2025–2026 geen enkele.
+
+**Besluit:** geen regel en geen vervolgmelding die tot verkopen aanzet. Wel is het een feit dat zonder
+kosten te volgen is: de SEC meldt gratis welke stukken een bedrijf indient. Of er een vervolgbericht komt
+("het bedrijf heeft een prospectus voor een uitgifte ingediend"), als informatie en zonder advies, is aan
+de gebruiker; het eigen track record kan daarna laten zien of het beeld van 2025–2026 standhoudt.
