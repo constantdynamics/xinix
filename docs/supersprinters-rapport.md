@@ -1529,8 +1529,8 @@ perioden dezelfde kant op, met 9 en 10 meldingen in de controleperiode:
 - **Gratis kan ook:** de short-gegevens van FINRA vanaf nu per voorspelling vastleggen en tonen, zonder
   dat ze meetellen in de kans. Dan laat het eigen track record na een paar maanden zien of het verband
   standhoudt. Niet gebouwd; het is een keuze van de gebruiker.
-- **Niet onderzocht:** aandacht op sociale media en een kalender met beslissingen. Daar bestaat geen
-  gratis geschiedenis van die hier meteen bruikbaar was.
+- **Niet getest:** aandacht op sociale media en een kalender met beslissingen. Wat die gegevens kosten en
+  wat er gratis van bestaat, staat in 16.7.
 
 ### 16.6 Kanttekeningen
 
@@ -1541,3 +1541,46 @@ perioden dezelfde kant op, met 9 en 10 meldingen in de controleperiode:
   verslag; een omgekeerde split of een uitgifte daarna vertekent de verhouding.
 - **2025–2026 was al vaker bekeken**, en de verkenning met vier feiten is achteraf bedacht.
 - **Alleen Amerikaanse aandelen.** FINRA meldt niets over Canada, Azië of Australië.
+
+### 16.7 Aandacht op sociale media en de kalender: wat het kost (uitgezocht op verzoek)
+
+Antwoord van de gebruiker op de keuzevragen: 3b, "zoek uit wat het kost en leg het me voor". Uitgezocht
+met zoekopdrachten op 16 november 2026. De sites van de aanbieders zijn vanuit de sessie niet bereikbaar
+(alleen de hosts die voor de omgeving zijn toegestaan), dus de prijzen komen uit zoekresultaten en zijn
+niet bij de aanbieder nagelezen.
+
+**Aandacht op sociale media**
+
+| Bron | Wat het levert | Geschiedenis | Kosten |
+|---|---|---|---|
+| Arctic Shift (archief van Reddit, door vrijwilligers) | alle berichten en reacties, per subreddit te doorzoeken, ook als bulkbestanden | december 2005 tot nu | gratis, zonder garanties |
+| Quiver Quantitative | vermeldingen per aandeel per dag op r/wallstreetbets | sinds augustus 2018 | $30 of $75 per maand; onzeker of de reeks nog in de koppeling zit (een concurrent meldt: geen nieuwe gegevens sinds februari 2025) |
+| ChartExchange | vermeldingen en toon op Reddit | sinds 2017 | prijs niet gevonden |
+| Financial Modeling Prep | Stocktwits en X | onbekend; staat als verouderd in de documentatie | $29 tot $139 per maand |
+| Finnhub | Reddit en X | onbekend | $2.500 tot $3.500 per maand |
+| Stocktwits zelf | geen open koppeling | | |
+
+Er bestaat dus wel gratis geschiedenis (correctie op 16.5): het archief van Reddit. Tellen moet zelf: per
+aandeel per dag de vermeldingen in een handvol subreddits. Geschat een halve dag werk; de host
+`arctic-shift.photon-reddit.com` moet daarvoor aan de omgeving worden toegevoegd (één goedkeuring van de
+gebruiker). Zit er iets in, dan hoeft er ook in productie geen abonnement te komen: voor de ±100
+Amerikaanse aandelen van de kopgroep is dagelijks tellen bij Reddit zelf gratis.
+
+**Kalender met beslissingen over medicijnen**
+
+| Bron | Wat het levert | Geschiedenis | Kosten |
+|---|---|---|---|
+| BioPharmCatalyst | kalender van de FDA, afgelopen gebeurtenissen, download naar Excel; koppeling alleen in het jaarabonnement | diepte niet gevonden | $35 per maand, per jaar afgerekend (±$420; actieprijs van juni 2026); 7 dagen gratis proberen |
+| BiopharmaWatch | koppeling met de huidige en de historische kalender, met de uitkomst per beslissing | niet gevonden | $99 per maand, per jaar afgerekend ($1.190) |
+| Benzinga | kalender van de FDA via een koppeling | vanaf 2018 | geen openbare prijs |
+| Zelf uit de SEC | persberichten waarin het bedrijf de datum van de beslissing noemt | 2001 tot nu | gratis; geschat een halve dag werk, via de hulpfunctie in Supabase |
+
+**Wat de eigen meting al zegt.** Sprinters meet sinds september per soort nieuws of er meer treffers op
+volgen dan verwacht (`xinix_sprint_news_lift`, favorieten met vier sterren of meer). Voor "beslissing of
+data binnen 14 dagen": 75 berichten, geen enkele keer +50% binnen tien handelsdagen, waar 2,4 verwacht
+was. Voor "binnen 30 tot 60 dagen": 260 berichten, geen enkele, waar 8,7 verwacht was. Dat is een kleine
+meting op een andere groep aandelen, maar ze wijst eerder de andere kant op: een aandeel dat op een
+uitslag wacht, springt vóór die uitslag zelden. Bovendien werkt zo'n uitslag naar twee kanten.
+
+**Advies:** aandacht op sociale media eerst gratis testen met het archief van Reddit; voor de kalender
+niets kopen. Niets gebouwd; de keuze is aan de gebruiker.
