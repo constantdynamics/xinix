@@ -3,6 +3,7 @@
 // als history-strip. Geen auth nodig (read-only, net als dashboard).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { requireDevice } from "../_shared/device.ts";
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
   const k = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -48,6 +49,7 @@ const STALE_FAIL_MS = 2 * 24 * 60 * 60 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
   const sb = getServiceClient();
   // Ruim genoeg om elke job zijn laatste run + history te geven, ook de
   // dagelijkse/wekelijkse die zelden draaien (poll-metals slaat het weekend
@@ -111,6 +113,6 @@ Deno.serve(async (req) => {
 
   return new Response(
     JSON.stringify({ jobs, degraded_jobs, generated_at: new Date().toISOString() }),
-    { headers: { ...cors(req), "content-type": "application/json", "cache-control": "public, max-age=20" } },
+    { headers: { ...cors(req), "content-type": "application/json", "cache-control": "private, max-age=20" } },
   );
 });

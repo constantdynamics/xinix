@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { requireDevice } from "../_shared/device.ts";
 function getServiceClient() { const u = Deno.env.get("SUPABASE_URL"); const k = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); if (!u||!k) throw new Error("env"); return createClient(u, k, { auth: { persistSession: false, autoRefreshToken: false } }); }
 const ALLOWED = new Set(["https://constantdynamics.github.io","http://localhost:5173","http://localhost:4173"]);
 function cors(req: Request) { const o = req.headers.get("origin") ?? ""; return { "access-control-allow-origin": ALLOWED.has(o) ? o : "null", "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-requested-with, apikey", "access-control-max-age": "86400", vary: "origin" }; }
@@ -50,6 +51,7 @@ const HEAT_CONTRIBUTION: Record<string, Sev> = {
 
 Deno.serve(async (req) => {
   const p = pf(req); if (p) return p;
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
   const supabase = getServiceClient();
   const runQueries = () => Promise.all([
     supabase.from("signal_tickers").select("*").eq("active", true),
@@ -238,5 +240,5 @@ Deno.serve(async (req) => {
       degradedJobs.push({ job, failing_since: since, consecutive_failures: consec, last_message: (runLog.find((x: any) => x.job === job)?.message) ?? null });
     }
   }
-  return j(req, { cards, recent_signals: signals.slice(0, 50), upcoming_catalysts: catalysts.slice(0, 50), run_log: runLog, poll_status: pollStatus, degraded_jobs: degradedJobs, generated_at: new Date().toISOString() }, { headers: { "cache-control": "public, max-age=120" } });
+  return j(req, { cards, recent_signals: signals.slice(0, 50), upcoming_catalysts: catalysts.slice(0, 50), run_log: runLog, poll_status: pollStatus, degraded_jobs: degradedJobs, generated_at: new Date().toISOString() }, { headers: { "cache-control": "private, max-age=120" } });
 });

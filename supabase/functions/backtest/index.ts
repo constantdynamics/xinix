@@ -1,5 +1,7 @@
+import { requireDevice } from "../_shared/device.ts";
 import { getServiceClient } from "../_shared/supabase.ts";
 import {
+  corsHeaders,
   handlePreflight,
   jsonResponse,
   textResponse,
@@ -26,6 +28,7 @@ interface Row {
 Deno.serve(async (req) => {
   const pf = handlePreflight(req);
   if (pf) return pf;
+  const nee = await requireDevice(req, corsHeaders(req)); if (nee) return nee;
 
   const supabase = getServiceClient();
   const { data, error } = await supabase

@@ -8,6 +8,7 @@
 // functie-deploy relatieve imports buiten de bronmap niet meeneemt.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { requireDevice } from "../_shared/device.ts";
 
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
@@ -48,6 +49,7 @@ const MAX_LIMIT = 400;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
   if (req.method !== "GET") return text(req, "Method not allowed", { status: 405 });
 
   try {

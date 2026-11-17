@@ -13,11 +13,23 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export function apiUrl(path: string): string {
   if (path.startsWith("http")) return path;
-  if (!API_BASE) return path;
+  if (!API_BASE) return withDevice(path);
   // Strip "/api" prefix wanneer we naar Supabase wijzen — daar zijn de
   // functies bv. https://x.supabase.co/functions/v1/dashboard zonder /api.
   const stripped = path.replace(/^\/api\//, "/");
-  return `${API_BASE}${stripped}`;
+  return withDevice(`${API_BASE}${stripped}`);
+}
+
+// De apparaatsleutel van het inlogscherm (auth.ts). De functies geven alleen gegevens aan een
+// ingelogd apparaat (supabase/functions/_shared/device.ts); als parameter, zodat er geen CORS-kop
+// bij hoeft en ook een downloadlink werkt.
+export const DEVICE_KEY = "xinix_device_token_v1";
+export function getDeviceToken(): string | null {
+  try { return localStorage.getItem(DEVICE_KEY); } catch { return null; }
+}
+function withDevice(url: string): string {
+  const t = getDeviceToken();
+  return t ? `${url}${url.includes("?") ? "&" : "?"}device=${encodeURIComponent(t)}` : url;
 }
 
 export function getToken(): string | null {

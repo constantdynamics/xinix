@@ -6,6 +6,7 @@
 // compute-zwitserleven-background/index.ts. Bij wijziging beide aanpassen.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { requireDevice } from "../_shared/device.ts";
 
 // Index-universum (zelfde lijst als in compute-zwitserleven-background)
 const INDEX_UNIVERSE: string[] = [...new Set([
@@ -134,6 +135,7 @@ function cors(req: Request) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
 
   try {
     const sb = getServiceClient();

@@ -2,6 +2,7 @@
 // Geeft: auto-toegevoegde tickers + feniks-ranking + hikkertjes-ranking (top 25) + scan-history.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { requireDevice } from "../_shared/device.ts";
 
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
@@ -28,6 +29,7 @@ function cors(req: Request) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
 
   try {
     const sb = getServiceClient();

@@ -1,7 +1,7 @@
 // xinix-supersprint — SUPERsprinters: aandelen op de Saxo-beurzen die binnen 10 handelsdagen +50%
 // kunnen maken (Favorieten → SUPERsprinters).
 //
-//   GET  /xinix-supersprint                               ranglijst, track record, verbruik (publiek)
+//   GET  /xinix-supersprint                               ranglijst, track record, verbruik (ingelogde apparaten)
 //   POST /xinix-supersprint?mode=round&region=apac        ronde na het slot (apac | europa | amerika)
 //   POST /xinix-supersprint?mode=flush                    het meldmoment: alles wat wacht, hoogste kans eerst
 //   POST /xinix-supersprint?mode=resolve                  track record afrekenen, bijsturing, nieuwsmeting
@@ -14,12 +14,14 @@
 // nieuws bij de bovenste aandelen, een controle vóór een melding en het afrekenen van het track record.
 // Uitzetten: signal_settings.ss_enabled = false. Zie docs/supersprinters-rapport.md.
 //
-// Uitrollen: alleen dit bestand gaat naar Supabase. Het eigenlijke werk (run.ts en core.ts) wordt bij
-// het uitrollen opgehaald uit de openbare repository, vastgepind op één commit. Zo draait in productie
-// precies wat in de repo staat. Na een wijziging in run.ts of core.ts: eerst mergen, dan hieronder de
-// commit bijwerken en dit bestand opnieuw uitrollen (deploy_edge_function, verify_jwt uit).
+// Uitrollen: alleen dit bestand en ../_shared/device.ts (de inlogcontrole) gaan naar Supabase. Het
+// eigenlijke werk (run.ts en core.ts) wordt bij het uitrollen opgehaald uit de openbare repository,
+// vastgepind op één commit. Zo draait in productie precies wat in de repo staat. Na een wijziging in
+// run.ts of core.ts: eerst mergen, dan hieronder de commit bijwerken en dit bestand opnieuw uitrollen
+// (deploy_edge_function, verify_jwt uit, entrypoint xinix-supersprint/index.ts, met _shared/device.ts erbij).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import * as R from "https://raw.githubusercontent.com/constantdynamics/xinix/83141021990f1d81f0eda792700fcf479520cfa4/supabase/functions/xinix-supersprint/run.ts";
+import { requireDevice } from "../_shared/device.ts";
 
 const ALLOWED = new Set(["https://constantdynamics.github.io", "http://localhost:5173", "http://localhost:4173"]);
 function cors(req: Request): Record<string, string> {
@@ -67,6 +69,7 @@ async function logged(sb: R.SB, job: string, fn: () => Promise<R.RunResult>): Pr
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode");
   try {

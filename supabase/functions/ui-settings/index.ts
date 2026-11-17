@@ -1,9 +1,11 @@
 // ui-settings — single-row config voor UI-aanpassingen (tab-volgorde, labels, verborgen tabs).
 // GET = openbaar (frontend leest bij elke load). POST/PUT = vereist admin-token.
 
+import { requireDevice } from "../_shared/device.ts";
 import { getServiceClient } from "../_shared/supabase.ts";
 import { checkAuth } from "../_shared/auth.ts";
 import {
+  corsHeaders,
   handlePreflight,
   jsonResponse,
   textResponse,
@@ -40,6 +42,7 @@ function defaults(): UiSettings {
 Deno.serve(async (req) => {
   const pf = handlePreflight(req);
   if (pf) return pf;
+  const nee = await requireDevice(req, corsHeaders(req)); if (nee) return nee;
 
   const sb = getServiceClient();
 

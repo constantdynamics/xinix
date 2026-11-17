@@ -10,6 +10,7 @@
 // venster is onhaalbaar.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { requireDevice } from "../_shared/device.ts";
 
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
@@ -77,6 +78,7 @@ function normalizeCode(v: unknown): string {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req) });
+  const nee = await requireDevice(req, corsHeaders(req)); if (nee) return nee;
   if (req.method !== "POST") return text(req, "Method not allowed", { status: 405 });
 
   let body: Record<string, unknown> = {};

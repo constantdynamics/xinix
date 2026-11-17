@@ -1,7 +1,8 @@
 // Koershistorie-proxy voor de koersgrafiek-popup (Favorieten).
 // Yahoo's v8 chart-endpoint geeft historische candles voor elk venster maar
 // stuurt geen CORS-headers — daarom proxyen we het server-side. Read-only,
-// publiek (geen secrets), met cache zodat herhaald openen snel is.
+// alleen voor ingelogde apparaten (_shared/device.ts), met cache zodat herhaald openen snel is.
+import { requireDevice } from "../_shared/device.ts";
 const ALLOWED = new Set(["https://constantdynamics.github.io", "http://localhost:5173", "http://localhost:4173"]);
 function cors(req: Request) {
   const o = req.headers.get("origin") ?? "";
@@ -33,6 +34,7 @@ const RANGE_MAP: Record<string, { range: string; interval: string }> = {
 
 Deno.serve(async (req) => {
   const p = pf(req); if (p) return p;
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
   const url = new URL(req.url);
   const ticker = (url.searchParams.get("ticker") ?? "").trim().toUpperCase();
   const rangeKey = (url.searchParams.get("range") ?? "1y").trim();
@@ -80,5 +82,5 @@ Deno.serve(async (req) => {
     previous_close: meta.chartPreviousClose ?? meta.previousClose ?? null,
     market_price: meta.regularMarketPrice ?? null,
     points,
-  }, { headers: { "cache-control": `public, max-age=${cacheSec}` } });
+  }, { headers: { "cache-control": `private, max-age=${cacheSec}` } });
 });

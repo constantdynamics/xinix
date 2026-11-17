@@ -1,14 +1,10 @@
 // Inlogpagina: een apparaat is bekend zolang het een apparaatsleutel heeft die
 // de server (edge function xinix-auth) nog niet heeft ingetrokken. Los van het
 // beheertoken: dat blijft nodig om te bewerken.
-import { apiUrl, getToken } from "./api";
+import { apiUrl, DEVICE_KEY, getDeviceToken, getToken } from "./api";
 
-const DEVICE_KEY = "xinix_device_token_v1";
+export { getDeviceToken };
 const DEVICE_ID_KEY = "xinix_device_id_v1";
-
-export function getDeviceToken(): string | null {
-  try { return localStorage.getItem(DEVICE_KEY); } catch { return null; }
-}
 export function getDeviceId(): number | null {
   try { const v = localStorage.getItem(DEVICE_ID_KEY); return v ? Number(v) : null; } catch { return null; }
 }
