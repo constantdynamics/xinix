@@ -9,6 +9,7 @@
 //
 // Publiek leesbaar (net als hippo-scores): geen geheimen, alleen scores.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { requireDevice } from "../_shared/device.ts";
 
 const EVENTS = ["h7", "h14", "h21", "k30", "k90", "p30", "p90", "rk"];
 const HITS = new Set(["hikkertje", "poefie", "feniks", "ster", "hippo", "raket", "poefie-kans"]);
@@ -38,6 +39,7 @@ function json(req: Request, body: unknown, status = 200) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
   if (req.method !== "GET") return json(req, { error: "Method not allowed" }, 405);
   try {
     const url = new URL(req.url);

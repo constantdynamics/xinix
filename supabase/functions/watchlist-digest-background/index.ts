@@ -5,6 +5,7 @@
 // GET  ?type=daily|weekly|monthly          → geeft laatste opgeslagen digest terug
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { requireDevice } from "../_shared/device.ts";
 
 const NTFY_TOPIC   = Deno.env.get("NTFY_TOPIC")     ?? "";
 const NTFY_BASE    = "https://ntfy.sh";
@@ -113,10 +114,11 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "authorization, content-type, x-cron-secret" } });
   }
+  const nee = await requireDevice(req, { "access-control-allow-origin": "*" }); if (nee) return nee;
 
   const sb = getClient();
 
-  // ── GET: geef laatste opgeslagen digest(s) terug (publiek) ──────────────────
+  // ── GET: geef laatste opgeslagen digest(s) terug (ingelogde apparaten) ──────────────────
   if (req.method === "GET") {
     const url = new URL(req.url);
     const type = (url.searchParams.get("type") ?? "daily") as DigestType;

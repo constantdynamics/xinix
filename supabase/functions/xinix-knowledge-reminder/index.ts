@@ -2,6 +2,8 @@
 // maandelijkse kennisexport handmatig te controleren of te downloaden.
 // Getriggerd door pg_cron op de 25e van elke maand.
 
+import { checkAdminOrCron } from "../_shared/auth.ts";
+
 const NTFY_TOPIC   = Deno.env.get("NTFY_TOPIC")     ?? "";
 const NTFY_BASE    = "https://ntfy.sh";
 const RESEND_KEY   = Deno.env.get("RESEND_API_KEY") ?? "";
@@ -9,7 +11,8 @@ const RESEND_FROM  = "Xinix <noreply@constantdynamics.nl>";
 const NOTIFY_EMAIL = Deno.env.get("NOTIFY_EMAIL")   ?? "";
 const DASHBOARD_URL = "https://constantdynamics.github.io/xinix";
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  if (!checkAdminOrCron(req)) return new Response("Unauthorized", { status: 401 });
   const now = new Date();
   const monthName = now.toLocaleDateString("nl-NL", { month: "long", year: "numeric" });
 

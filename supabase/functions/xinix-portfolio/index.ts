@@ -6,6 +6,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { TX_COST } from "../_shared/constants.ts";
+import { requireDevice } from "../_shared/device.ts";
 
 function getServiceClient() {
   const u = Deno.env.get("SUPABASE_URL");
@@ -90,6 +91,7 @@ interface SectorInsight {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
   try {
     const sb = getServiceClient();
     const [stateRes, openRes, closedRes, equityRes, tickersRes, summaryRes] = await Promise.all([

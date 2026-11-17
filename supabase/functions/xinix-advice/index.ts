@@ -34,6 +34,7 @@
 //   sim kocht tegen de slotkoers van de vorige dag, wat te gunstig bleek (ZYBT).
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { publishNtfy } from "../_shared/ntfy.ts";
+import { requireDevice } from "../_shared/device.ts";
 
 type SB = SupabaseClient;
 type Json = Record<string, unknown>;
@@ -1336,6 +1337,7 @@ async function action(req: Request): Promise<Response> {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(req) });
+  const nee = await requireDevice(req, cors(req)); if (nee) return nee;
   try {
     if (req.method === "GET") return await overview(req);
     const mode = new URL(req.url).searchParams.get("mode");

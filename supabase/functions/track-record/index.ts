@@ -1,5 +1,6 @@
+import { requireDevice } from "../_shared/device.ts";
 import { getServiceClient } from "../_shared/supabase.ts";
-import { handlePreflight, jsonResponse } from "../_shared/cors.ts";
+import { corsHeaders, handlePreflight, jsonResponse } from "../_shared/cors.ts";
 
 interface ScoreRow {
   id: number;
@@ -61,6 +62,7 @@ function summarize(returns: number[]) {
 Deno.serve(async (req) => {
   const pf = handlePreflight(req);
   if (pf) return pf;
+  const nee = await requireDevice(req, corsHeaders(req)); if (nee) return nee;
 
   const url = new URL(req.url);
   const minCompleteness = Number(
